@@ -152,7 +152,7 @@ want it outside a session.
 ### 1. Install, from inside Claude Code
 
 ```
-/plugin marketplace add agentsensei/agentsensei
+/plugin marketplace add crozzfire/agentsensei
 /plugin install agentsensei
 ```
 
@@ -290,7 +290,7 @@ $ npx agentsensei
   and nothing remains on this machine. There is nothing to analyse yet.
 
   → install the plugin and it will archive sessions as you work:
-      /plugin marketplace add agentsensei/agentsensei
+      /plugin marketplace add crozzfire/agentsensei
 ```
 
 Never a bare zero, never a stack trace — and it routes to the primary surface rather than to itself.

@@ -30,8 +30,14 @@ marketplace — which is the single biggest discovery lever available without be
 
 **Tier 1 ships first regardless**, because it has no gatekeeper and works the day the repo is public:
 
+> **Note on the namespace.** The repo lives at `crozzfire/agentsensei`, so the marketplace path is
+> `crozzfire/agentsensei`. The **plugin name stays `agentsensei`**, so commands remain
+> `/agentsensei:*` — marketplace path and plugin name are independent. If this later moves to an
+> `agentsensei` org, `marketplace.json`'s top-level `renames` key handles the move without breaking
+> existing installs.
+
 ```
-/plugin marketplace add agentsensei/agentsensei
+/plugin marketplace add crozzfire/agentsensei
 /plugin install agentsensei
 ```
 
