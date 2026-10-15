@@ -5,6 +5,7 @@ deliberately — see [DECISIONS.md](../DECISIONS.md) for the decision index with
 
 | Doc | What it covers |
 |---|---|
+| [architecture.md](architecture.md) | **Start here.** Pipeline, flow diagrams, module map, and the invariants |
 | [dimensions.md](dimensions.md) | The 40-dimension catalogue — description, example, measurement method, confidence basis, known failure modes — plus selection presets and config |
 | [surfaces.md](surfaces.md) | Install model, hooks, the two surfaces (live / retrospective), the running score, and both principles |
 | [artifacts.md](artifacts.md) | How a finding becomes a prompt, a guard, or a rule diff — and the evidence on what actually works |

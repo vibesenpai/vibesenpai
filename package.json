@@ -1,0 +1,24 @@
+{
+  "name": "agentsensei",
+  "version": "0.0.0",
+  "description": "Local-first analyzer for AI coding sessions: finds wasted turns, shows the evidence, generates what you can apply",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "bin": { "agentsensei": "./dist/cli.js" },
+  "exports": { ".": "./dist/index.js" },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "cli": "node --experimental-strip-types src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
