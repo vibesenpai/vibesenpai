@@ -25,6 +25,7 @@ Planned 2026-10-12/15, before any code existed.
 | D8 | **Principle Zero: a broken analyzer must never break a session.** Outranks correctness of findings. 8 enforcement points incl. unconditional `exit 0`, timeouts, detached analysis, circuit breaker, kill switch. | [docs/surfaces.md](docs/surfaces.md) |
 | D9 | **Principle One: the live surface must never interrupt.** Worst acceptable outcome is an unnoticed nudge. | [docs/surfaces.md](docs/surfaces.md) |
 | D10 | **The product never writes the user's harness config.** Silently editing settings is the S4 Self-Initiated Overreach failure the tool exists to detect. `doctor` reports; it does not fix. | [PLAN.md](PLAN.md) |
+| D10b | **We never copy transcripts. Nothing of ours outlives the harness's own files.** A transcript can contain a leaked token; copying it would create a second exposure in a directory we chose, with a lifetime we chose — making any resulting breach ours, from data that was not ours to duplicate. The catalog stores only offsets, hashes and paths pointing back at the source. Copying was considered as an opt-in and rejected: the escape hatch would have preserved the copy writer, prune loop, sync-root refusal and `0700` enforcement, which is the complexity the decision removes. Cost accepted: **no history beyond the harness TTL, at all.** | [docs/architecture.md](docs/architecture.md) |
 | D11 | **Statusline, not hook stdout**, for ambient surfacing. Hook stdout lands in the *model's* context — verified in this session's own transcript. Injecting findings would perturb the session being measured. | [docs/surfaces.md](docs/surfaces.md) |
 | D12 | Banned with no fallback: `UserPromptSubmit` surfacing, `/dev/tty` writes, OSC codes, terminal bell, mid-session notifications. | [docs/surfaces.md](docs/surfaces.md) |
 
@@ -57,8 +58,8 @@ Planned 2026-10-12/15, before any code existed.
 | D25 | **Two identity keys**: `findingId` (per session) and `subjectId` (per project, across sessions). The score, dismissals, and the audit all need the second. | [docs/contracts.md](docs/contracts.md) |
 | D26 | The **skeleton is versioned**, and `v` is in the verdict cache key — three consumers (model input, user-facing evidence, future team wire format). | [docs/contracts.md](docs/contracts.md) |
 | D27 | Skeletons are **redacted at construction**, built as if they will be transmitted. Also what makes the eval fixtures safely redistributable. | [docs/contracts.md](docs/contracts.md) |
-| D28 | **Events are not stored** in SQLite — re-derived from the incremental archive. Search is not our product, so the trade goes opposite to `agentsview`. | [docs/contracts.md](docs/contracts.md) |
-| D29 | **Archive in XDG, models in `$CLAUDE_PLUGIN_DATA`.** Losing the archive loses irreplaceable history; losing models costs a re-download. | [docs/models.md](docs/models.md) |
+| D28 | **Events are not stored** in SQLite — re-derived from the source via the incremental catalog. Search is not our product, so the trade goes opposite to `agentsview`. | [docs/contracts.md](docs/contracts.md) |
+| D29 | **Store in XDG, models in `$CLAUDE_PLUGIN_DATA`.** The store holds the catalog and findings — derived, redacted, and worth keeping across a plugin uninstall; models are large and re-downloadable. | [docs/models.md](docs/models.md) |
 | D30 | Detectors are **`async` from day one**; findings carry `method` / `confidence` / `modelVersion` even while all are `RULE` / `certain` / null. | [docs/models.md](docs/models.md) |
 
 ## Models
@@ -100,6 +101,8 @@ Kept because the discarded answer is the one a reader will reach for next.
 | `CLAUDE.md` line as the flagship fix | A guard is ~3× better; `MEMORY` is budget-limited | The 753-rule study |
 | `all-MiniLM-L6-v2`, lazy ~23MB download | EmbeddingGemma + NLI, eager ~270MB | Size stopped being the constraint; accuracy and negation handling did |
 | `post_compaction_drift` | `context_rationale_erosion` | The published version names *why* the decision reversed |
+| Copy every transcript into our own archive | Catalog only — copy nothing | Mirroring the harness TTL removed the benefit; duplicating a leaked token would make the breach ours |
+| Mirror `cleanupPeriodDays` and prune copies | No copies, so nothing to prune | The pruning machinery only existed to manage a copy that should not exist |
 | `turn: number` as the event index | `uuid` + reconstructed leaf path | Transcripts are a tree |
 | Measured before/after as a headline differentiator | A running score on every run | The headline version needs weeks and asks for belief |
 | Strengths lead the report | Problems lead | Burying cost reads as evasive |

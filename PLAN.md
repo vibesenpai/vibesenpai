@@ -32,9 +32,9 @@ report rather than an empty shell. The implications:
 
 - **Day-one value comes from their actual sessions**, not just the `CLAUDE.md` audit. The audit stays
   in the MVP, but as a strong second rather than the sole cold-open.
-- **The archiver's urgency is a user benefit, not just ours.** Their 30-day window is also being
-  deleted on a rolling basis. "Run this now, before Claude Code deletes another week" is a real and
-  honest reason to install today.
+- **There is no way to recover what the harness already deleted**, and we do not pretend otherwise.
+  We read in place and keep no copies, so the honest pitch is "start now and you will have history
+  from here" — not "we can rescue your past.
 - **The empty case still needs handling well** — a brand-new install, or a machine like this one. It
   must say *"no sessions found yet — here's what will happen as you work"*, never a bare zero.
 
@@ -93,7 +93,7 @@ is also the stated goal of matching industry standards.
 Dimension count is **not** the cost driver. Each pure-rule detector is small —
 `inaccurate_self_report` is "assertion language + last verification was a failure", roughly 30 lines;
 `no_verification` ~25; `tool_loop` ~20. Ten of them is ~350 lines. The real cost is the parser (tree
-reconstruction, sidechain attribution), the redactor, the archive, the CLI and the tests — all paid
+reconstruction, sidechain attribution), the redactor, the catalog, the CLI and the tests — all paid
 once, whether you ship 6 detectors or 16.
 
 So the boundary is drawn at **the dependencies that change the shape of the project.** There are two,
@@ -213,25 +213,27 @@ product's job is to *tell* you, not to *fix* you:
 
 ```
 $ agentsensei doctor
-  retention   cleanupPeriodDays not set → Claude Code default of 30 days applies
-              transcripts older than 30 days will be deleted at the next cleanup
-              to keep them: set "cleanupPeriodDays" in ~/.claude/settings.json
-              or run `agentsensei archive` on a schedule — agentsensei's own copy is never cleaned
+  harness     cleanupPeriodDays not set → Claude Code deletes after 30 days
+  store       no transcript copies are kept — sources are read in place
 ```
 
 This also applies to `agentsensei hooks install` at M6: it prints the exact JSON it would add, asks before
 writing, and offers `--print-only` so the user can paste it themselves. Opt-in and visible, never
 silent.
 
-**Step 0 on this machine only (development, not product behavior):** raise `cleanupPeriodDays` to
-`3650` in *your* settings so the remaining data stops disappearing during development. This is a
-one-time change to your dev environment that I make because you asked for it, and it is recorded in
-`DECISIONS.md` as a dev-environment action explicitly outside the product's behavior.
+*(An earlier plan raised `cleanupPeriodDays` on this machine to stop data disappearing during
+development. That is no longer wanted: we read in place and report the harness TTL neutrally rather
+than encouraging anyone to keep more data for our benefit.)*
 
-1. **Archiver before parser.** `agentsensei archive` copies harness transcripts into its own store —
-   append-only, content-hashed, byte-offset + mtime tracked so re-runs read only new bytes.
-   Everything downstream reads the archive, never the live directory. Installed as an opt-in
-   `SessionEnd` hook at M6 so preservation is automatic.
+1. **Catalog before parser.** `agentsensei scan` records, per source, the byte offset consumed plus
+   size, mtime, sha256 and harness version — and **copies nothing**. A re-scan reads only new bytes;
+   unchanged sources cost zero. Everything downstream reads the source in place, from the remembered
+   offset.
+
+   **No transcript is ever duplicated.** A transcript can contain a leaked token, so copying it would
+   create a second exposure in a directory we chose, with a lifetime we chose — making any resulting
+   breach ours. The catalog is 4 KB where copying was 10.4 MB, and the harness's own retention is
+   reported but never mirrored, because there is nothing of ours to prune.
 
    **No hardcoded paths — every location is config-driven with CLI override.** Precedence, highest
    first: CLI flag → env var → config file → platform default.
@@ -239,28 +241,14 @@ one-time change to your dev environment that I make because you asked for it, an
    | Setting | CLI flag | Env var | Default |
    |---|---|---|---|
    | Transcript sources | `--source <path>` (repeatable) | `AGENTSENSEI_SOURCES` | `~/.claude/projects`, `~/.codex/sessions` |
-   | Archive location | `--archive <path>` | `AGENTSENSEI_ARCHIVE` | `$XDG_DATA_HOME/agentsensei` else `~/.local/share/agentsensei` — **never** the plugin data dir, so it survives uninstall |
-   | Model location | `--models <path>` | `AGENTSENSEI_MODELS` | `$CLAUDE_PLUGIN_DATA` as a plugin, else `<archive>/models` |
+   | Store location | `--archive <path>` | `AGENTSENSEI_ARCHIVE` | `$XDG_DATA_HOME/agentsensei` |
+   | Model location | `--models <path>` | `AGENTSENSEI_MODELS` | `$CLAUDE_PLUGIN_DATA` as a plugin, else `<store>/models` |
    | Config file | `--config <path>` | `AGENTSENSEI_CONFIG` | `$XDG_CONFIG_HOME/agentsensei/config.json` |
 
-   This is not just tidiness — it is what makes the tool work for non-default Claude Code installs,
-   lets the archive live on an external or encrypted volume, and allows `--source` to point at a
-   restored backup or a second machine's transcripts. It also makes the whole pipeline testable
-   against fixture directories instead of the real home directory, which the M1 test suite needs.
-   `agentsensei config` prints the resolved values and which layer each came from.
+   This is what lets the tool work with non-default harness installs, and lets the whole pipeline be
+   tested against fixture directories instead of the real home directory.
 
-   **The archive is raw and unredacted by design — this is a deliberate decision, not a sequencing
-   accident.** Transcripts contain whatever was pasted into a session, including keys and `.env`
-   contents, and the redactor does not exist until M1. Redaction is therefore applied at parse and
-   display time, never at archive time, so that the preserved copy stays byte-faithful to the
-   original and a redactor bug can never destroy evidence. The consequences must be handled in M0,
-   not M1:
-   - Created `0700`, owner-only, and `agentsensei doctor` asserts the mode on every run.
-   - Default location verified on this machine: `~/.local/share` is a real `drwx------` directory,
-     outside iCloud's `Library/Mobile Documents`, with no Dropbox or Google Drive in `~`. Since the
-     location is now configurable, the archiver checks *the resolved path* and refuses to initialize
-     if it lands inside a known sync root (per §4.5) — a warning the user can override explicitly.
-   - `docs/log-formats.md` and `DECISIONS.md` both state plainly that the archive holds secrets.
+
 2. `docs/log-formats.md` — the Claude Code format, **with observed and inferred claims labeled
    separately.** Everything documented so far comes from two local transcripts, and neither contains
    a rewind, a compaction, or a true sidechain (`isSidechain` was present but uniformly `false`;
@@ -268,7 +256,7 @@ one-time change to your dev environment that I make because you asked for it, an
    and retention behaviour are **observed**; the branching tree, sidechain interleaving and revert
    signal are **inferred** — corroborated by the history-viewer's 21 `parentUuid` / 32 `isSidechain`
    references, which M0 cites as the secondary source while reading that parser. The first real
-   compaction or `Task` fan-out captured in the archive promotes or corrects each inferred claim.
+   compaction or `Task` fan-out seen in a real session promotes or corrects each inferred claim.
    Codex marked "not present on this machine."
 3. `docs/data-sources.md` — the corpora above with licenses, gating status, and the
    license-compatibility conclusion for redistributing derived fixtures (CC BY / ODC-BY / MIT all
@@ -284,9 +272,9 @@ one-time change to your dev environment that I make because you asked for it, an
    Principles Zero and One, the three-tier eval split, the four surviving differentiation claims, and
    the plan-heavily-implement-smoothly convention.
 
-**M0 is done when:** the archive holds every surviving transcript, a re-run of `archive` reads zero
-redundant bytes, this document is split with no orphaned rationale, and `docs/prior-art.md` records
-real output from both competitors rather than claims from their READMEs.
+**M0 is done when:** the catalog tracks every transcript on disk without copying any of them, a
+re-scan reads zero redundant bytes, this document is split with no orphaned rationale, and
+`docs/prior-art.md` records real output from both competitors rather than claims from their READMEs.
 
 ## M1 — parse, redact, skeletonize
 
@@ -299,8 +287,8 @@ real output from both competitors rather than claims from their READMEs.
 3. **Skeletonizer** (`src/skeleton.ts`): target 5–10% of raw tokens; the shape in the design doc is
    the output contract. Measured and asserted in tests.
 4. **Windowing**: 6–12 turn sliding windows along the active path, sidechains excluded from main-thread windows.
-5. **Reader modes** (`src/read.ts`): one incremental offset reader, two modes — `archive` (completed
-   sessions) and `live` (tails the in-flight file for `agentsensei now`). Same code, a parameter.
+5. **Reader modes** (`src/read.ts`): one incremental offset reader, two modes — `catalogued` (up to
+   the recorded offset) and `live` (tails past it for `agentsensei now`). Same code, a parameter.
 6. **Pinned contracts** (`src/types.ts`): the three from the Contracts section — `TurnRef` keyed on
    `uuid`, `Finding` with subject-based identity, and the versioned `Skeleton`. These are the only
    shapes specified before implementation, because each one is persisted and would be wrong-in-place
@@ -309,7 +297,7 @@ real output from both competitors rather than claims from their READMEs.
    --project` wired up to argument parsing and depth labeling, printing "no detectors yet" until M2.
    The shape is settled now because retrofitting it after the detectors exist is the expensive order.
 
-**M1 is done when:** every archived session parses without error, the redactor passes its
+**M1 is done when:** every catalogued session parses without error, the redactor passes its
 planted-secret suite, skeletons hit the 5–10% target, and `agentsensei now` reads the in-flight transcript
 of the session it is run from — all on local data only.
 
@@ -383,7 +371,7 @@ Two items move **earlier** because M6 depends on them being right:
 - `npx vitest` — parser tree reconstruction, redactor planted secrets, skeleton compression ratio,
   each detector against its synthetic fixture. The rewind-branch fixture is **hand-built from
   inference**, so it is marked as such in the test file and re-derived from a real captured branch as
-  soon as the archive contains one.
+  soon as a real one appears in a session.
 - `ls -ld ~/.local/share/agentsensei` — asserts `0700`, and that the path is outside any sync root
 - **Running-score honesty tests** — assert no percentage is shown below the minimum denominator (raw
   `2 → 1` instead); assert deltas compute on rates not counts, by feeding two windows with equal
@@ -404,16 +392,17 @@ Two items move **earlier** because M6 depends on them being right:
   a session's first boundary; assert `init` wraps rather than replaces an existing `statusLine`;
   assert `dimensions.ambient: []` produces zero live output. A regression here is worse than a wrong
   finding, so these are assertions, not manual checks.
-- `agentsensei archive && agentsensei archive` — second run reports zero new bytes (incremental proof)
-- `agentsensei archive --source test/fixtures/projects --archive /tmp/h1` — the whole pipeline runs
+- `agentsensei scan && agentsensei scan` — second run reads zero bytes (incremental proof)
+- `ls <store>` — `index.json` and nothing else; no transcript copy exists anywhere
+- `agentsensei scan --source test/fixtures/projects --archive /tmp/h1` — the whole pipeline runs
   against fixture directories, touching no real home-directory path. This is the test-suite path and
   the proof that nothing is hardcoded.
 - `agentsensei config` — prints resolved paths and which layer (flag / env / file / default) set each
 - `git diff` on `~/.claude/settings.json` after a full run — must be empty; the product never writes it
-- `agentsensei skeleton <local-session>` — prints a readable skeleton of a real archived session
+- `agentsensei skeleton <local-session>` — prints a readable skeleton of a real catalogued session
 - `agentsensei now` run from inside a live Claude Code session — reads the in-flight transcript and
-  reports on turns that have not been written to the archive yet
-- `agentsensei report --since 2026-01-01` — returns prompt-level depth for the pre-archive period and
+  reports on turns past the last catalogued offset
+- `agentsensei report --since 2026-01-01` — returns prompt-level depth for the pre-catalog period and
   labels it as such, rather than silently returning nothing
 - `agentsensei eval` (M4) — three labeled blocks; the gold block is the only one quoted as precision
 - **Outcome tri-state tests** — the MVP's critical safety path. Fixtures for: a repo with no test
@@ -422,15 +411,15 @@ Two items move **earlier** because M6 depends on them being right:
   `abandoned`, which would be the false flag that destroys trust.
 - `agentsensei claude-md` on a real `CLAUDE.md` — classifies rules as ceremonial / ineffective /
   working, and runs on the first invocation with no accumulated history
-- `agentsensei doctor` — archive size, retention setting, and the network claim stated precisely as
+- `agentsensei doctor` — catalog size, harness TTL, and the network claim stated precisely as
   **"no network calls during analysis"** rather than "no network capability." Re-checked against the
   final design and it holds: the only network access anywhere is the user-initiated model download,
   which is setup, not analysis — and hooks can never trigger it. `doctor` additionally reports both
-  storage paths separately (archive and models) since they now differ. The weaker claim is needed
+  storage paths separately (store and models) since they now differ. The weaker claim is needed
   because "no network capability" becomes false
   at M5, when the bundled embedding model downloads lazily on first use. Scoping the claim now avoids
   having to walk back a user-facing honesty guarantee three milestones in.
-- Per-milestone: wall-clock scan time, peak RSS, CPU on the real archive, reported in the summary
+- Per-milestone: wall-clock scan time, peak RSS, CPU on real sessions, reported in the summary
 
 ## Open items
 

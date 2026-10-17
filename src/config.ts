@@ -16,9 +16,9 @@ export type Config = {
   /** Transcript source directories, searched for *.jsonl. */
   sources: string[];
   /**
-   * Durable store: transcripts, findings, SQLite. Deliberately NOT the plugin
-   * data dir — it must survive plugin uninstall and be shared with the CLI,
-   * because two stores would mean two different answers.
+   * Durable store: the catalog, findings, SQLite. **No transcript copies.**
+   * Deliberately NOT the plugin data dir — it must survive plugin uninstall and
+   * be shared with the CLI, because two stores would mean two different answers.
    */
   archive: string;
   /**
@@ -34,15 +34,23 @@ export type Provenance = Record<keyof Omit<Config, 'configFile'>, Layer>;
 export type Layer = 'flag' | 'env' | 'file' | 'default';
 
 export type ResolveInput = {
-  flags?: { sources?: string[]; archive?: string; models?: string; config?: string };
+  flags?: {
+    sources?: string[];
+    archive?: string;
+    models?: string;
+    config?: string;
+  };
   env?: NodeJS.ProcessEnv;
   home?: string;
 };
 
 /**
- * Directories we refuse to initialise the archive inside. The archive holds raw,
- * unredacted transcripts by design (see docs/contracts.md), so it must not be
- * synced to a third party by accident.
+ * Directories we would rather not put our store inside.
+ *
+ * This used to be load-bearing, when the archive held raw transcripts. It no
+ * longer does — we copy nothing — so this is ordinary hygiene: the catalog still
+ * records absolute paths, and findings still hold redacted excerpts, neither of
+ * which belongs in someone's cloud drive by accident.
  */
 const SYNC_ROOT_MARKERS = [
   join('Library', 'Mobile Documents'), // iCloud Drive

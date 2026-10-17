@@ -9,7 +9,8 @@ import { homedir } from 'node:os';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveConfig, type Layer } from './config.ts';
-import { describeArchive, runArchive, SyncRootRefusal } from './archive.ts';
+import { describeCatalog, readCatalog, runScan } from './catalog.ts';
+import { parse, registry } from './parsers/index.ts';
 
 type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
 
@@ -62,45 +63,40 @@ function configFromFlags(a: Argv) {
 const USAGE = `agentsensei — find the turns where you and your agent wasted effort
 
 Usage
-  agentsensei archive            preserve transcripts before the harness deletes them
-  agentsensei doctor             harnesses, paths, retention warning
+  agentsensei scan               read new transcript data (copies nothing)
+  agentsensei doctor             harnesses, paths, parser coverage
   agentsensei config             resolved values and which layer set each
 
 Options
   --source <path>    transcript source (repeatable)
-  --archive <path>   archive location
+  --archive <path>   store location (catalog + findings)
   --models <path>    model location
   --config <path>    config file
 
 Not yet implemented (see PLAN.md): now, report, fix, explain, claude-md, eval.
 `;
 
-function cmdArchive(a: Argv): number {
+function cmdScan(a: Argv): number {
   const { config } = configFromFlags(a);
-  try {
-    const s = runArchive({
-      sources: config.sources,
-      archive: config.archive,
-      allowSyncRoot: a.flags['allow-sync-root'] === true,
-    });
-    const changed = s.added + s.appended;
-    console.log(
-      `scanned ${s.scanned} transcript${s.scanned === 1 ? '' : 's'} · ` +
-        `${s.added} new, ${s.appended} appended, ${s.unchanged} unchanged` +
-        (s.reset > 0 ? `, ${s.reset} re-archived` : ''),
-    );
-    console.log(`read ${fmtBytes(s.bytesRead)}${changed === 0 ? ' (nothing new)' : ''}`);
-    const d = describeArchive(config.archive);
-    console.log(`archive · ${d.sessions} sessions · ${fmtBytes(d.bytes)} · ${config.archive}`);
-    for (const sk of s.skipped) console.error(`skipped ${sk.path}: ${sk.reason}`);
-    return 0;
-  } catch (err) {
-    if (err instanceof SyncRootRefusal) {
-      console.error(err.message);
-      return 1;
-    }
-    throw err;
-  }
+  const s = runScan({ sources: config.sources, catalog: config.archive });
+
+  console.log(
+    `scanned ${s.scanned} transcript${s.scanned === 1 ? '' : 's'} · ` +
+      `${s.added} new, ${s.grown} grown, ${s.unchanged} unchanged` +
+      (s.reset > 0 ? `, ${s.reset} re-read` : '') +
+      (s.vanished > 0 ? `, ${s.vanished} deleted by the harness` : ''),
+  );
+  console.log(
+    `read ${fmtBytes(s.bytesRead)}${s.bytesRead === 0 ? ' (nothing new)' : ''} · copied nothing`,
+  );
+  const d = describeCatalog(config.archive);
+  console.log(
+    `catalog · ${d.sessions} session${d.sessions === 1 ? '' : 's'}` +
+      (d.gone > 0 ? ` (${d.gone} source${d.gone === 1 ? '' : 's'} since deleted)` : '') +
+      ` · ${config.archive}`,
+  );
+  for (const sk of s.skipped) console.error(`skipped ${sk.path}: ${sk.reason}`);
+  return 0;
 }
 
 function cmdConfig(a: Argv): number {
@@ -111,6 +107,7 @@ function cmdConfig(a: Argv): number {
   show('sources', config.sources.join(', '), provenance.sources);
   show('archive', config.archive, provenance.archive);
   show('models', config.models, provenance.models);
+
   console.log(
     `  ${'config'.padEnd(9)} ${config.configFile ?? '(none)'}` +
       `  (${config.configFile && existsSync(config.configFile) ? 'present' : 'absent'})`,
@@ -118,8 +115,11 @@ function cmdConfig(a: Argv): number {
   return 0;
 }
 
-/** Read `cleanupPeriodDays` without ever writing the file. We report; we never fix. */
-function retentionStatus(home: string): string[] {
+/**
+ * Report the harness's own retention. Read-only, always — we never write it, and
+ * we no longer mirror it either, because we keep no copies to prune.
+ */
+function harnessTtlStatus(home: string): string[] {
   const settings = join(home, '.claude', 'settings.json');
   let configured: number | undefined;
   try {
@@ -131,12 +131,9 @@ function retentionStatus(home: string): string[] {
   }
   const lines: string[] = [];
   if (configured === undefined) {
-    lines.push('  retention  cleanupPeriodDays not set → Claude Code default of 30 days applies');
-    lines.push('             transcripts older than 30 days are deleted at the next cleanup');
-    lines.push('             to keep the raw files longer, set it yourself in ~/.claude/settings.json');
-    lines.push("             agentsensei's own archive is never cleaned");
+    lines.push('  harness    cleanupPeriodDays not set → Claude Code deletes after 30 days');
   } else {
-    lines.push(`  retention  cleanupPeriodDays = ${configured}`);
+    lines.push(`  harness    cleanupPeriodDays = ${configured} (your setting)`);
   }
   try {
     const stamp = readFileSync(join(home, '.claude', '.last-cleanup'), 'utf8').trim();
@@ -168,9 +165,14 @@ function cmdDoctor(a: Argv): number {
     console.log(`  source     ${s}  (${detail})`);
   }
 
-  const d = describeArchive(config.archive);
-  console.log(`  archive    ${config.archive}`);
-  console.log(`             ${d.sessions} sessions · ${fmtBytes(d.bytes)}`);
+  const d = describeCatalog(config.archive);
+  console.log(`  store      ${config.archive}`);
+  console.log(
+    `             ${d.sessions} session${d.sessions === 1 ? '' : 's'} catalogued` +
+      (d.gone > 0 ? `, ${d.gone} source${d.gone === 1 ? '' : 's'} since deleted` : '') +
+      ` · ${fmtBytes(d.bytesTracked)} of source read`,
+  );
+  console.log('             no transcript copies are kept — sources are read in place');
 
   let mode = 'absent';
   try {
@@ -180,11 +182,41 @@ function cmdDoctor(a: Argv): number {
   }
   console.log(`             permissions ${mode}${mode === '700' || mode === 'absent' ? '' : '  ⚠ expected 700'}`);
   console.log(`  models     ${config.models}  (not installed)`);
+
+  // Parser coverage: which harness versions the archive actually holds, and
+  // whether a measured strategy claims each one. A version we have never read
+  // is reported, not hidden — findings from it may be incomplete.
+  console.log('  parsers');
+  for (const p of registry.list()) {
+    console.log(`             ${p.id}  tested: ${Object.keys(p.testedVersions).join(', ')}`);
+  }
+  const index = readCatalog(config.archive);
+  if (index) {
+    const seen = new Map<string, { n: number; match: string }>();
+    for (const e of Object.values(index.entries)) {
+      try {
+        const r = parse(e.source, readFileSync(e.source, 'utf8'), e.sessionId);
+        const key = r.provenance.version ?? '(none)';
+        const cur = seen.get(key);
+        if (cur) cur.n++;
+        else seen.set(key, { n: 1, match: r.provenance.match });
+      } catch {
+        /* a source we can no longer read is reported as `gone` above */
+      }
+    }
+    if (seen.size > 0) {
+      console.log('  archive versions');
+      for (const [v, { n, match }] of [...seen].sort()) {
+        const flag = match === 'exact' ? '' : `  ⚠ ${match} — findings may be incomplete`;
+        console.log(`             ${v.padEnd(10)} ${n} session${n === 1 ? '' : 's'}  ${match}${flag}`);
+      }
+    }
+  }
   console.log('  network    no network calls during analysis');
   console.log('             the only network access is the opt-in model download, which is');
   console.log('             setup rather than analysis — hooks can never trigger it');
   console.log('');
-  for (const l of retentionStatus(home)) console.log(l);
+  for (const l of harnessTtlStatus(home)) console.log(l);
   return 0;
 }
 
@@ -192,8 +224,8 @@ export function main(argv = process.argv.slice(2)): number {
   const a = parseArgv(argv);
   const cmd = a._[0];
   switch (cmd) {
-    case 'archive':
-      return cmdArchive(a);
+    case 'scan':
+      return cmdScan(a);
     case 'doctor':
       return cmdDoctor(a);
     case 'config':
@@ -210,5 +242,11 @@ export function main(argv = process.argv.slice(2)): number {
 }
 
 if (import.meta.filename === process.argv[1]) {
-  process.exit(main());
+  try {
+    process.exit(main());
+  } catch (err) {
+    // A bad flag is a user error, not a crash. No stack trace.
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 }

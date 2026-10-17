@@ -55,7 +55,7 @@ manifest rather than a refactor:
 ```
 agentsensei/
   package.json                 # the npm CLI
-  .claude-plugin/plugin.json   # v1 — + userConfig for archive path etc.
+  .claude-plugin/plugin.json   # v1 — + userConfig for store path etc.
   hooks/
     hooks.json                 # Claude Code   — ${extensionPath}
   scripts/                     # ONE set of entrypoints, harness-agnostic by design
@@ -82,8 +82,8 @@ comes up, not assumed in the meantime.
 | Hook | What we do | Cost |
 |---|---|---|
 | `SessionStart` | emit the pre-computed aggregate standing; note session id + cwd | microseconds — nothing is computed here, only read |
-| `Stop` | drain queue → print; archive new bytes; maybe spawn detached analysis | ~10ms, never blocks |
-| `PreCompact` | **archive before compaction destroys context** — the one irreplaceable capture | ~10ms |
+| `Stop` | drain queue → print; catalog new bytes; maybe spawn detached analysis | ~10ms, never blocks |
+| `PreCompact` | **read before compaction destroys context** — the one irreplaceable capture | ~10ms |
 | `SessionEnd` | finalize: resolve provisional findings, persist | nobody is watching — see below |
 
 **`SessionEnd` surfaces nothing, because there is nobody there to surface to.** Its job is not
@@ -122,15 +122,15 @@ in a README:
    gets killed, not waited on.
 3. **Analysis is detached, never in-process.** The hook spawns and exits; the analyzer cannot hold a
    session open, and killing the session cannot corrupt a half-written analysis.
-4. **The archive is append-only and content-hashed**, so a crash mid-write cannot corrupt existing
-   data — the worst case is a partial trailing record, which the parser skips.
+4. **The catalog is written temp-then-rename**, so a crash cannot leave it half-written. And the
+   offset never advances past a complete line, so a partial record is re-read rather than skipped.
 5. **Never write to the harness's own files.** We read `~/.claude/projects` and never open it for
    writing. The transcript is the user's record, not our scratch space.
 6. **Circuit breaker.** If the detached analyzer fails N times in a row, the hook self-disables and
    records why. `agentsensei doctor` reports it. Degrading to silence beats degrading to noise.
 7. **A kill switch that always works:** `AGENTSENSEI_DISABLE=1` short-circuits every hook on the
    first line, before any logic runs — so recovery never requires uninstalling or editing JSON.
-8. **Tested adversarially:** the M6 suite runs hooks with a corrupt archive, a full disk, a missing
+8. **Tested adversarially:** the M6 suite runs hooks with a corrupt catalog, a full disk, a missing
    binary, a killed analyzer mid-write, and a read-only data dir. Pass condition is that the session
    is unaffected in every case.
 
@@ -220,7 +220,7 @@ synchronous analyzer:
 ```
 Stop hook fires (budget ~10ms, `|| true`):
   1. drain: is there a finished analysis in the queue? → print it, mark surfaced
-  2. append new transcript bytes to the archive (incremental, offset-tracked)
+  2. advance the catalog over new transcript bytes (incremental, offset-tracked)
   3. has a window (6–12 turns) just closed? → spawn DETACHED analysis, exit immediately
                                                  ↓
                                   writes findings to the queue when done
@@ -373,7 +373,7 @@ nudging anyone.
   agentsensei claude-md               audit CLAUDE.md: ceremonial / ineffective / working
   agentsensei goal <dimension>        set a target; tracks baseline → delta
   agentsensei dashboard               localhost UI
-  agentsensei archive                 preserve transcripts (also runs via hook)
+  agentsensei scan                    read new transcript data (copies nothing)
   agentsensei doctor                  harnesses, backends, paths, retention warning
   agentsensei config                  resolved values + which layer set each
   agentsensei eval                    three-tier scoreboard
@@ -429,8 +429,8 @@ wrappers over the same code paths, so there is no second analyzer to keep in syn
 
 Three changes from the design doc's list, all deliberate:
 
-- **`scan` is gone.** Scanning is an implementation detail of an incremental archive, not a user verb.
-  `report` scans if it needs to.
+- **`scan` is the catalog command.** It advances the offset over new transcript bytes and copies
+  nothing. `report` scans first if it needs to.
 - **`hooks install` becomes `init`.** It is multi-harness now, and "set me up" is the actual intent.
 - **`explain` and `dismiss` are new, and they are load-bearing.** `explain` is how "evidence, not
   vibes" becomes a thing you can *do* rather than a claim in a README. `dismiss --wrong` is how a
@@ -539,7 +539,7 @@ class of bug entirely, and a rollup cache is added only if measurement shows the
   recognises.
 - **`since last`** — the immediately preceding window of the *same size*: sessions 11–20 for a
   10-session view. Equal-sized windows, or the comparison is meaningless.
-- **`all time`** — the full archive. Which, honestly, begins when `agentsensei` was installed, so the
+- **`all time`** — everything catalogued. Which, honestly, begins when `agentsensei` was installed, so the
   output says so (`all time (since Oct 9)`) rather than implying it knows about anything earlier.
 
 `agentsensei report --last 7d` switches the window to days; the deltas follow the same rules with days
@@ -573,9 +573,9 @@ agentsensei · current session · 47 turns, 2h14m
 
 **Two architectural consequences, both of which land in M1:**
 
-1. **Live mode reads the live JSONL, not the archive.** The current session's transcript is still
-   being appended to, so the "everything downstream reads the archive" rule needs an explicit
-   exception: `now` tails the active file. The same incremental offset reader serves both, so this is
+1. **Live mode tails past the catalogued offset.** The current session's transcript is still being
+   appended to, so `now` reads from the last catalogued offset to the end of the file rather than
+   waiting for a scan. The same incremental offset reader serves both, so this is
    a parameter, not a second code path. Hooks receive the transcript path directly, which is how the
    automatic version at M6 locates it.
 2. **The current session is incomplete, and that is a precision problem, not a detail.** Outcome
@@ -606,8 +606,8 @@ rather than letting a date range silently return nothing:
 
 | Date range | Available depth |
 |---|---|
-| From the archive's first run forward | **Full** — tool calls, outcomes, every detector |
-| 2025-12-26 → archive start | **Prompt-level only** — the 899 prompts in `history.jsonl` |
+| From the first scan forward, within the harness TTL | **Full** — tool calls, outcomes, every detector |
+| Before that | **Prompt-level only** — the 899 prompts in `history.jsonl`, which survives cleanup |
 
 The shallow tier is more useful than it sounds: 899 prompts over 10 months supports prompt-quality
 trends, vague-prompt detection (→ S2 Misread Intent / C1 Underspecified Instruction), and repeated
@@ -618,7 +618,7 @@ uniform coverage.
 `agentsensei dashboard` (M3) is the visual form of this surface; `now` stays terminal-only.
 
 **Milestone effect:** the detector core (M2) gates both, so the ordering holds. But the CLI shape,
-the live/archive reader parameter, and the `requiresOutcome` flag move into **M1** — they are cheap
+the live/catalogued reader parameter, and the `requiresOutcome` flag move into **M1** — they are cheap
 now and expensive to retrofit. `history.jsonl` parsing is promoted from an open item to an **M2
 deliverable**, since it is the only thing backing the async surface's historical range.
 

@@ -38,7 +38,7 @@ Verified via the GitHub API and project docs on 2026-10-12.
 **Timing note:** vibe-log-cli's last push was 2026-04-19 — roughly six months stale, while agentsview
 and ccusage were both pushed today. The coaching niche specifically is the under-maintained one.
 
-**Action for M0:** install and run vibe-log-cli and agentsview against the local archive, and record
+**Action for M0:** install and run vibe-log-cli and agentsview against the local transcripts, and record
 in `DECISIONS.md` what each produces on real data. The differentiation argument above is built from
 documentation; it needs to be checked against actual output before we commit six milestones to it.
 

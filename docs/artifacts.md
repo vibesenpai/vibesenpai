@@ -150,7 +150,7 @@ $ agentsensei claude-md
 ```
 
 **We can do this and competitors cannot, because we have the before/after violation data.** The study
-found two-thirds of rules are ceremonial but could only say so in aggregate; with a session archive we
+found two-thirds of rules are ceremonial but could only say so in aggregate; with a session catalog we
 can say it *per rule, for one person's actual repo.* This is the single most novel coaching feature in
 the plan, and it falls directly out of the research.
 

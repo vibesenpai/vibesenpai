@@ -1,3 +1,5 @@
+import { SCHEMA, type Versioned } from './schema.ts';
+
 /**
  * The pinned contracts. See docs/contracts.md for the reasoning.
  *
@@ -24,6 +26,13 @@ export type TurnType =
   | 'tool_use'
   | 'tool_result'
   | 'queue_operation'
+  /**
+   * A slash-command echo (`<local-command-stdout>`, `<command-name>`, …).
+   * Written as a `user` record with string content, but it is not a human
+   * speaking — 13 of 69 "prompts" across 3 real sessions were these. Counting
+   * them as prompts inflates every per-prompt rate denominator.
+   */
+  | 'local_command'
   | 'system';
 
 export type Event = {
@@ -33,12 +42,14 @@ export type Event = {
   /** The transcript record's own uuid. The only stable identifier. */
   uuid: string;
   /**
-   * Parent in the transcript tree. A transcript is a TREE, not a linear log:
-   * rewind and compaction create branches, so events must be walked along the
-   * active leaf path rather than read in file order.
+   * Parent in the transcript tree. Kept for grouping and for detecting genuinely
+   * abandoned subtrees — NOT for sequencing. Measured over real sessions: the
+   * longest parentUuid path covers only 78.2% of records, because parallel tool
+   * calls legitimately branch. File order is topological and complete, so that
+   * is what `seq` follows. See docs/log-formats.md.
    */
   parentUuid: string | null;
-  /** Index along the active leaf path. Derived on read; never persisted as identity. */
+  /** Index in file order. Derived on read; never persisted as identity. */
   seq: number;
 
   /**
@@ -64,6 +75,17 @@ export type Event = {
   /** Interrupts: SWE-chat's `queue_op_subtype` (user_prompt_discarded, …). */
   queueOpSubtype?: string;
 
+  /**
+   * On a branch the user abandoned — by rewinding, or by submitting a prompt and
+   * resubmitting it before any reply. **Observed**, not inferred: a `/rewind`
+   * leaves the old records in the file with no marker of any kind, so this is
+   * derived structurally (see parsers/claude-code.ts).
+   *
+   * Flagged rather than dropped: detectors ignore these by default, but silently
+   * discarding records would hide that work happened at all.
+   */
+  abandoned?: boolean;
+
   /** Short and redacted. Never raw file contents. */
   textSummary?: string;
 
@@ -75,10 +97,10 @@ export type Event = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * `seq` is a position on the *active leaf path*, and that path changes when a
- * rewind or compaction alters which branch is live. A finding stored as
- * "turns 31, 44" would silently point at different turns after the next rewind.
- * So `uuid` is the identity and `seq` is recomputed for display only.
+ * `seq` is a derived position, and re-parsing can renumber it — a compaction or
+ * rewind changes which records are present, so a finding stored as "turns 31,
+ * 44" would silently point somewhere else. `uuid` comes from the transcript and
+ * never moves, so it is the identity; `seq` is recomputed for display only.
  */
 export type TurnRef = {
   uuid: string;
@@ -110,7 +132,7 @@ export type Polarity = 'lower-is-better' | 'higher-is-better' | 'neutral';
 
 export type ArtifactKind = 'prompt' | 'guard' | 'rule';
 
-export type Finding = {
+export type Finding = Versioned<'finding'> & {
   /** Per-session instance: hash(dimension + sessionId + subject). */
   id: string;
   /**
@@ -166,8 +188,10 @@ export type Finding = {
  * Bump when the shape OR the text rendering changes. This is part of the verdict
  * cache key, so a bump invalidates cached verdicts rather than silently reusing
  * ones computed against a different shape.
+ *
+ * Sourced from SCHEMA so there is exactly one place to change it.
  */
-export const SKELETON_VERSION = 1 as const;
+export const SKELETON_VERSION = SCHEMA.skeleton;
 
 export type SkeletonLine =
   | { k: 'user'; ref: TurnRef; text: string }
@@ -180,8 +204,7 @@ export type SkeletonLine =
       kind: 'compaction' | 'interrupt' | 'commit' | 'revert';
     };
 
-export type Skeleton = {
-  v: typeof SKELETON_VERSION;
+export type Skeleton = Versioned<'skeleton'> & {
   sessionId: string;
   window: { from: TurnRef; to: TurnRef };
   lines: SkeletonLine[];

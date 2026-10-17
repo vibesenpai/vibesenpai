@@ -120,11 +120,11 @@ a sub-10ms no-op that checks a stamp file and moves on.
 
 | What | Where | Why |
 |---|---|---|
-| **Archive** (transcripts, findings, SQLite) | `$XDG_DATA_HOME/agentsensei` | durable user data. Must **survive plugin uninstall** and be shared with the CLI — two stores would mean two different answers |
+| **Store** (catalog + findings, SQLite — **no transcript copies**) | `$XDG_DATA_HOME/agentsensei` | durable derived data. Must **survive plugin uninstall** and be shared with the CLI — two stores would mean two different answers |
 | **Classifiers** (~270 MB) | `$CLAUDE_PLUGIN_DATA` when running as a plugin, else XDG | large, disposable, re-downloadable, and correctly removed when the plugin is uninstalled |
 
 That split is the right default precisely because the consequences of losing each are different:
-losing the archive loses irreplaceable history; losing the models costs a re-download.
+losing the store loses irreplaceable derived history; losing the models costs a re-download.
 
 ### The install-time offer
 

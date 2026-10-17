@@ -4,8 +4,8 @@
 
 Most structure should be designed while implementing. **The exception is anything written to disk and
 read back later** — if its shape changes, previously stored data becomes wrong, and the migration is
-worse than the design. Three contracts qualify. Everything else (archive file naming, offset-tracking
-format, detector internals, CLI formatting, table indices) is deliberately deferred.
+worse than the design. Three contracts qualify. Everything else (catalog file naming, detector
+internals, CLI formatting, table indices) is deliberately deferred.
 
 ### 1. Evidence references — by `uuid`, never by position
 
@@ -131,12 +131,31 @@ U  it's still broken                      [correction]
   rule (assistant prose first, then tool detail) and the elision is noted in the output rather than
   hidden — a skeleton that silently drops the decisive turn would produce a confident wrong verdict.
 
+### Storage: nothing raw is ever kept
+
+| What | Where | Why it is safe to keep |
+|---|---|---|
+| **Catalog** — offsets, hashes, versions, source paths | `$XDG_DATA_HOME/agentsensei` | bookkeeping only, no content. 4 KB where copying was 10.4 MB |
+| **Findings** — redacted, no file contents | same store, SQLite | the running score needs the history |
+| **Skeletons for windows that produced a finding** | same store | redacted **at construction** — no file contents, no absolute paths, no identifiers. ~10% of raw size |
+| **Raw transcripts** | **never stored** | a transcript can contain a leaked token; duplicating it would make the breach ours |
+| **Models** (~270 MB) | `$CLAUDE_PLUGIN_DATA` | large, disposable, removed on plugin uninstall |
+
+**Persisting skeletons rather than copies is what makes keeping no transcripts safe rather than merely
+cheaper.** `explain` prints a skeleton anyway, so evidence survives the harness deleting a source
+*in the form the user actually sees* — at a tenth the size, with nothing secret in it. The redaction
+designed for the future team wire format (D27) pays for itself twice.
+
+The split follows from what losing each would cost: the catalog and findings are irreplaceable once a
+source ages out; models are a re-download. Hence the store survives plugin uninstall and the models
+directory does not.
+
 ### SQLite: minimal now, migrations from the first write
 
 ```sql
 meta(key, value)                       -- schema_version, created_at
 sessions(session_id PK, harness, project, started_at, ended_at,
-         archive_path, byte_offset, mtime, outcome,
+         source_path, byte_offset, mtime, harness_version, gone, outcome,
          turn_count, edit_count, tool_call_count,          -- rate denominators:
          verified_edit_count, success_claim_count)         -- every delta is a SQL aggregate
 findings(id PK, subject_id, session_id, dimension, subject, occurrences, confidence,
@@ -149,8 +168,8 @@ constraints(subject_id PK, project, text, source, first_stated_at, violations)
                                                         -- powers the CLAUDE.md audit
 ```
 
-**Events are deliberately not stored.** They are re-derived from the archive on demand, because the
-archive is already incremental (offset + mtime per file), re-parsing only changed bytes is cheap, and
+**Events are deliberately not stored.** They are re-derived from the source on demand, because the
+catalog is already incremental (offset + mtime per file), re-parsing only changed bytes is cheap, and
 storing every event would balloon the database for data we already hold verbatim. `agentsview`
 indexes events for search speed — but search is not our product, so the trade goes the other way.
 Revisit only if measurement shows re-parsing is the bottleneck.
@@ -164,7 +183,7 @@ right, but because it is likely wrong.
 
 ### What is explicitly deferred
 
-Archive file naming and offset-file format; detector internals beyond the async signature; CLI and
+Catalog file naming; detector internals beyond the async signature; CLI and
 dashboard rendering; indices (added when a measurement shows a slow query); the `Backend`
 implementations beyond the null one; and the eval harness's storage. None of these are read back by a
 *later* version of the code in a way that breaks, so they can be designed while being built.

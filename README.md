@@ -162,19 +162,19 @@ commands and the `SessionStart` / `Stop` / `PreCompact` / `SessionEnd` hooks fro
 ours: the never-touch-your-config rule is satisfied structurally.
 
 The manifest's `userConfig` (verified as a real plugin.json field, used by mem0) prompts at install
-for the handful of settings worth asking up front — archive location override, and whether the ambient
+for the handful of settings worth asking up front — store location override, and whether the ambient
 statusline is wanted at all. Nothing sensitive, nothing required.
 
 ### 2. First session after install — the onboarding moment
 
 This is the answer to *"where is the hook for setup?"* The `SessionStart` hook detects a first run
-with no archive and emits a one-time brief. Hook stdout lands in the agent's context, so Claude
+with no catalog and emits a one-time brief. Hook stdout lands in the agent's context, so Claude
 relays it — the same mechanism mem0's plugin uses:
 
 ```
   agentsensei installed · 34 sessions found in ~/.claude/projects, not yet analysed
 
-  /agentsensei:setup   archive them and show your first report   (~10s, no download)
+  /agentsensei:setup   analyse them and show your first report  (~10s, no download)
   /agentsensei:now     analyse just this session
 ```
 
@@ -184,7 +184,7 @@ required and no CLI invocation.
 ### 3. `/agentsensei:setup` — onboarding, in the harness
 
 ```
-  Archived 34 sessions over 18 days → ~/.local/share/agentsensei (84 MB)
+  Scanned 34 sessions over 18 days · copied nothing (catalog: 31 KB)
 
   COSTING YOU
   ✗ no_verification         23 of 41 edits unverified          /agentsensei:fix 1
@@ -289,7 +289,10 @@ $ npx agentsensei
   Claude Code deletes transcripts after 30 days by default (cleanupPeriodDays),
   and nothing remains on this machine. There is nothing to analyse yet.
 
-  → install the plugin and it will archive sessions as you work:
+  agentsensei reads your transcripts in place and never copies them, so it
+  cannot recover sessions the harness has already removed.
+
+  → install the plugin and it will track sessions as you work:
       /plugin marketplace add crozzfire/agentsensei
 ```
 
