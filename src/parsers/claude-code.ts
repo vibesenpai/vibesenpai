@@ -70,6 +70,7 @@ import type {
   ToolUseBlock,
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
+import { redact } from '../redact.ts';
 import type { Event, TurnType } from '../types.ts';
 
 /**
@@ -88,6 +89,9 @@ const NOISE_TYPES = new Set([
   'atis-latch',
   'ai-title',
   'agent-name',
+  // Found only in a public corpus of 231 transcripts spanning 42 versions:
+  'progress', // hook progress ticks
+  'frame-link', // artifact frame reference
 ]);
 
 export type ParseResult = {
@@ -150,12 +154,67 @@ type AnyBlock = {
   content?: ToolResultBlockParam['content'];
 };
 
-/** Short, single-line, length-capped. Full redaction is redact.ts's job. */
+/**
+ * Short, single-line, length-capped — and **redacted**.
+ *
+ * Redaction happens here, at the point the summary is created, rather than
+ * later at display time. Since we keep no transcript copies, an `Event` is
+ * already the only version that will exist; a secret that survives into one has
+ * nowhere else to be caught.
+ *
+ * Note the order: redact BEFORE truncating. Truncating first could cut a token
+ * in half and leave a fragment that no rule matches — half a key is still a
+ * leak, and a shorter one is not a safer one.
+ */
+/**
+ * Every path that reaches an `Event` goes through here.
+ *
+ * There were three assignment sites and the first fix only covered one, leaking
+ * 59 paths from `file-history-*` records. A single choke point means a new site
+ * cannot quietly forget.
+ */
+function cleanPath(p: string | undefined): string | undefined {
+  return p === undefined ? undefined : redact(p).text;
+}
+
 function summarise(s: unknown, max = 200): string | undefined {
   if (typeof s !== 'string') return undefined;
   const flat = s.replace(/\s+/g, ' ').trim();
   if (flat === '') return undefined;
-  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+  const clean = redact(flat).text;
+  if (clean.length <= max) return clean;
+  // The marker is space-separated because `/home/…` would otherwise read `…` as
+  // the username and mask it to `/home/[USER]`, inventing a path segment that
+  // was never there.
+  return redactToFixedPoint(`${clean.slice(0, max)} …`);
+}
+
+/**
+ * Redact until the text stops changing.
+ *
+ * One pass suffices for whole text, but truncation can leave a dangling
+ * construct whose marker the next pass then consumes: cutting
+ * `API_TOKEN=secret` at the `=` leaves `API_TOKEN= …`, and `secret-assignment`
+ * allows whitespace after the separator, so it swallows the marker as the value.
+ * No secret is exposed either way — redaction already ran before the cut — but
+ * the output would not be stable.
+ *
+ * Iterating makes the invariant hold *by construction*: every emitted summary
+ * is a fixed point of `redact`. That is what lets scripts/verify-corpus.ts treat
+ * any re-redaction change as proof a field reached an `Event` without passing
+ * the redactor — the bug that leaked 347 home paths through `filePath`.
+ *
+ * The bound is a guard against a future rule pair that oscillates, not an
+ * expectation; observed convergence is one or two passes.
+ */
+function redactToFixedPoint(s: string, limit = 4): string {
+  let cur = s;
+  for (let i = 0; i < limit; i++) {
+    const next = redact(cur).text;
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
 }
 
 /**
@@ -207,7 +266,18 @@ function tokensOf(usage: Partial<Usage> | undefined): Event['tokens'] | undefine
   };
 }
 
-/** Pull the most useful identifying argument out of a tool call. */
+/**
+ * Pull the most useful identifying argument out of a tool call.
+ *
+ * These are **structured evidence fields**, not summaries — `constraint_decay`
+ * compares `command` against a stated rule, so `npm install lodash` must survive
+ * verbatim. But they routinely contain absolute paths, which carry the username.
+ *
+ * So they get the same redactor as everything else: it rewrites `/Users/alice`
+ * to `~` while leaving the command and path structure intact. Measured on real
+ * transcripts, 347 events carried a raw home path through these two fields alone
+ * — they bypass `summarise()`, so forgetting them leaked silently.
+ */
 function toolTarget(name: string | undefined, input: unknown): {
   filePath?: string;
   command?: string;
@@ -218,9 +288,9 @@ function toolTarget(name: string | undefined, input: unknown): {
   const str = (k: string): string | undefined =>
     typeof rec[k] === 'string' ? (rec[k] as string) : undefined;
   const out: { filePath?: string; command?: string; pattern?: string } = {};
-  const fp = str('file_path') ?? str('path') ?? str('notebook_path');
-  const cmd = str('command');
-  const pat = str('pattern') ?? str('query');
+  const fp = cleanPath(str('file_path') ?? str('path') ?? str('notebook_path'));
+  const cmd = cleanPath(str('command'));
+  const pat = cleanPath(str('pattern') ?? str('query'));
   if (fp !== undefined) out.filePath = fp;
   if (cmd !== undefined) out.command = cmd;
   if (pat !== undefined) out.pattern = pat;
@@ -228,7 +298,13 @@ function toolTarget(name: string | undefined, input: unknown): {
   return out;
 }
 
-type TreeNode = { uuid: string; parentUuid: string | null; type: string; isHumanPrompt: boolean };
+type TreeNode = {
+  uuid: string;
+  parentUuid: string | null;
+  type: string;
+  isHumanPrompt: boolean;
+  isSidechain: boolean;
+};
 
 /**
  * Which records sit on a branch the user walked away from.
@@ -244,8 +320,18 @@ type TreeNode = { uuid: string; parentUuid: string | null; type: string; isHuman
  *
  * That distinction matters because an earlier attempt at this used subtree size
  * ("one side dies early, the other continues"), which flagged all 42 parallel
- * tool calls in a real session. Verified on 4 sessions: 1 rewind and 2 abandoned
- * prompts found, 0 false positives.
+ * tool calls in a real session.
+ *
+ * **Sidechains are excluded explicitly.** A subagent's work hangs off the main
+ * spine and carries its own injected prompt, so the human-prompt test would
+ * classify an entire fan-out as abandoned. On a public corpus of 99
+ * sidechain-bearing transcripts this happened to produce 0 false positives — but
+ * only incidentally, which is the worst reason for something to be correct. The
+ * exclusion makes it intentional: a subagent branch was never a branch the user
+ * walked away from.
+ *
+ * Verified on 231 public transcripts across 42 harness versions plus 4 local
+ * sessions: 52 abandoned main-thread events, 0 in any sidechain.
  */
 export function markAbandoned(nodes: TreeNode[]): Set<string> {
   if (nodes.length === 0) return new Set();
@@ -286,6 +372,7 @@ export function markAbandoned(nodes: TreeNode[]): Set<string> {
   for (const node of spine) {
     for (const child of kids.get(node) ?? []) {
       if (spine.has(child.uuid)) continue; // the branch that was continued
+      if (child.isSidechain) continue; // a subagent's work, not an abandoned branch
       const sub = subtreeOf(child.uuid);
       if (sub.some((u) => byUuid.get(u)?.isHumanPrompt === true)) {
         for (const u of sub) dead.add(u);
@@ -338,6 +425,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
           parentUuid: r.parentUuid ?? null,
           type,
           isHumanPrompt: false,
+          isSidechain: r.isSidechain === true,
         });
       }
       continue;
@@ -368,6 +456,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
         type,
         isHumanPrompt:
           type === 'user' && typeof c === 'string' && !META_CONTENT.test(c),
+        isSidechain: r.isSidechain === true,
       });
     }
 
@@ -466,7 +555,54 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
         const tracked = Object.keys(r.snapshot?.trackedFileBackups ?? {});
         push('system', {
           textSummary: `file-history-snapshot:${tracked.length} tracked`,
-          ...(tracked[0] !== undefined ? { filePath: tracked[0] } : {}),
+          ...(cleanPath(tracked[0]) !== undefined ? { filePath: cleanPath(tracked[0]) as string } : {}),
+        });
+        break;
+      }
+
+      // ── Types that appear only in the public corpus ─────────────────────
+      //
+      // None of these occur in local transcripts, which is why testing against
+      // someone else's data mattered: three carry signal the detectors want,
+      // and all three were being silently counted as "unknown".
+
+      case 'summary': {
+        // What compaction leaves behind. `leafUuid` anchors it to the turn it
+        // replaced — the reference `context_rationale_erosion` needs to tell a
+        // dropped rationale from a dropped action.
+        const sm = r as { summary?: unknown; leafUuid?: unknown };
+        push('system', {
+          ...sum(sm.summary),
+          ...(typeof sm.leafUuid === 'string' ? { toolCallId: sm.leafUuid } : {}),
+        });
+        break;
+      }
+
+      case 'cost-state': {
+        // Session totals. The lines-added/removed counters are a real progress
+        // signal for outcome classification, and this is where
+        // `spend_without_progress` finally gets an input.
+        const cs = r as {
+          totalLinesAdded?: unknown;
+          totalLinesRemoved?: unknown;
+          totalCostUSD?: unknown;
+        };
+        const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+        const cost = num(cs.totalCostUSD);
+        push('system', {
+          textSummary:
+            `cost-state: +${num(cs.totalLinesAdded) ?? 0}/-${num(cs.totalLinesRemoved) ?? 0} lines` +
+            (cost !== undefined ? `, $${cost.toFixed(4)}` : ''),
+        });
+        break;
+      }
+
+      case 'pr-link': {
+        // A pull request was opened — one of the strongest convergence signals
+        // available. Work that reached a PR was not abandoned.
+        const pr = r as { prNumber?: unknown; prRepository?: unknown };
+        push('system', {
+          textSummary: `pr-link: ${String(pr.prRepository ?? '?')}#${String(pr.prNumber ?? '?')}`,
         });
         break;
       }
@@ -474,7 +610,9 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       case 'file-history-delta': {
         push('system', {
           textSummary: 'file-history-delta',
-          ...(typeof r.trackingPath === 'string' ? { filePath: r.trackingPath } : {}),
+          ...(typeof r.trackingPath === 'string'
+            ? { filePath: cleanPath(r.trackingPath) as string }
+            : {}),
         });
         break;
       }

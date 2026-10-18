@@ -148,9 +148,12 @@ export function detectVersion(lines: readonly string[]): string | undefined {
  * Source path first — the directory layout is the strongest signal — then record
  * shape, since the archive may hold files whose origin is no longer on disk.
  */
+/** Codex record types, from a public corpus. Distinctive and unambiguous. */
+const CODEX_TYPES = new Set(['session_meta', 'response_item', 'event_msg', 'turn_context']);
+
 export function detectHarness(sourcePath: string, lines: readonly string[]): Harness {
   if (sourcePath.includes('.claude/projects')) return 'claude-code';
-  if (sourcePath.includes('.codex/sessions')) return 'codex';
+  if (sourcePath.includes('.codex/sessions') || sourcePath.includes('/codex/')) return 'codex';
 
   for (const line of lines.slice(0, 50)) {
     const t = line.trim();
@@ -158,11 +161,19 @@ export function detectHarness(sourcePath: string, lines: readonly string[]): Har
     try {
       const r = JSON.parse(t) as Record<string, unknown>;
       if ('turn_type' in r) return 'swe-chat'; // SWE-chat's normalised column
+
+      // Codex, by record type. Checked BEFORE the Claude Code test: a public
+      // corpus of 231 transcripts contained Codex rollouts outside any
+      // `.codex/` directory, and they were being handed to the Claude Code
+      // parser — which produced a pile of "unknown" types rather than an honest
+      // refusal.
+      const ty = r['type'];
+      if (typeof ty === 'string' && CODEX_TYPES.has(ty)) return 'codex';
+
       // `parentUuid` is the distinctive Claude Code field. Deliberately not
-      // requiring `isSidechain` as well: our own archive stores files as
-      // `sessions/<id>.jsonl`, so the path carries no harness hint and shape
-      // detection is the only signal. Being strict here would make the archiver
-      // produce files its own parser refuses.
+      // also requiring `isSidechain`: our own store keeps no path hint, so
+      // shape detection is the only signal and being strict would make us
+      // refuse files we produced ourselves.
       if ('parentUuid' in r) return 'claude-code';
     } catch {
       /* skip */

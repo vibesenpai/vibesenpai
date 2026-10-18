@@ -299,3 +299,179 @@ describe('parser — slash-command echoes are not prompts', () => {
     ]);
   });
 });
+
+describe('parser — redacts at construction, not at display', () => {
+  // An Event is already the only version that will exist, since no transcript
+  // copy is kept. A secret that survives into one has nowhere else to be caught.
+  it('redacts a secret in a user prompt', () => {
+    const text = j({
+      type: 'user',
+      uuid: 'a',
+      message: { content: 'use this key sk-ant-api03-AbCdEf1234567890xyz please' },
+    });
+    const e = parseTranscriptText(text).events[0];
+    expect(e?.textSummary).not.toContain('sk-ant-api03');
+    expect(e?.textSummary).toContain('[REDACTED:api-key]');
+  });
+
+  it('redacts a secret echoed in a tool result', () => {
+    const text = j({
+      type: 'user',
+      uuid: 'a',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 't1', content: 'DB_PASSWORD=hunter2\nok' },
+        ],
+      },
+    });
+    expect(parseTranscriptText(text).events[0]?.textSummary).not.toContain('hunter2');
+  });
+
+  it('redacts before truncating, so a long secret cannot survive as a fragment', () => {
+    // Truncating first could cut a token in half, leaving a fragment no rule
+    // matches. Half a key is still a leak.
+    const secret = `sk-ant-api03-${'A'.repeat(300)}`;
+    const text = j({ type: 'user', uuid: 'a', message: { content: `key ${secret} end` } });
+    const out = parseTranscriptText(text).events[0]?.textSummary ?? '';
+    expect(out).not.toContain('AAAAAAAAAA');
+    expect(out).toContain('[REDACTED:api-key]');
+  });
+
+  it('keeps the command evidence intact while redacting around it', () => {
+    const text = j({
+      type: 'assistant',
+      uuid: 'a',
+      message: {
+        content: [
+          { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm install lodash' } },
+        ],
+      },
+    });
+    const e = parseTranscriptText(text).events[0];
+    // `command` is a structured field, not a summary — it is evidence and must
+    // survive verbatim for constraint_decay to work.
+    expect(e?.command).toBe('npm install lodash');
+  });
+});
+
+describe('parser — structured evidence fields are redacted too', () => {
+  it('rewrites a home path in filePath while keeping the path structure', () => {
+    // These bypass summarise(), so forgetting them leaked silently: 347 events
+    // in real transcripts carried a raw home path through filePath/command.
+    const home = process.env.HOME ?? '/Users/nobody';
+    const text = j({
+      type: 'assistant',
+      uuid: 'a',
+      message: {
+        content: [
+          { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: `${home}/app/src/auth.ts` } },
+        ],
+      },
+    });
+    const e = parseTranscriptText(text).events[0];
+    expect(e?.filePath).toBe('~/app/src/auth.ts');
+  });
+
+  it('keeps the command verbatim apart from the path', () => {
+    const home = process.env.HOME ?? '/Users/nobody';
+    const text = j({
+      type: 'assistant',
+      uuid: 'a',
+      message: {
+        content: [
+          {
+            type: 'tool_use', id: 't1', name: 'Bash',
+            input: { command: `cd ${home}/app && npm install lodash` },
+          },
+        ],
+      },
+    });
+    // `npm install` must survive — constraint_decay compares exactly this.
+    expect(parseTranscriptText(text).events[0]?.command).toBe('cd ~/app && npm install lodash');
+  });
+});
+
+describe('parser — a sidechain is never an abandoned branch', () => {
+  it('does not flag a subagent fan-out as abandoned', () => {
+    // A subagent hangs off the main spine and carries its own injected prompt,
+    // so the human-prompt test would classify a whole fan-out as abandoned.
+    // A public corpus of 99 sidechain transcripts produced 0 false positives —
+    // but incidentally, which is the worst reason to be correct.
+    const text = [
+      j({ type: 'user', uuid: 'm1', parentUuid: null, message: { content: 'do the thing' } }),
+      // subagent branch off the main thread, with its own prompt
+      j({ type: 'user', uuid: 's1', parentUuid: 'm1', isSidechain: true, message: { content: 'subagent task' } }),
+      j({
+        type: 'assistant', uuid: 's2', parentUuid: 's1', isSidechain: true,
+        message: { content: [{ type: 'text', text: 'subagent reply' }] },
+      }),
+      // main thread continues past the fan-out
+      j({
+        type: 'assistant', uuid: 'm2', parentUuid: 'm1',
+        message: { content: [{ type: 'text', text: 'main reply' }] },
+      }),
+    ].join('\n');
+
+    const r = parseTranscriptText(text);
+    expect(r.abandoned).toBe(0);
+    expect(r.events.filter((e) => e.isSidechain)).toHaveLength(2);
+  });
+});
+
+describe('parser — truncation must preserve the redaction fixed point', () => {
+  // Found by the public-corpus leak gate, which fired 10 times on text that was
+  // already safe. Redaction runs before truncation, so a cut token can never
+  // expose a secret — but the cut *marker* was being absorbed into the fragment
+  // it followed, turning `/home/` + `…` into a path whose username looked real.
+  //
+  // The invariant: re-redacting anything we emit must be a no-op. That is what
+  // lets scripts/verify-corpus.ts treat any change as proof a field reached an
+  // Event without passing the redactor.
+  const summaryOf = (content: string): string => {
+    const text = [
+      j({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'go' } }),
+      j({
+        type: 'user',
+        uuid: 'b',
+        parentUuid: 'a',
+        message: { content: [{ type: 'tool_result', tool_use_id: 't1', content }] },
+      }),
+    ].join('\n');
+    const e = parseTranscriptText(text).events.find((x) => x.toolCallId === 't1');
+    return e?.textSummary ?? '';
+  };
+
+  it('does not invent a username when the cut lands on a path prefix', () => {
+    // Pad so character 200 falls immediately after `/home/`.
+    const padded = `${'x'.repeat(200 - '/home/'.length)}/home/bob/project`;
+    const out = summaryOf(padded);
+    expect(out).not.toContain('/home/[USER]'); // nothing was there to mask
+    expect(out).toContain('/home/');
+  });
+
+  it('closes a replacement token the cut split in half', () => {
+    const padded = `${'x'.repeat(190)}API_TOKEN=supersecretvalue`;
+    const out = summaryOf(padded);
+    expect(out).not.toContain('supersecret');
+    expect(out).not.toMatch(/\[REDACTED:[a-z-]*$/); // no dangling fragment
+  });
+
+  it('is a fixed point of redact — the property the corpus gate relies on', async () => {
+    const { redact } = await import('../src/redact.ts');
+    const cases = [
+      `${'x'.repeat(194)}/home/bob/project`,
+      `${'y'.repeat(190)}API_TOKEN=hunter2abcdef`,
+      `${'z'.repeat(195)}/Users/alice/notes.md`,
+      `${'w'.repeat(180)}contact me@example.com now`,
+    ];
+    for (const c of cases) {
+      const out = summaryOf(c);
+      expect(out).not.toBe('');
+      expect(redact(out).text).toBe(out);
+    }
+  });
+
+  it('still marks that truncation happened', () => {
+    expect(summaryOf('q'.repeat(400))).toMatch(/…$/);
+  });
+});

@@ -1,0 +1,44 @@
+{
+  "note": [
+    "Pinned public corpora for parser validation. The SHAs are load-bearing:",
+    "an unpinned clone makes `0 leaks across 6,019 events` meaningless, because",
+    "the next run measures a different corpus. Both repos are live and move.",
+    "",
+    "Deliberately NOT npm devDependencies, and not vendored:",
+    "  - claude-code-log is a Python/PyPI project with no package.json, so npm",
+    "    cannot install it even from git.",
+    "  - claude-code-sessions is `private: true`; its package.json exists only to",
+    "    run Prettier on the repo's posts.",
+    "  - Both names on npm resolve to unrelated projects by other maintainers.",
+    "  - It is 26 MB of test *data* with no importable surface.",
+    "",
+    "To re-pin after reviewing upstream changes: scripts/verify-corpus.sh --update"
+  ],
+  "corpora": [
+    {
+      "dest": "ccl",
+      "repo": "daaain/claude-code-log",
+      "sha": "9834d25c88dc4dbe8f8ade40ae4b74602ae7669d",
+      "license": "MIT",
+      "contributes": "the version spread (1.0.0 -> 2.1.301) and the 5 record types never seen locally"
+    },
+    {
+      "dest": "ccs",
+      "repo": "frederick-douglas-pearce/claude-code-sessions",
+      "sha": "d488abb41f92b107fc405f874125e9f128238b8b",
+      "license": "MIT",
+      "contributes": "Linux home paths, and Codex rollouts sitting outside any .codex/ directory"
+    }
+  ],
+  "baseline": {
+    "files": 231,
+    "parsed": 231,
+    "threw": 0,
+    "events": 6019,
+    "malformed": 0,
+    "abandoned": 52,
+    "versions": 42,
+    "sidechainEvents": 712,
+    "leaks": 0
+  }
+}

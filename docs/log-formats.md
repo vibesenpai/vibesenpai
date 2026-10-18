@@ -170,9 +170,22 @@ command echoes: `<local-command-caveat>`, `<local-command-stdout>`, `<command-na
 eight. Counting them inflates prompt totals and every per-prompt rate denominator, so they are
 emitted as `local_command` rather than `user_prompt`.
 
-**`isSidechain` exists on every record and was `false` in all 1,695.** Subagent interleaving remains
-**inferred** — no fan-out appears in this data, so the attribution logic is written to the field but
-is not yet validated against a real sidechain.
+### Sidechains — **observed**, via a public corpus
+
+The last inferred claim. Local transcripts had `isSidechain: false` in all 1,695 records, so subagent
+handling was written to the field without ever being exercised. Two MIT-licensed public corpora
+([`claude-code-log`](https://github.com/daaain/claude-code-log),
+[`claude-code-sessions`](https://github.com/frederick-douglas-pearce/claude-code-sessions)) supply
+**99 transcripts containing sidechains, 712 sidechain events**.
+
+Structure: a sidechain's root record has a `parentUuid` pointing at a **main-thread** record, so a
+subagent branch hangs off the spine. Some carry an `agentId`; some roots have `parentUuid: null`.
+
+**This exposed a latent false-positive.** A subagent receives its own injected prompt, so the
+abandoned-branch rule — *"a sibling subtree off the spine containing a human prompt"* — would classify
+an entire fan-out as abandoned. On this corpus it happened to produce **0** false positives, but only
+incidentally, which is the worst reason for something to be correct. Sidechains are now excluded
+explicitly: a subagent branch was never a branch the user walked away from.
 
 **Timestamps** are ISO-8601 UTC. Records without a `uuid` (`mode`, `last-prompt`, `file-history-*`)
 cannot participate in the tree, which is a further reason not to rely on it for sequencing.
@@ -194,7 +207,66 @@ transcript can contain a leaked token — duplicating it would move that liabili
 catalog tracks offsets and the sources are read in place, with the honest cost that no history exists
 beyond the harness's own window. See [architecture.md](architecture.md) §1.
 
+## Validating against public transcripts
+
+Testing only against one developer's sessions is unrepresentative: one machine exercises one OS, one
+version, one set of habits. `npm run verify:corpus` fetches two MIT corpora (231 transcripts) and runs
+the parser over them. The corpora are deliberately **not vendored** — committing other people's
+transcripts would break the same rule that stops us copying yours.
+
+They are also deliberately **not npm devDependencies**, which was considered and rejected on
+evidence: `claude-code-log` is a Python/PyPI project with no `package.json`, `claude-code-sessions`
+is `private: true` with a manifest that exists only to run Prettier on its posts, and both names on
+npm resolve to unrelated projects by other maintainers. Details in `scripts/corpus.json`.
+
+**Commits are pinned.** Both upstreams are live and move, so an unpinned clone would quietly turn
+every number below into a statement about whatever HEAD happened to be that morning. The pins live in
+`scripts/corpus.json`; a checkout sitting at a different commit is re-checked-out rather than
+accepted, and `--update` re-pins deliberately. The run is a **gate**, not a report: it exits non-zero
+on count drift or on any leak.
+
+What that run caught on its first execution, none of which local data could have surfaced:
+
+| Finding | Local data | Public corpus |
+|---|---|---|
+| Harness versions | 4 (all `2.1.x`) | **42**, spanning `1.0.0` → `2.1.301` |
+| Record types | 13 | **5 more** — `summary`, `cost-state`, `pr-link` (signal), `progress`, `frame-link` (noise) |
+| Sidechains | 0 | **712 events across 99 files** |
+| Linux home paths | 0 (macOS) | **2,414** — an untested redaction rule |
+| Codex rollouts outside `.codex/` | none | **6 files** being handed to the Claude Code parser |
+
+Three of the new record types carry real signal and were being counted as "unknown":
+
+- **`summary`** — what compaction leaves behind, anchored by `leafUuid` to the turn it replaced. The
+  reference `context_rationale_erosion` needs to tell a dropped rationale from a dropped action.
+- **`cost-state`** — `totalCostUSD`, `totalLinesAdded/Removed`, durations. The lines-changed counters
+  are a progress signal for outcome classification, and this is where `spend_without_progress` finally
+  gets an input.
+- **`pr-link`** — a pull request was opened. One of the strongest convergence signals available.
+
+Current result: **231 files, 0 crashes, 6,019 events, 0 malformed lines**, and 0 secret shapes
+surviving into any `Event` field — despite 5,926 macOS home paths, 2,414 Linux home paths, 302 emails,
+2 OpenAI keys and 1 AWS key id present in the raw corpus.
+
+**The leak claim is asserted, not inspected.** The invariant is that re-redacting anything we emit
+must be a no-op; if it changes, a field reached an `Event` without passing the redactor — which is
+exactly how `filePath` and `command` carried 347 raw home paths while `summarise()` looked clean.
+Fields are enumerated off the `Event` object rather than from a hand-written list, so a new string
+field is covered the day it appears.
+
+Its first run flagged 10 summaries, all of which turned out to be safe: truncation cut at character
+200 and the `…` marker was being absorbed by the fragment it followed, so `/home/` re-masked to
+`/home/[USER]` — a path segment that was never in the source. No secret was ever exposed (redaction
+runs before truncation), but the output was not stable. Summaries are now redacted to a **fixed
+point**, which makes the invariant hold by construction instead of by argument.
+
+**Version coverage is reported, not assumed.** The parser claims `2.1.x`; on this corpus that resolves
+to 2 `exact`, 72 `range`, 151 `fallback` and 6 `none` (Codex, correctly refused). A fallback parse
+still happens — refusing would discard data — but it is labelled.
+
 ## Codex
 
-`~/.codex/sessions/` does not exist on this machine. The Codex format is entirely **unobserved** and
-nothing has been written against it.
+`~/.codex/sessions/` does not exist on this machine, and no Codex parser exists. The 6 Codex rollouts
+in the public corpus are **detected and refused** rather than mangled: `session_meta`,
+`response_item`, `event_msg` and `turn_context` are distinctive enough to identify by record type,
+which matters because they appeared outside any `.codex/` directory.
