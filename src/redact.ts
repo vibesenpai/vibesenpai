@@ -100,6 +100,14 @@ const RULES: Rule[] = [
         'npm_[A-Za-z0-9]{30,}', // npm
         'dop_v1_[a-f0-9]{60,}', // DigitalOcean
         'shpat_[a-f0-9]{30,}', // Shopify
+        // Added after a bare `hf_…` token survived into an Event during this
+        // project's own work — it was caught only when assigned to a *TOKEN*
+        // variable, so one pasted into a prompt would have persisted.
+        'hf_[A-Za-z0-9]{20,}', // HuggingFace
+        '(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}', // Stripe secret/restricted
+        'SG\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}', // SendGrid
+        'r8_[A-Za-z0-9]{20,}', // Replicate
+        'ya29\\.[A-Za-z0-9_-]{20,}', // Google OAuth access token
       ].join('|'),
       'g',
     ),

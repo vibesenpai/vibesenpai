@@ -18,6 +18,14 @@ describe('redact — planted secrets', () => {
     ['google', 'AIzaSyA1234567890abcdefghijklmnopqrstu'],
     ['mem0', 'm0-abcdefghijklmnopqrstuvwxyz'],
     ['gitlab', 'glpat-AbCdEf1234567890xy'],
+    // Added after a bare one survived into an Event during this project's own
+    // work: it was caught only via the variable name, so a token pasted into a
+    // prompt would have persisted.
+    ['huggingface', 'hf_AbCdEfGhIjKlMnOpQrStUvWxYz012345'],
+    ['stripe', 'sk_live_AbCdEf1234567890xyz'],
+    ['sendgrid', 'SG.AbCdEf1234567890xy.AbCdEf1234567890xyz'],
+    ['replicate', 'r8_AbCdEfGhIjKlMnOpQrStUv123'],
+    ['google oauth', 'ya29.AbCdEfGhIjKlMnOpQrStUvWx'],
   ];
 
   for (const [name, secret] of planted) {
