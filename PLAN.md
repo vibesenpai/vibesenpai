@@ -360,7 +360,28 @@ incremental persistence. The seam is natural:
 M2a first means the score and persistence are exercised by real use before the riskiest detectors
 land on top of them.
 
-**M2a**, in this order — cheapest and most certain first:
+> **Superseded by measurement — see [docs/findings-frequency.md](docs/findings-frequency.md).**
+> The order below was "cheapest and most certain first", which put the three *rarest* dimensions at
+> the front: measured over 1,139 real sessions, `revert_churn` occurs in 9% of sessions, `tool_loop`
+> in 4%, `inaccurate_self_report` in 1%. All three are built and all three produce ~nothing.
+>
+> **The measured order is:**
+>
+> 1. **`user_correction`** — 63,710 labelled instances, pushback in 50% of turns (the paper's own
+>    headline). The catalogue's "anchor signal", unbuilt, and SWE-chat's `prompt_pushback` gives a
+>    ready-made silver label set so precision and recall are measurable without hand-labelling.
+> 2. **`prompt_withdrawn`** *(new dimension)* — 37% of sessions. Purely structural.
+> 3. **`edit_retry_friction`** *(new dimension)* — 33% of sessions. Purely structural, and the one
+>    dimension that is unambiguous waste rather than a judgment call.
+> 4. **`user_interrupt`** — 64% of sessions, but needs the published 4.5% baseline to separate
+>    friction from healthy steering.
+> 5. **`no_verification`** — 12%, capped by the 20% of sessions that are warm.
+>
+> Deprioritised with reasons: `error_ignored` ranks 2nd by frequency but its probe over-counts badly
+> (of 234 matches, ≥68 were the agent *fixing* the error); `premature_external_write` needs branch
+> awareness.
+
+**M2a**, in this order — cheapest and most certain first *(original ordering, retained for the record)*:
 
 1. `user_correction` (lexical) — the anchor signal; 91.5% of episodes involve it
 2. `inaccurate_self_report` → `no_verification` → `tool_loop` → `error_ignored` → `revert_churn` →

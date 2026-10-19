@@ -1,5 +1,13 @@
 # Dimensions
 
+> **Measured 2026-10-19 — read [findings-frequency.md](findings-frequency.md) before building from
+> this catalogue.** Across 1,139 real sessions the three detectors we built rank **10th, 11th and
+> 14th of 14**, and three patterns absent from this list rank **4th, 6th and 7th**. The catalogue is
+> derived from five published taxonomies of *agent reasoning failures*, and it is good at those — but
+> the dominant real-world friction is the harness being awkward to work in, which none of those
+> papers studied. The frequency column below is the published figure; the measured one is in the
+> findings doc and sometimes disagrees sharply.
+
 ## The dimensions we analyse — full catalogue
 
 40 dimensions across 10 groups. Every entry carries the same fields, and the two that matter most are

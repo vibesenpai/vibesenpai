@@ -25,11 +25,14 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "cli": "node --experimental-strip-types src/cli.ts",
-    "verify:corpus": "bash scripts/verify-corpus.sh"
+    "verify:corpus": "bash scripts/verify-corpus.sh",
+    "measure": "node --experimental-strip-types scripts/measure-dimensions.ts",
+    "pull:swechat": "node --experimental-strip-types scripts/pull-swechat.ts"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
     "@types/node": "24.10.1",
+    "hyparquet": "^1.31.5",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
   }
