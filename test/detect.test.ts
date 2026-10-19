@@ -731,3 +731,96 @@ describe('precision guards learned from real false positives', () => {
     expect(f).toHaveLength(1);
   });
 });
+
+describe('tool_loop — the output has to match too', () => {
+  const run = async (events: Event[]) =>
+    (await runDetectors({
+      events,
+      session: facts(),
+      detectors: [toolLoop()],
+      now: 'T',
+    })).findings;
+
+  it('does not fire when the last call returned something new', async () => {
+    // The gap in the weaker "not all distinct" test: [FAIL, FAIL, OK] still
+    // fired, even though the third call plainly returned new information.
+    const f = await run([
+      bash('npm test'), result('FAIL token undefined'),
+      bash('npm test'), result('FAIL token undefined'),
+      bash('npm test'), result('OK 12 passed'),
+    ]);
+    expect(f).toHaveLength(0);
+  });
+
+  it('does not fire while the failure count is going down', async () => {
+    // Steady progress. Blanket digit-stripping collapsed these to one string and
+    // reported the healthiest possible pattern as a loop.
+    const f = await run([
+      bash('npm test'), result('Tests: 3 failed, 9 passed'),
+      bash('npm test'), result('Tests: 2 failed, 10 passed'),
+      bash('npm test'), result('Tests: 1 failed, 11 passed'),
+    ]);
+    expect(f).toHaveLength(0);
+  });
+
+  it('still fires when only the duration differs', async () => {
+    const f = await run([
+      bash('npm test'), result('FAIL auth.ts token undefined in 1.2s'),
+      bash('npm test'), result('FAIL auth.ts token undefined in 1.4s'),
+      bash('npm test'), result('FAIL auth.ts token undefined in 0.9s'),
+    ]);
+    expect(f).toHaveLength(1);
+  });
+
+  it('still fires when only a line number shifted', async () => {
+    // The spec's own example: flaky line numbers must not split one failure
+    // into three.
+    const f = await run([
+      bash('npm test'), result('FAIL at auth.ts:42:7 token undefined'),
+      bash('npm test'), result('FAIL at auth.ts:45:7 token undefined'),
+      bash('npm test'), result('FAIL at auth.ts:51:7 token undefined'),
+    ]);
+    expect(f).toHaveLength(1);
+  });
+
+  it('does not fire when a result was never captured', async () => {
+    // We cannot read what we did not capture. `unknown` beats guessing.
+    const f = await run([
+      bash('npm test'), result('FAIL'),
+      bash('npm test'),
+      bash('npm test'), result('FAIL'),
+    ]);
+    expect(f).toHaveLength(0);
+  });
+
+  it('does not fire on empty output, which tells us nothing', async () => {
+    const f = await run([
+      bash('grep -r TODO .'), result(''),
+      bash('grep -r TODO .'), result(''),
+      bash('grep -r TODO .'), result(''),
+    ]);
+    expect(f).toHaveLength(0);
+  });
+
+  it('does not conflate different greps — the common benign case', async () => {
+    // Searching repeatedly is normal work. Different patterns are different
+    // calls, which `argHash` already separates.
+    const f = await run([
+      bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
+      bash('grep -rn "bar" src/'), result('src/b.ts:9: bar'),
+      bash('grep -rn "baz" src/'), result('src/c.ts:1: baz'),
+    ]);
+    expect(f).toHaveLength(0);
+  });
+
+  it('does fire on the identical search repeated for the identical answer', async () => {
+    // Same pattern, same answer, nothing changed in between: the search was a
+    // no-op the second and third time.
+    const f = await run([
+      bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
+      bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
+      bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
+    ]);
+    expect(f).toHaveLength(1);
+  });
+});

@@ -21,10 +21,15 @@
  * spec's mitigation is "no intervening state change", which does not help, since
  * polling has none either. So there are two further guards:
  *
- *   1. **Distinct results mean new information.** If every call in the run came
- *      back different, the caller was learning something and this is not a loop.
- *      A progress spinner, a growing log, a changing status all land here.
- *   2. **N is configurable**, because a retry-with-backoff is indistinguishable
+ *   1. **The output must be identical too.** A repeated call that returns
+ *      something new is work, not a loop — so a changing status, a growing log,
+ *      or a failure count going 3 → 2 → 1 all disqualify the run. This is the
+ *      "no new information" half of the definition, and it is the stricter test:
+ *      an earlier version only skipped runs whose results were *all different*,
+ *      which still fired on `[FAIL, FAIL, OK]`.
+ *   2. **Output we cannot read is not evidence.** A run with a missing or empty
+ *      result is skipped rather than assumed identical.
+ *   3. **N is configurable**, because a retry-with-backoff is indistinguishable
  *      from a loop by structure alone and some projects do it legitimately.
  */
 
@@ -90,24 +95,41 @@ export function subjectOf(e: Event): string {
 }
 
 /**
- * Strip the volatile parts of a result so two runs of the same failing test
- * compare equal.
+ * Strip the parts of a result that change for reasons unrelated to the work.
  *
- * Without this the distinctness guard below never fires: real output carries
- * durations, line numbers and ids that differ every run, so *every* repeat looks
- * like new information. Measured: 0 of 19 runs survived the un-normalised guard.
- * Same approach the spec prescribes for `fail_fix_fail`'s error signature, so
- * flaky line numbers do not split one failure into three.
+ * ── What must survive, and why it nearly did not ─────────────────────────────
+ *
+ * The first version replaced every digit with `N`, which collapsed
+ *
+ *     Tests: 3 failed, 9 passed
+ *     Tests: 2 failed, 10 passed
+ *     Tests: 1 failed, 11 passed
+ *
+ * into one identical string — reporting **steady progress as a loop**, on
+ * precisely the behaviour the tool should encourage. The spec is explicit that
+ * an error signature is the normalised first error line *plus the failure
+ * count*: the count is signal, not noise.
+ *
+ * So only genuinely volatile things are normalised: durations, timestamps,
+ * hashes, addresses, and line/column numbers (the spec's own example of what
+ * must not split one failure into three). Counts are preserved.
  */
 export function normaliseResult(text: string | undefined): string {
   return (text ?? '')
     .toLowerCase()
+    // ISO timestamps
+    .replace(/\d{4}-\d{2}-\d{2}t[\d:.]+z?/g, 'T')
+    // durations — "1.2s", "450ms", "3 min"
+    .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds|m|min|mins|h|hr)\b/g, 'D')
+    // memory addresses and hashes
+    .replace(/0x[0-9a-f]+/g, 'H')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, 'H')
     .replace(/\b[0-9a-f]{7,}\b/g, 'H')
-    .replace(/\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds|m|min)\b/g, 'D')
-    .replace(/\d+/g, 'N')
+    // line:col references, so a shifted line does not look like a new failure
+    .replace(/:\d+(?::\d+)?\b/g, ':L')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 160);
+    .slice(0, 200);
 }
 
 type Run = { signature: string; events: Event[]; results: (string | undefined)[] };
@@ -176,11 +198,22 @@ export function runsOf(events: Event[]): Run[] {
   return runs;
 }
 
-/** True when every result in the run differs — the caller was learning. */
-function resultsAllDistinct(results: (string | undefined)[]): boolean {
-  const present = results.filter((r) => r !== undefined).map(normaliseResult);
-  if (present.length < 2) return false;
-  return new Set(present).size === present.length;
+/**
+ * Did every call in the run come back the same?
+ *
+ * This is the "no new information" half of the definition, and it has to be
+ * *identical output*, not merely "not all different". The weaker test fired on
+ * `[FAIL, FAIL, OK]` — a run whose last call plainly returned something new.
+ *
+ * A missing result is **not** treated as matching. We cannot read what we did
+ * not capture, and CLAUDE.md is explicit that `unknown` beats guessing: a run
+ * whose output we cannot compare is not reported as a loop.
+ */
+function sameOutputThroughout(results: (string | undefined)[], calls: number): boolean {
+  if (results.length < calls) return false; // a result we never saw
+  const normalised = results.map(normaliseResult);
+  if (normalised.some((r) => r === '')) return false; // empty tells us nothing
+  return new Set(normalised).size === 1;
 }
 
 export type ToolLoopOptions = { minRepeats?: number };
@@ -206,7 +239,9 @@ export function toolLoop(opts: ToolLoopOptions = {}): Detector {
 
       for (const run of runsOf(ctx.window.events)) {
         if (run.events.length < minRepeats) continue;
-        if (resultsAllDistinct(run.results)) continue;
+        // Identical call AND identical answer. Repeating a call that returns
+        // something new is work, not a loop.
+        if (!sameOutputThroughout(run.results, run.events.length)) continue;
 
         const evidence: TurnRef[] = run.events.map((e) => ({
           uuid: e.uuid,
