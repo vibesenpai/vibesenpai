@@ -286,11 +286,20 @@ function tokensOf(usage: Partial<Usage> | undefined): Event['tokens'] | undefine
   const input = num(usage.input_tokens);
   const output = num(usage.output_tokens);
   const cacheRead = num(usage.cache_read_input_tokens);
-  if (input === undefined && output === undefined && cacheRead === undefined) return undefined;
+  const cacheCreation = num(usage.cache_creation_input_tokens);
+  if (
+    input === undefined &&
+    output === undefined &&
+    cacheRead === undefined &&
+    cacheCreation === undefined
+  ) {
+    return undefined;
+  }
   return {
     ...(input !== undefined ? { input } : {}),
     ...(output !== undefined ? { output } : {}),
     ...(cacheRead !== undefined ? { cacheRead } : {}),
+    ...(cacheCreation !== undefined ? { cacheCreation } : {}),
   };
 }
 

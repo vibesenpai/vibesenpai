@@ -20,7 +20,6 @@ import { basename, dirname } from 'node:path';
 import { parse } from '../src/parsers/index.ts';
 import { redact } from '../src/redact.ts';
 import { buildSkeletons, render } from '../src/skeleton.ts';
-import { learn, lookupFor, emptyRegistry } from '../src/verify.ts';
 import { runDetectors, detectorsFor, countDenominators } from '../src/detect/index.ts';
 import type { Event } from '../src/types.ts';
 
@@ -66,7 +65,7 @@ const realRatios: number[] = [];
  * Detector results, kept in the gate rather than measured by hand.
  *
  * This was a manual step and it showed: a path-dedup fix changed `editCount`
- * from 1,155 to 791 and `verifiedEditCount` from 238 to 112, and the only
+ * from 1,155 to 791, and the only
  * reason anyone noticed was being asked whether the corpus had been re-run.
  * Detectors are the product now, so their behaviour belongs in the same gate
  * that guards the parser.
@@ -134,29 +133,31 @@ for (const f of files) {
 }
 
 // ── Detectors ───────────────────────────────────────────────────────────────
-// Verification is learned first, over every session, exactly as the product
-// does it — a cold project must stay cold here too.
-let registry = emptyRegistry();
-for (const s of parsedSessions) registry = learn(registry, s.events, s.project, 'corpus');
-
+// `detectorFindings` is 0 while the registry is empty after the 2026-10-19
+// reset, and the gate still runs: it is what proves the runner, denominators
+// and token totals hold across every pinned corpus, and it is what will catch
+// the first real finding moving the baseline off zero.
 const detectors = detectorsFor('all');
 const byDimension: Record<string, number> = {};
 let detFindings = 0;
 let detFailures = 0;
 let editCount = 0;
-let verifiedEditCount = 0;
+let failedCallCount = 0;
 let unclassifiedTouchCount = 0;
+let outputTokens = 0;
+let cacheCreationTokens = 0;
 
 for (const s of parsedSessions) {
-  const verification = lookupFor(registry, s.project);
-  const d = countDenominators(s.events, verification);
+  const d = countDenominators(s.events);
   editCount += d.editCount;
-  verifiedEditCount += d.verifiedEditCount;
+  failedCallCount += d.failedCallCount;
   unclassifiedTouchCount += d.unclassifiedTouchCount;
+  outputTokens += d.tokens.output;
+  cacheCreationTokens += d.tokens.cacheCreation;
 
   const res = await runDetectors({
     events: s.events,
-    session: { sessionId: 'corpus', project: s.project, verification, live: false },
+    session: { sessionId: 'corpus', project: s.project, live: false },
     now: 'corpus',
     detectors,
   });
@@ -208,9 +209,10 @@ console.log(`\ndetectors: ${detectors.length} run over ${parsedSessions.length} 
 console.log(`  scopes: ${detectors.map((d) => `${d.dimension}=${d.scope}`).join('  ')}`);
 console.log(`  findings ${detFindings} ${JSON.stringify(byDimension)} · detector failures ${detFailures}`);
 console.log(
-  `  edits ${editCount} · verified ${verifiedEditCount} · unclassified touches ${unclassifiedTouchCount}`,
+  `  edits ${editCount} · harness-declared failures ${failedCallCount} · ` +
+    `unclassified touches ${unclassifiedTouchCount}`,
 );
-console.log(`  verification learned: ${Object.keys(registry.entries).length} commands`);
+console.log(`  tokens: output ${outputTokens} · cache creation ${cacheCreationTokens}`);
 
 // ── Baseline gate ───────────────────────────────────────────────────────────
 const actual: Record<string, number> = {
@@ -228,8 +230,10 @@ const actual: Record<string, number> = {
   detectorFindings: detFindings,
   detectorFailures: detFailures,
   editCount,
-  verifiedEditCount,
+  failedCallCount,
   unclassifiedTouchCount,
+  outputTokens,
+  cacheCreationTokens,
 };
 
 const drift = Object.entries(manifest.baseline)

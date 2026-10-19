@@ -142,8 +142,48 @@ export type Event = {
   /** Short and redacted. Never raw file contents. */
   textSummary?: string;
 
-  tokens?: { input?: number; output?: number; cacheRead?: number };
+  /**
+   * The harness's own billing record, copied verbatim off `message.usage`.
+   *
+   * The only signal in the format that is exact, universal, and free of text:
+   * it is identical for Python, Rust, an MCP server or a custom agent, because
+   * it describes the API call rather than the work. Populated on **100% of
+   * assistant messages** across the 1,139-session corpus.
+   *
+   * `cacheCreation` is the load-bearing one. `cacheRead` re-counts the entire
+   * prefix on every call, so it grows quadratically with turn count and any
+   * ratio built on it is pinned near 1 by construction — measured
+   * `read/(read+creation)` runs p10 0.901 to p90 0.985, i.e. an "outlier" is
+   * just a short session. `cacheCreation` is what re-ingesting an invalidated
+   * prefix actually cost, and it spreads 7.5x p90/p50. See `GRAVEYARD.md`.
+   */
+  tokens?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheCreation?: number;
+  };
 };
+
+/**
+ * The only fields a detector may read.
+ *
+ * ── Why this is a type and not a convention ─────────────────────────────────
+ *
+ * `command`, `pattern` and `textSummary` are text, and a rule over text is a
+ * rule over an open space: thousands of toolchains, infinite phrasings, and no
+ * way to know what was missed. Three detectors were built on them and produced
+ * **5 true positives against ~25 false positives** over 1,139 real sessions.
+ *
+ * Omitting the fields makes `e.command` in a detector a build failure rather
+ * than a review comment — the same move as `test/source-hygiene.test.ts`
+ * making an invisible character fail the build.
+ *
+ * A harness string can still *name* a sub-reason, but the **runner** attaches
+ * it to an already-valid finding (`src/detect/labels.ts`). Detection never
+ * depends on it, so a harness change loses a label and never a finding.
+ */
+export type StructuralEvent = Omit<Event, 'command' | 'pattern' | 'textSummary'>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TurnRef — evidence pointers. By uuid, never by position.

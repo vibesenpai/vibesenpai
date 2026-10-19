@@ -1,16 +1,28 @@
 /**
  * The detector registry and the runner.
  *
- * ── Denominators are computed here, not by detectors ─────────────────────────
+ * ── Detectors get a text-free view ──────────────────────────────────────────
  *
- * Every rate the running score displays needs a denominator — edits, turns,
- * success claims. Those are **per-session totals**, while detectors run
- * per-window. If each detector incremented a counter, a run that stopped
- * halfway would bank partial findings against partial denominators, and every
- * rate would be quietly wrong in a way no output would reveal.
+ * `DetectorContext.events` is `StructuralEvent[]`, so a detector cannot read
+ * `command`, `pattern` or `textSummary` — it is a build failure, not a review
+ * comment. The runner still sees whole `Event`s, because it is the runner that
+ * attaches a harness-owned label (`./labels.ts`) to an already-valid finding.
+ * Detection therefore never depends on text; a harness change loses a label.
  *
- * So the runner makes one pass over the session's events for denominators, and
- * detectors only ever emit candidates.
+ * ── Denominators are computed here, not by detectors ────────────────────────
+ *
+ * Every rate the running score displays needs a denominator. Those are
+ * **per-session totals**, while detectors run per-window. If each detector
+ * incremented a counter, a run that stopped halfway would bank partial findings
+ * against partial denominators, and every rate would be quietly wrong in a way
+ * no output would reveal.
+ *
+ * ── Aggregates are metadata, not findings ───────────────────────────────────
+ *
+ * A session-wide number has no turn to point at, and CLAUDE.md is explicit that
+ * nothing is reported as a number without evidence behind it. So the token
+ * totals live here, beside the other denominators, and are shown as the context
+ * a reader needs — never as a finding, and never as a score.
  *
  * ── Failure isolation ───────────────────────────────────────────────────────
  *
@@ -24,25 +36,27 @@ import { collect, type Candidate } from '../finding.ts';
 import { buildWindows, threadsOf, type SkeletonOptions, type Window } from '../skeleton.ts';
 import type { Event, Finding, Preset } from '../types.ts';
 import type { Detector, DetectorContext, SessionFacts } from './types.ts';
-import { hasSuccessClaim } from './claims.ts';
 import { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../edits.ts';
-import type { VerificationLookup } from '../verify.ts';
-import { toolLoop } from './tool-loop.ts';
-import { revertChurn } from './revert-churn.ts';
-import { inaccurateSelfReport } from './inaccurate-self-report.ts';
 
 export type { Detector, DetectorContext, SessionFacts } from './types.ts';
-export { isSuccessClaim, hasSuccessClaim } from './claims.ts';
 // Re-exported so existing callers and tests keep one import site.
 export { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../edits.ts';
 
 /**
- * All detectors, in the order PLAN.md specifies: cheapest and most certain
- * first, so the framework is exercised by structurally checkable rules before
- * the lexical ones arrive.
+ * All detectors.
+ *
+ * **Empty by design, as of the 2026-10-19 reset.** The three that used to be
+ * here read command verbs, result vocabulary and assistant prose to decide, and
+ * over 1,139 real sessions produced 5 true positives against ~25 false
+ * positives. They are gone; `GRAVEYARD.md` holds the evidence.
+ *
+ * The replacements land one at a time, each with its probe in
+ * `scripts/measure-dimensions.ts`, in order of how clearly they can point at a
+ * turn: `edit_retry`, `file_churn`, `context_reingest`, `redundant_call`. A
+ * detector that disagrees with the measurement that justified it is wrong.
  */
 export function allDetectors(): Detector[] {
-  return [toolLoop(), revertChurn(), inaccurateSelfReport()];
+  return [];
 }
 
 const PRESET_RANK: Record<Preset, number> = { core: 0, standard: 1, all: 2 };
@@ -52,7 +66,10 @@ const PRESET_RANK: Record<Preset, number> = { core: 0, standard: 1, all: 2 };
  *
  * `core` is the trust-building set. A dimension joins it only when it is
  * `certain` or `high` and needs no model — the first finding a stranger sees
- * decides whether they keep the tool.
+ * decides whether they keep the tool. Measured frequency is **not** a reason to
+ * promote: `redundant_call` fires on 0.4% of sessions and earns its place on
+ * never being wrong, while the three detectors that led `core` on assumed
+ * frequency were the ones removed.
  */
 export function detectorsFor(preset: Preset, only?: string[]): Detector[] {
   const wanted = only === undefined ? undefined : new Set(only);
@@ -62,13 +79,33 @@ export function detectorsFor(preset: Preset, only?: string[]): Detector[] {
   });
 }
 
+/**
+ * What a session cost, exactly as the harness billed it.
+ *
+ * Populated on 100% of assistant messages across the corpus, and identical in
+ * meaning for every language and every tool — it describes the API call, not
+ * the work. This is the one place a number needs no interpretation.
+ *
+ * `cacheRead` is recorded but deliberately **not** turned into a ratio: it
+ * re-counts the whole prefix on every call, so it grows with the square of the
+ * turn count and `read/(read+creation)` is pinned near 1 by construction
+ * (measured p10 0.901 to p90 0.985). `cacheCreation` is what re-ingesting an
+ * invalidated prefix actually cost, and it spreads 7.5x p90/p50.
+ */
+export type TokenTotals = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+};
+
 /** Per-session totals every rate divides by. One pass, never incremental. */
 export type Denominators = {
   turnCount: number;
   editCount: number;
   toolCallCount: number;
-  verifiedEditCount: number;
-  successClaimCount: number;
+  /** Tool results the harness itself marked failed. Structural, never inferred. */
+  failedCallCount: number;
   /**
    * File-touching calls we could **not** classify as an edit or a read.
    *
@@ -76,26 +113,19 @@ export type Denominators = {
    * visible instead of silently undercounting. `doctor` surfaces it.
    */
   unclassifiedTouchCount: number;
+  tokens: TokenTotals;
 };
 
-export function countDenominators(
-  events: Event[],
-  verification: VerificationLookup,
-): Denominators {
+export function countDenominators(events: Event[]): Denominators {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
   const d: Denominators = {
     turnCount: 0,
     editCount: 0,
     toolCallCount: 0,
-    verifiedEditCount: 0,
-    successClaimCount: 0,
+    failedCallCount: 0,
     unclassifiedTouchCount: 0,
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
   };
-
-  // An edit is "verified" when a verification command runs after it. Tracked as
-  // a pending set rather than a per-edit scan, so one test run can clear every
-  // edit that preceded it — which is what actually happened.
-  let pendingEdits = 0;
 
   // Files an edit tool already claimed, so a snapshot confirming the same edit
   // does not count it twice.
@@ -112,6 +142,13 @@ export function countDenominators(
   for (const e of sorted) {
     if (e.turnType === 'user_prompt') d.turnCount++;
 
+    if (e.tokens !== undefined) {
+      d.tokens.input += e.tokens.input ?? 0;
+      d.tokens.output += e.tokens.output ?? 0;
+      d.tokens.cacheRead += e.tokens.cacheRead ?? 0;
+      d.tokens.cacheCreation += e.tokens.cacheCreation ?? 0;
+    }
+
     const evidence = editEvidenceOf(e);
     if (evidence === 'harness') {
       // Tool-agnostic confirmation. Only counts files no edit tool already
@@ -119,7 +156,6 @@ export function countDenominators(
       for (const path of e.changedFiles ?? []) {
         if (alreadyCredited(path)) continue;
         d.editCount++;
-        pendingEdits++;
       }
     }
 
@@ -127,22 +163,30 @@ export function countDenominators(
       d.toolCallCount++;
       if (evidence === 'tool') {
         d.editCount++;
-        pendingEdits++;
         if (e.filePath !== undefined) creditedByTool.push(e.filePath);
       } else if (evidence === 'probable') {
         // Not an edit for rate purposes — we cannot tell a write from a read.
         d.unclassifiedTouchCount++;
-      } else if (verification.isVerification(e.command)) {
-        d.verifiedEditCount += pendingEdits;
-        pendingEdits = 0;
       }
     }
-    if (e.turnType === 'assistant_msg' && e.textSummary !== undefined) {
-      if (hasSuccessClaim(e.textSummary)) d.successClaimCount++;
-    }
+
+    if (e.turnType === 'tool_result' && callFailed(e)) d.failedCallCount++;
   }
 
   return d;
+}
+
+/**
+ * Did the harness say this call failed?
+ *
+ * Purely structural, and it stays that way. A careful text pattern was tried
+ * here and was actively wrong: it read `0 errors, 0 warnings` as a failure, and
+ * in 26 of 38 cases where the harness reported a non-zero exit it saw nothing
+ * wrong at all. The harness's own verdict is the only one worth having.
+ */
+export function callFailed(e: Event): boolean {
+  if (e.isError === true) return true;
+  return e.exitCode !== undefined && e.exitCode !== 0;
 }
 
 export type RunInput = {
@@ -224,7 +268,7 @@ export async function runDetectors(input: RunInput): Promise<RunResult> {
       project: input.session.project,
       now,
     }),
-    denominators: countDenominators(input.events, input.session.verification),
+    denominators: countDenominators(input.events),
     windows: windows.length,
     failures,
   };

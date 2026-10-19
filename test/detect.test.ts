@@ -5,17 +5,13 @@ import {
   runDetectors,
   detectorsFor,
   countDenominators,
+  allDetectors,
   editEvidenceOf,
   EDIT_TOOLS,
 } from '../src/detect/index.ts';
-import { staticLookup, coldLookup } from '../src/verify.ts';
-import { toolLoop, runsOf, signatureOf } from '../src/detect/tool-loop.ts';
-import { revertChurn, destructiveKind } from '../src/detect/revert-churn.ts';
-import { inaccurateSelfReport } from '../src/detect/inaccurate-self-report.ts';
-import { hasSuccessClaim } from '../src/detect/claims.ts';
 import { collect, mergeFindings, materialise, findingId, subjectIdOf } from '../src/finding.ts';
 import type { Event, Finding } from '../src/types.ts';
-import type { SessionFacts } from '../src/detect/types.ts';
+import type { Detector, SessionFacts } from '../src/detect/types.ts';
 
 let seq = 0;
 function ev(over: Partial<Event> & Pick<Event, 'turnType'>): Event {
@@ -35,7 +31,6 @@ function ev(over: Partial<Event> & Pick<Event, 'turnType'>): Event {
 const facts = (over: Partial<SessionFacts> = {}): SessionFacts => ({
   sessionId: 's1',
   project: 'proj',
-  verification: staticLookup(['npm test']),
   live: false,
   ...over,
 });
@@ -177,261 +172,161 @@ describe('finding — the merge that fixes M1 double-counting', () => {
   });
 });
 
-describe('tool_loop — structural, hence certain', () => {
-  const run = async (events: Event[], minRepeats = 3) =>
-    (await runDetectors({
-      events,
-      session: facts(),
-      detectors: [toolLoop({ minRepeats })],
-      now: '2026-10-18T00:00:00.000Z',
-    })).findings;
-
-  it('fires on three identical calls with nothing between', async () => {
-    const f = await run([
-      bash('npm test'), result('FAIL'),
-      bash('npm test'), result('FAIL'),
-      bash('npm test'), result('FAIL'),
-    ]);
-    expect(f).toHaveLength(1);
-    expect(f[0]!.dimension).toBe('tool_loop');
-    expect(f[0]!.subject).toBe('Bash npm test');
-    expect(f[0]!.occurrences).toBe(3);
-    expect(f[0]!.confidence).toBe('certain');
-  });
-
-  it('does NOT fire when an edit sits between — that is fail_fix_fail', async () => {
-    // Something changed, so the retry was informed. Different dimension,
-    // different advice, and it needs an outcome (M2b).
-    const f = await run([
-      bash('npm test'), result('FAIL'),
-      edit('src/a.ts'),
-      bash('npm test'), result('FAIL'),
-      edit('src/a.ts'),
-      bash('npm test'), result('FAIL'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('does NOT fire when every result differs — the caller was learning', async () => {
-    // The polling guard. A growing log or changing status is new information,
-    // which is precisely what "no new information" excludes.
-    const f = await run([
-      bash('curl /health'), result('starting'),
-      bash('curl /health'), result('migrating'),
-      bash('curl /health'), result('ready'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('still fires when polling returns the same answer every time', async () => {
-    const f = await run([
-      bash('curl /health'), result('not ready'),
-      bash('curl /health'), result('not ready'),
-      bash('curl /health'), result('not ready'),
-    ]);
-    expect(f).toHaveLength(1);
-  });
-
-  it('breaks the run at a user prompt — new instruction, fresh attempt', async () => {
-    const f = await run([
-      bash('npm test'), result('FAIL'),
-      bash('npm test'), result('FAIL'),
-      ev({ turnType: 'user_prompt', textSummary: 'try something else' }),
-      bash('npm test'), result('FAIL'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('continues across assistant prose, which changes nothing', async () => {
-    const f = await run([
-      bash('npm test'), result('FAIL'),
-      ev({ turnType: 'assistant_msg', textSummary: 'let me try that again' }),
-      bash('npm test'), result('FAIL'),
-      ev({ turnType: 'assistant_msg', textSummary: 'once more' }),
-      bash('npm test'), result('FAIL'),
-    ]);
-    expect(f).toHaveLength(1);
-  });
-
-  it('respects a configurable threshold', async () => {
-    const two = [bash('npm test'), result('FAIL'), bash('npm test'), result('FAIL')];
-    expect(await run(two, 3)).toHaveLength(0);
-    expect(await run(two, 2)).toHaveLength(1);
-  });
-
-  it('does not conflate two different commands', () => {
-    const rs = runsOf([bash('npm test'), result(), bash('npm run build'), result()]);
-    expect(rs).toHaveLength(0); // neither repeated
-  });
-
-  it('tells apart two calls to a tool whose arguments we cannot name', async () => {
-    // The measured false positive: `command`/`filePath`/`pattern` cover Bash,
-    // Read, Edit and Grep only, so six separate TaskCreate calls once looked
-    // like one call repeated six times — at `certain` confidence.
-    const f = await run([
-      opaque('TaskCreate', 'task one'), result('created #1'),
-      opaque('TaskCreate', 'task two'), result('created #2'),
-      opaque('TaskCreate', 'task three'), result('created #3'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('still fires when the SAME opaque call is genuinely repeated', async () => {
-    const f = await run([
-      opaque('TaskUpdate', 'same args'), result('ok'),
-      opaque('TaskUpdate', 'same args'), result('ok'),
-      opaque('TaskUpdate', 'same args'), result('ok'),
-    ]);
-    expect(f).toHaveLength(1);
-    expect(f[0]!.subject).toMatch(/^TaskUpdate #/); // opaque but stable
-  });
-
-  it('skips a call with no arguments at all rather than assuming sameness', async () => {
-    const noArgs = (): Event => ev({ turnType: 'tool_use', toolName: 'Whoami' });
-    const f = await run([noArgs(), result('a'), noArgs(), result('a'), noArgs(), result('a')]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('does not flag a polling tool for polling', async () => {
-    // The only tool_loop finding across 227 real sessions, and it was wrong:
-    // calling BashOutput three times on a running job is the tool working.
-    const poll = (): Event => ev({ turnType: 'tool_use', toolName: 'BashOutput', argHash: hash('bash_1') });
-    const f = await run([
-      poll(), result('<status>running</status>'),
-      poll(), result('<status>running</status>'),
-      poll(), result('<status>running</status>'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('compares results after normalising volatile parts', async () => {
-    // Durations and counts differ every run, so without normalisation every
-    // repeat looks like new information: 0 of 19 real runs survived that guard.
-    const f = await run([
-      bash('npm test'), result('FAIL 3 tests in 1.21s'),
-      bash('npm test'), result('FAIL 3 tests in 1.47s'),
-      bash('npm test'), result('FAIL 3 tests in 0.98s'),
-    ]);
-    expect(f).toHaveLength(1);
-  });
-});
-
-describe('revert_churn — a neutral fact, not a failure', () => {
-  const run = async (events: Event[]) =>
-    (await runDetectors({
-      events,
-      session: facts(),
-      detectors: [revertChurn()],
-      now: '2026-10-18T00:00:00.000Z',
-    })).findings;
-
-  it('reports a hard reset after edits as discarded work', async () => {
-    const f = await run([edit('src/a.ts'), bash('git reset --hard HEAD~1')]);
-    expect(f).toHaveLength(1);
-    expect(f[0]!.subject).toBe('git reset --hard');
-    // Neutral: discarding a deliberate spike is good engineering.
-    expect(f[0]!.polarity).toBe('neutral');
-  });
-
-  it('does NOT fire when the session edited nothing', async () => {
-    // Somebody tidying their tree before starting has not discarded this
-    // session's work.
-    const f = await run([bash('git reset --hard HEAD~1')]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('recognises each destructive form', () => {
-    expect(destructiveKind('git checkout -- src/a.ts')).toBe('git checkout --');
-    expect(destructiveKind('git restore src/a.ts')).toBe('git restore');
-    expect(destructiveKind('git reset --hard')).toBe('git reset --hard');
-    expect(destructiveKind('git stash drop')).toBe('git stash drop');
-    expect(destructiveKind('git clean -fd')).toBe('git clean -f');
-  });
-
-  it('leaves non-destructive git alone', () => {
-    for (const cmd of [
-      'git status',
-      'git checkout main',
-      'git reset HEAD~1',
-      'git stash',
-      'git diff',
-    ]) {
-      expect(destructiveKind(cmd)).toBeUndefined();
-    }
-  });
-});
-
 describe('denominators — one pass, never incremental', () => {
   // Detectors run per window; these are per session. If a detector incremented
   // them, a run stopped halfway would bank partial findings against partial
   // denominators and every rate would be silently wrong.
   it('counts turns, edits and tool calls', () => {
-    const d = countDenominators(
-      [
-        ev({ turnType: 'user_prompt', textSummary: 'go' }),
-        edit('src/a.ts'),
-        bash('npm test'),
-      ],
-      staticLookup(['npm test']),
-    );
+    const d = countDenominators([
+      ev({ turnType: 'user_prompt', textSummary: 'go' }),
+      edit('src/a.ts'),
+      bash('npm test'),
+    ]);
     expect(d).toMatchObject({ turnCount: 1, editCount: 1, toolCallCount: 2 });
   });
 
-  it('credits every edit a later verification covers', () => {
-    // One test run clears the edits that preceded it, which is what happened.
-    const d = countDenominators(
-      [edit('a.ts'), edit('b.ts'), bash('npm test')],
-      staticLookup(['npm test']),
+  it('counts only failures the harness itself declared', () => {
+    // Structural, and it stays that way: a text pattern tried here read
+    // `0 errors, 0 warnings` as a failure, and missed 26 of 38 real non-zero
+    // exits. The harness's own verdict is the only one worth having.
+    const d = countDenominators([
+      ev({ turnType: 'tool_result', isError: true }),
+      ev({ turnType: 'tool_result', exitCode: 1 }),
+      ev({ turnType: 'tool_result', exitCode: 0, textSummary: 'error: 0 errors, 0 warnings' }),
+      ev({ turnType: 'tool_result', textSummary: 'FAILED — 3 tests broken' }),
+    ]);
+    expect(d.failedCallCount).toBe(2);
+  });
+
+  it('sums the token totals the harness billed', () => {
+    const d = countDenominators([
+      ev({ turnType: 'assistant_msg', tokens: { input: 10, output: 5, cacheRead: 900, cacheCreation: 40 } }),
+      ev({ turnType: 'assistant_msg', tokens: { input: 2, output: 7, cacheRead: 950, cacheCreation: 10 } }),
+      ev({ turnType: 'user_prompt' }),
+    ]);
+    expect(d.tokens).toEqual({ input: 12, output: 12, cacheRead: 1850, cacheCreation: 50 });
+  });
+
+  it('records cacheRead without ever making it a ratio', () => {
+    // `cacheRead` re-counts the whole prefix on every call, so it grows with
+    // the square of the turn count: read/(read+creation) measured p10 0.901 to
+    // p90 0.985 across the corpus, i.e. pinned near 1 by construction. It is
+    // kept as a total and never divided. See GRAVEYARD.md.
+    const short = countDenominators([
+      ev({ turnType: 'assistant_msg', tokens: { cacheRead: 100, cacheCreation: 100 } }),
+    ]);
+    const long = countDenominators(
+      Array.from({ length: 20 }, () =>
+        ev({ turnType: 'assistant_msg', tokens: { cacheRead: 100, cacheCreation: 0 } }),
+      ),
     );
-    expect(d.verifiedEditCount).toBe(2);
+    const ratio = (d: ReturnType<typeof countDenominators>): number =>
+      d.tokens.cacheRead / (d.tokens.cacheRead + d.tokens.cacheCreation);
+    // The longer session scores "better" purely for being longer. Which is why
+    // no detector may use it.
+    expect(ratio(long)).toBeGreaterThan(ratio(short));
+    expect(Object.keys(countDenominators([]))).not.toContain('cacheHitRate');
+  });
+});
+
+/**
+ * A detector with no rule of its own.
+ *
+ * The runner's behaviour — failure isolation, scope dispatch, skeleton delivery
+ * — is framework, not detection. Testing it through a real detector made these
+ * tests break when that detector was removed, which is backwards: the framework
+ * outlives any rule that runs on it.
+ */
+function stub(over: Partial<Detector> = {}): Detector {
+  return {
+    dimension: 'stub',
+    scope: 'session',
+    polarity: 'neutral',
+    confidence: 'certain',
+    method: 'RULE',
+    requiresOutcome: false,
+    denominator: 'per-session',
+    preset: 'core',
+    describe: (subject, occurrences) =>
+      occurrences === 1 ? `stub matched ${subject}` : `stub matched ${subject} ${occurrences} times`,
+    detect: async () => [],
+    ...over,
+  };
+}
+
+/** Emits one candidate per span, named for the actor whose span it was. */
+const perSpan = (over: Partial<Detector> = {}): Detector =>
+  stub({
+    detect: async (ctx) => {
+      const calls = ctx.events.filter((e) => e.turnType === 'tool_use');
+      if (calls.length === 0) return [];
+      const first = calls[0]!;
+      return [
+        {
+          dimension: 'stub',
+          subject: first.sidechainId ?? 'main',
+          evidence: calls.map((e) => ({ uuid: e.uuid, sessionId: e.sessionId, seq: e.seq })),
+          confidence: 'certain' as const,
+          method: 'RULE' as const,
+          polarity: 'neutral' as const,
+          requiresOutcome: false,
+          artifacts: [],
+        },
+      ];
+    },
+    ...over,
   });
 
-  it('leaves edits after the last verification uncredited', () => {
-    const d = countDenominators(
-      [edit('a.ts'), bash('npm test'), edit('b.ts')],
-      staticLookup(['npm test']),
-    );
-    expect(d.verifiedEditCount).toBe(1);
-  });
-
-  it('counts success claims narrowly', () => {
-    // This divides `inaccurate_self_report`; a loose pattern inflates the
-    // denominator and makes the rate look better than it is.
-    const claims = ['Fixed — all tests pass now.', 'Done.', 'That works now'];
-    const notClaims = ['Let me check whether that passes', 'This might be fixed by', 'Running tests'];
-    for (const t of claims) {
-      expect(countDenominators([ev({ turnType: 'assistant_msg', textSummary: t })], coldLookup()).successClaimCount).toBe(1);
-    }
-    for (const t of notClaims) {
-      const n = countDenominators([ev({ turnType: 'assistant_msg', textSummary: t })], coldLookup()).successClaimCount;
-      expect(n, `should not count: ${t}`).toBe(0);
-    }
-  });
-
-  it('credits nothing when the project is cold', () => {
-    // "Cannot tell" is a different claim from "nothing was verified".
-    expect(countDenominators([edit('a.ts'), bash('npm test')], coldLookup()).verifiedEditCount).toBe(0);
+describe('a detector cannot read text — enforced by the compiler', () => {
+  it('omits command, pattern and textSummary from the detector view', () => {
+    // The whole reset in one assertion. If any of these fields becomes
+    // readable again, the expect-error directives below go unused and the
+    // BUILD fails — which is the point: three detectors read text to decide
+    // and produced 5 true positives against ~25 false positives over 1,139
+    // real sessions. See GRAVEYARD.md.
+    //
+    // (Written without the directive's own spelling, because a comment
+    // containing it IS one — that mistake cost a confusing build error here.)
+    const probe = stub({
+      detect: async (ctx) => {
+        const e = ctx.events[0];
+        if (e !== undefined) {
+          // @ts-expect-error — `command` is not on StructuralEvent.
+          void e.command;
+          // @ts-expect-error — `pattern` is not on StructuralEvent.
+          void e.pattern;
+          // @ts-expect-error — `textSummary` is not on StructuralEvent.
+          void e.textSummary;
+          // Structural fields are of course readable.
+          void e.argHash;
+          void e.isError;
+          void e.filePath;
+          void e.tokens;
+        }
+        return [];
+      },
+    });
+    expect(probe.dimension).toBe('stub');
   });
 });
 
 describe('runner — isolation and presets', () => {
-  it('counts a throwing detector instead of losing the window', async () => {
+  it('counts a throwing detector instead of losing the others findings', async () => {
     // Principle Zero: one detector's bug must not cost the others' findings.
-    const broken = {
-      ...toolLoop(),
+    const broken = stub({
       dimension: 'broken',
       detect: async () => {
         throw new Error('boom');
       },
-    };
+    });
     const r = await runDetectors({
-      events: [bash('npm test'), result('FAIL'), bash('npm test'), result('FAIL'), bash('npm test'), result('FAIL')],
+      events: [bash('npm test'), result('FAIL'), bash('npm test')],
       session: facts(),
-      detectors: [broken, toolLoop()],
+      detectors: [broken, perSpan()],
       now: '2026-10-18T00:00:00.000Z',
     });
     expect(r.failures['broken']).toBeGreaterThan(0);
-    expect(r.findings).toHaveLength(1); // tool_loop still reported
+    expect(r.findings).toHaveLength(1); // the other detector still reported
   });
 
   it('core is a subset of all', () => {
@@ -451,475 +346,133 @@ describe('runner — isolation and presets', () => {
   });
 
   it('restricts to an explicit dimension list', () => {
-    expect(detectorsFor('all', ['tool_loop']).map((d) => d.dimension)).toEqual(['tool_loop']);
+    const only = detectorsFor('all', ['nothing-registered']);
+    expect(only).toEqual([]);
   });
 
-  it('every detector describes itself in prose, never as a bare count', () => {
+  it('every registered detector describes itself in prose, never as a bare count', () => {
     // Nudges need a short description, not a number. The singular form names
-    // the subject; the plural may omit it, because quoting one claim when three
-    // were made would misrepresent the finding.
-    for (const d of detectorsFor('all')) {
-      const one = d.describe('subject-here', 1);
-      expect(one, d.dimension).toContain('subject-here');
-
+    // the subject; the plural may omit it, because quoting one instance when
+    // three occurred would misrepresent the finding.
+    for (const d of [...detectorsFor('all'), stub()]) {
+      expect(d.describe('subject-here', 1), d.dimension).toContain('subject-here');
       const many = d.describe('subject-here', 3);
       expect(many.length, d.dimension).toBeGreaterThan(20);
-      // Not just a count: there must be words carrying the meaning.
-      expect(many.replace(/[^a-z ]/gi, '').trim().split(/\s+/).length, d.dimension)
-        .toBeGreaterThan(3);
+      expect(many.replace(/[^a-z ]/gi, '').trim().split(/\s+/).length, d.dimension).toBeGreaterThan(3);
     }
   });
-});
 
-describe('inaccurate_self_report — the transcript disagreeing with itself', () => {
-  const run = async (events: Event[]) =>
-    (await runDetectors({
-      events,
-      session: facts(),
-      detectors: [inaccurateSelfReport()],
-      now: '2026-10-18T00:00:00.000Z',
-    })).findings;
-
-  const failed = (text: string): Event =>
-    ev({ turnType: 'tool_result', isError: true, textSummary: text, ...(outputDigest(text) !== undefined ? { outHash: outputDigest(text) as string } : {}) });
-  const passed = (text: string): Event =>
-    ev({ turnType: 'tool_result', exitCode: 0, textSummary: text, ...(outputDigest(text) !== undefined ? { outHash: outputDigest(text) as string } : {}) });
-  const says = (text: string): Event => ev({ turnType: 'assistant_msg', textSummary: text });
-
-  it('fires when success is claimed over a failing check', async () => {
-    const f = await run([
-      bash('npm test'),
-      failed('FAIL 2 tests'),
-      says('Fixed — all tests pass now.'),
-    ]);
-    expect(f).toHaveLength(1);
-    // `high`, not `certain`: the structural half is certain, but the claim is
-    // matched lexically over an open space with nothing behavioural confirming
-    // it. Confidence tracks the weakest link.
-    expect(f[0]!.confidence).toBe('high');
-    expect(f[0]!.method).toBe('LEX');
-    expect(f[0]!.evidence).toHaveLength(2); // the failure AND the claim
-  });
-
-  it('does not fire when the last check passed', async () => {
-    const f = await run([bash('npm test'), passed('3 passed'), says('All tests pass now.')]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('does not fire when no check ran — that is no_verification', async () => {
-    // Reporting one event under two dimensions would double-count it in the
-    // running score and make both rates wrong.
-    const f = await run([edit('src/a.ts'), says('Done.')]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('skips a SCOPED claim, which can be true while other tests fail', async () => {
-    // The spec's one real false-positive path. Without subject-to-failure
-    // matching we cannot tell a true scoped claim from a false global one.
-    const f = await run([
-      bash('npm test'),
-      failed('FAIL 2 tests'),
-      says('Fixed the import error — two unrelated tests still fail.'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('skips a hedged claim — hedging is not a claim', async () => {
-    const f = await run([
-      bash('npm test'),
-      failed('FAIL'),
-      says('That might be fixed by casting earlier.'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('forgets the failure after a new user prompt', async () => {
-    // A new instruction means the old failure may not be what is being claimed.
-    const f = await run([
-      bash('npm test'),
-      failed('FAIL'),
-      ev({ turnType: 'user_prompt', textSummary: 'leave that, do something else' }),
-      says('Done.'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('reports one finding per contradiction, not per claim word', async () => {
-    const f = await run([
-      bash('npm test'),
-      failed('FAIL'),
-      says('Fixed. Done. Everything works.'),
-    ]);
-    expect(f).toHaveLength(1);
-  });
-
-  it('agrees with the denominator about what a claim is', async () => {
-    // If the two disagreed, the rate would divide two different populations —
-    // and look perfectly reasonable while being meaningless.
-    const text = 'Fixed — all tests pass now.';
-    expect(hasSuccessClaim(text)).toBe(true);
-    const f = await run([bash('npm test'), failed('FAIL'), says(text)]);
-    expect(f).toHaveLength(1);
+  it('registers no detector yet, and says so rather than pretending', () => {
+    // The 2026-10-19 reset removed all three. This asserts the honest empty
+    // state so a silent zero is never mistaken for "nothing found".
+    expect(allDetectors()).toEqual([]);
   });
 });
 
 describe('occurrences counts instances, not cited turns', () => {
-  // Found by running against real sessions: every false claim reported
-  // `occurrences: 2`, because a contradiction cites both the failing check and
-  // the claim. One false claim is one occurrence.
-  it('counts one occurrence for a two-turn contradiction', async () => {
-    const f = (
-      await runDetectors({
-        events: [
-          bash('npm test'),
-          ev({ turnType: 'tool_result', isError: true, textSummary: 'FAIL' }),
-          ev({ turnType: 'assistant_msg', textSummary: 'Fixed — all tests pass now.' }),
-        ],
-        session: facts(),
-        detectors: [inaccurateSelfReport()],
-        now: '2026-10-18T00:00:00.000Z',
-      })
-    ).findings;
-    expect(f[0]!.occurrences).toBe(1);
-    expect(f[0]!.evidence).toHaveLength(2); // both turns still shown
-    expect(f[0]!.anchors).toHaveLength(1);
-  });
-
-  it('still counts every repeated call for tool_loop', async () => {
-    // Where each cited turn IS an instance, the count is unchanged.
-    const f = (
-      await runDetectors({
-        events: [
-          bash('npm test'), result('FAIL'),
-          bash('npm test'), result('FAIL'),
-          bash('npm test'), result('FAIL'),
-        ],
-        session: facts(),
-        detectors: [toolLoop()],
-        now: '2026-10-18T00:00:00.000Z',
-      })
-    ).findings;
-    expect(f[0]!.occurrences).toBe(3);
-  });
-
-  it('merges anchors by uuid, so a shared turn counts once', () => {
-    const mk = (anchors: string[], evid: string[]) =>
-      materialise({
-        candidate: {
-          dimension: 'inaccurate_self_report',
-          subject: 'fixed',
-          evidence: evid.map((u) => ({ uuid: u, sessionId: 's1' })),
-          anchors: anchors.map((u) => ({ uuid: u, sessionId: 's1' })),
-          confidence: 'certain',
-          method: 'RULE',
-          polarity: 'lower-is-better',
+  // Found by running against real sessions: every finding that cited both a
+  // cause turn and an effect turn reported `occurrences: 2`. One instance is
+  // one occurrence, however many turns it took to evidence it.
+  it('counts one occurrence for a finding evidenced by two turns', async () => {
+    const twoTurnEvidence = stub({
+      detect: async (ctx) => [
+        {
+          dimension: 'stub',
+          subject: 'one instance',
+          evidence: ctx.events.slice(0, 2).map((e) => ({ uuid: e.uuid, sessionId: e.sessionId, seq: e.seq })),
+          anchors: ctx.events.slice(1, 2).map((e) => ({ uuid: e.uuid, sessionId: e.sessionId, seq: e.seq })),
+          confidence: 'certain' as const,
+          method: 'RULE' as const,
+          polarity: 'neutral' as const,
           requiresOutcome: false,
+          artifacts: [],
         },
-        sessionId: 's1',
-        project: 'proj',
-        now: '2026-10-18T00:00:00.000Z',
-      });
-    const merged = mergeFindings(mk(['c1'], ['f1', 'c1']), mk(['c1'], ['f1', 'c1']));
-    expect(merged.occurrences).toBe(1);
-  });
-});
-
-describe('precision guards learned from real false positives', () => {
-  // All three of this framework's first real-data findings were wrong. Each one
-  // is pinned here so it cannot come back.
-  it('does not treat a denied tool permission as a verification failure', async () => {
-    // Real: "All scenarios done." over a result reading "The user doesn't want
-    // to proceed with this tool use." Nothing was tested, so nothing was
-    // contradicted — a category mistake, not a lie.
-    const f = (
-      await runDetectors({
-        events: [
-          bash('npm test'),
-          ev({
-            turnType: 'tool_result',
-            isError: true,
-            textSummary: "The user doesn't want to proceed with this tool use. The tool use was rejected.",
-          }),
-          ev({ turnType: 'assistant_msg', textSummary: 'All scenarios done.' }),
-        ],
-        session: facts(),
-        detectors: [inaccurateSelfReport()],
-        now: '2026-10-18T00:00:00.000Z',
-      })
-    ).findings;
-    expect(f).toHaveLength(0);
-  });
-
-  it('does not flag a claim that names what still fails', async () => {
-    // Real: "We've fixed all the sidechain-related tests. Only one test is
-    // still failing: test_timeline_system_messages." That is accurate, and
-    // flagging it would punish the transparency we want to reward.
-    const f = (
-      await runDetectors({
-        events: [
-          bash('npm test'),
-          ev({ turnType: 'tool_result', isError: true, textSummary: 'FAIL 1 test' }),
-          ev({
-            turnType: 'assistant_msg',
-            textSummary:
-              "We've fixed all the sidechain-related tests. Only one test is still failing: test_timeline.",
-          }),
-        ],
-        session: facts(),
-        detectors: [inaccurateSelfReport()],
-        now: '2026-10-18T00:00:00.000Z',
-      })
-    ).findings;
-    expect(f).toHaveLength(0);
-  });
-
-  it('requires the failure to come from a recognised verification command', async () => {
-    const events = [
-      bash('ls /nope'),
-      ev({ turnType: 'tool_result', isError: true, textSummary: 'No such file' }),
-      ev({ turnType: 'assistant_msg', textSummary: 'Fixed.' }),
-    ];
-    // `ls` is not verification, so the failure cannot contradict the claim.
-    expect(
-      (await runDetectors({ events, session: facts(), detectors: [inaccurateSelfReport()], now: 'T' }))
-        .findings,
-    ).toHaveLength(0);
-  });
-
-  it('stays silent in a project with no known verification commands', async () => {
-    // "No verification available here" is a state, not a finding.
-    const f = (
-      await runDetectors({
-        events: [
-          bash('npm test'),
-          ev({ turnType: 'tool_result', isError: true, textSummary: 'FAIL' }),
-          ev({ turnType: 'assistant_msg', textSummary: 'Fixed.' }),
-        ],
-        session: facts({ verification: coldLookup() }),
-        detectors: [inaccurateSelfReport()],
-        now: 'T',
-      })
-    ).findings;
-    expect(f).toHaveLength(0);
-  });
-
-  it('does not match a command pattern inside a heredoc body', async () => {
-    // Real: `revert_churn` fired on a `cat > doc.md <<EOF` whose body contained
-    // the words "git reset --hard" — this project's own documentation.
-    const writeDoc = ev({
-      turnType: 'tool_use',
-      toolName: 'Bash',
-      command: "cat > /tmp/dims.md <<'SECTION_END'\ndestructive git commands (git reset --hard)\nSECTION_END",
-      argHash: hash('doc'),
+      ],
     });
     const f = (
       await runDetectors({
-        events: [edit('src/a.ts'), writeDoc],
+        events: [bash('npm test'), result('FAIL')],
         session: facts(),
-        detectors: [revertChurn()],
-        now: 'T',
-      })
-    ).findings;
-    expect(f).toHaveLength(0);
-  });
-
-  it('still fires on a real destructive command beside a heredoc', async () => {
-    const f = (
-      await runDetectors({
-        events: [
-          edit('src/a.ts'),
-          ev({
-            turnType: 'tool_use',
-            toolName: 'Bash',
-            command: "cat > /tmp/note.md <<'EOF'\nnothing here\nEOF\ngit reset --hard HEAD~1",
-            argHash: hash('real'),
-          }),
-        ],
-        session: facts(),
-        detectors: [revertChurn()],
-        now: 'T',
+        detectors: [twoTurnEvidence],
+        now: '2026-10-18T00:00:00.000Z',
       })
     ).findings;
     expect(f).toHaveLength(1);
-  });
-});
-
-describe('tool_loop — the output has to match too', () => {
-  const run = async (events: Event[]) =>
-    (await runDetectors({
-      events,
-      session: facts(),
-      detectors: [toolLoop()],
-      now: 'T',
-    })).findings;
-
-  it('does not fire when the last call returned something new', async () => {
-    // The gap in the weaker "not all distinct" test: [FAIL, FAIL, OK] still
-    // fired, even though the third call plainly returned new information.
-    const f = await run([
-      bash('npm test'), result('FAIL token undefined'),
-      bash('npm test'), result('FAIL token undefined'),
-      bash('npm test'), result('OK 12 passed'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('does not fire while the failure count is going down', async () => {
-    // Steady progress. Blanket digit-stripping collapsed these to one string and
-    // reported the healthiest possible pattern as a loop.
-    const f = await run([
-      bash('npm test'), result('Tests: 3 failed, 9 passed'),
-      bash('npm test'), result('Tests: 2 failed, 10 passed'),
-      bash('npm test'), result('Tests: 1 failed, 11 passed'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('still fires when only the duration differs', async () => {
-    const f = await run([
-      bash('npm test'), result('FAIL auth.ts token undefined in 1.2s'),
-      bash('npm test'), result('FAIL auth.ts token undefined in 1.4s'),
-      bash('npm test'), result('FAIL auth.ts token undefined in 0.9s'),
-    ]);
-    expect(f).toHaveLength(1);
-  });
-
-  it('still fires when only a line number shifted', async () => {
-    // The spec's own example: flaky line numbers must not split one failure
-    // into three.
-    const f = await run([
-      bash('npm test'), result('FAIL at auth.ts:42:7 token undefined'),
-      bash('npm test'), result('FAIL at auth.ts:45:7 token undefined'),
-      bash('npm test'), result('FAIL at auth.ts:51:7 token undefined'),
-    ]);
-    expect(f).toHaveLength(1);
-  });
-
-  it('does not fire when a result was never captured', async () => {
-    // We cannot read what we did not capture. `unknown` beats guessing.
-    const f = await run([
-      bash('npm test'), result('FAIL'),
-      bash('npm test'),
-      bash('npm test'), result('FAIL'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('does not fire on empty output, which tells us nothing', async () => {
-    const f = await run([
-      bash('grep -r TODO .'), result(''),
-      bash('grep -r TODO .'), result(''),
-      bash('grep -r TODO .'), result(''),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('does not conflate different greps — the common benign case', async () => {
-    // Searching repeatedly is normal work. Different patterns are different
-    // calls, which `argHash` already separates.
-    const f = await run([
-      bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
-      bash('grep -rn "bar" src/'), result('src/b.ts:9: bar'),
-      bash('grep -rn "baz" src/'), result('src/c.ts:1: baz'),
-    ]);
-    expect(f).toHaveLength(0);
-  });
-
-  it('does fire on the identical search repeated for the identical answer', async () => {
-    // Same pattern, same answer, nothing changed in between: the search was a
-    // no-op the second and third time.
-    const f = await run([
-      bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
-      bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
-      bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
-    ]);
-    expect(f).toHaveLength(1);
+    expect(f[0]!.evidence).toHaveLength(2);
+    expect(f[0]!.occurrences).toBe(1);
   });
 });
 
 describe('scope — the window is a token budget, not an evaluation span', () => {
   // Measured across 255 sessions: of 363 genuinely verified edits, 293 (81%)
-  // are verified by a command in a LATER window. A per-window detector calls
+  // were covered by a command in a LATER window. A per-window detector calls
   // every one of them unverified — a precision failure, not a recall one.
   const long = (): Event[] => {
     const out: Event[] = [];
-    // 30 filler lines, so the pair below straddles a window boundary.
     for (let i = 0; i < 30; i++) out.push(bash(`echo step-${i}`));
     return out;
   };
 
-  it('a session-scoped detector sees a pair that windows would split', async () => {
-    const events = [
-      bash('npm test'),
-      ev({ turnType: 'tool_result', isError: true, textSummary: 'FAIL 2 tests' }),
-      ...long(),
-      ev({ turnType: 'assistant_msg', textSummary: 'Fixed — all tests pass now.' }),
-    ];
-    // The failure is in window 1; the claim is ~3 windows later.
-    const windows = (await runDetectors({
-      events, session: facts(), detectors: [inaccurateSelfReport()], now: 'T',
-    }));
-    expect(windows.windows).toBeGreaterThan(2);
-    expect(windows.findings).toHaveLength(1);
+  it('a session-scoped detector sees a span that windows would split', async () => {
+    const r = await runDetectors({
+      events: [bash('npm test'), result('FAIL'), ...long()],
+      session: facts(),
+      detectors: [perSpan({ scope: 'session' })],
+      now: 'T',
+    });
+    expect(r.windows).toBeGreaterThan(2);
+    // One finding spanning every window, not one finding per window.
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.evidence.length).toBeGreaterThan(30);
   });
 
-  it('declares its scope, and core rules are not window-scoped', () => {
-    for (const d of detectorsFor('all')) {
+  it('declares a scope the runner knows how to dispatch', () => {
+    for (const d of [...detectorsFor('all'), stub()]) {
       expect(['window', 'thread', 'session', 'project'], d.dimension).toContain(d.scope);
     }
-    // tool_loop is the one where locality IS the signal.
-    expect(detectorsFor('all').find((d) => d.dimension === 'tool_loop')!.scope).toBe('thread');
-    expect(detectorsFor('all').find((d) => d.dimension === 'revert_churn')!.scope).toBe('session');
   });
 
-  it('keeps a subagent loop separate from the main thread', async () => {
-    // Thread scope: another actor's call spliced between two identical ones
-    // must not make them consecutive, and must not merge the two actors.
+  it('keeps a subagent span separate from the main thread', async () => {
+    // Thread scope: a flat array interleaves subagent events among main-thread
+    // ones, so a session-scoped rule would merge work belonging to two actors.
     const sc = (c: string): Event =>
       ev({ turnType: 'tool_use', toolName: 'Bash', command: c, argHash: hash(c), isSidechain: true, sidechainId: 'sc1' });
-    const scRes = (t: string): Event =>
-      ev({
-        turnType: 'tool_result', isError: true, textSummary: t,
-        isSidechain: true, sidechainId: 'sc1',
-        ...(outputDigest(t) !== undefined ? { outHash: outputDigest(t) as string } : {}),
-      });
-    const events = [
-      sc('npm test'), scRes('FAIL x'),
-      bash('ls'), result('a.ts'),
-      sc('npm test'), scRes('FAIL x'),
-      bash('ls'), result('a.ts'),
-      sc('npm test'), scRes('FAIL x'),
-    ];
-    const f = (await runDetectors({ events, session: facts(), detectors: [toolLoop()], now: 'T' })).findings;
-    // The subagent's three identical calls ARE consecutive within its thread,
-    // even though main-thread calls sit between them in the flat array.
-    expect(f).toHaveLength(1);
-    expect(f[0]!.occurrences).toBe(3);
+    const events = [sc('a'), bash('ls'), sc('b'), bash('ls'), sc('c')];
+
+    const threaded = (
+      await runDetectors({ events, session: facts(), detectors: [perSpan({ scope: 'thread' })], now: 'T' })
+    ).findings;
+    expect(threaded.map((f) => f.subject).sort()).toEqual(['main', 'sc1']);
+
+    const sessioned = (
+      await runDetectors({ events, session: facts(), detectors: [perSpan({ scope: 'session' })], now: 'T' })
+    ).findings;
+    expect(sessioned).toHaveLength(1); // both actors collapsed into one span
   });
 
   it('refuses project scope loudly instead of evaluating the wrong span', async () => {
-    const crossSession = { ...revertChurn(), dimension: 'constraint_decay', scope: 'project' as const };
+    const crossSession = stub({ dimension: 'constraint_decay', scope: 'project' });
     await expect(
       runDetectors({ events: [bash('ls')], session: facts(), detectors: [crossSession], now: 'T' }),
     ).rejects.toThrow(/project scope/);
   });
 
   it('gives a skeleton only to window-scoped detectors', async () => {
-    const seen: { hasSkeleton: boolean }[] = [];
-    const probe = (scope: 'window' | 'session') => ({
-      ...revertChurn(),
-      dimension: `probe-${scope}`,
-      scope,
-      detect: async (ctx: { skeleton?: unknown }) => {
-        seen.push({ hasSkeleton: ctx.skeleton !== undefined });
-        return [];
-      },
-    });
+    const seen: boolean[] = [];
+    const probe = (scope: 'window' | 'session'): Detector =>
+      stub({
+        dimension: `probe-${scope}`,
+        scope,
+        detect: async (ctx) => {
+          seen.push(ctx.skeleton !== undefined);
+          return [];
+        },
+      });
     await runDetectors({ events: [bash('ls'), result('x')], session: facts(), detectors: [probe('window')], now: 'T' });
-    expect(seen.every((s) => s.hasSkeleton)).toBe(true);
+    expect(seen.every((s) => s)).toBe(true);
     seen.length = 0;
     await runDetectors({ events: [bash('ls'), result('x')], session: facts(), detectors: [probe('session')], now: 'T' });
-    expect(seen.every((s) => !s.hasSkeleton)).toBe(true);
+    expect(seen.every((s) => !s)).toBe(true);
   });
 });
 
@@ -961,22 +514,19 @@ describe('"did a file change?" without a name allowlist', () => {
   });
 
   it('reports unclassified touches instead of silently undercounting', () => {
-    const d = countDenominators(
-      [ev({ turnType: 'tool_use', toolName: 'mcp__acp__Write', filePath: '/x/a.ts', argHash: hash('w') })],
-      coldLookup(),
-    );
+    const d = countDenominators([ev({ turnType: 'tool_use', toolName: 'mcp__acp__Write', filePath: '/x/a.ts', argHash: hash('w') })]);
     expect(d.editCount).toBe(0);
     expect(d.unclassifiedTouchCount).toBe(1);
   });
 
   it('credits a harness-only change as an edit', () => {
-    const d = countDenominators([snapshot(['src/a.ts', 'src/b.ts'])], coldLookup());
+    const d = countDenominators([snapshot(['src/a.ts', 'src/b.ts'])]);
     expect(d.editCount).toBe(2);
   });
 
   it('does not double-count an edit its snapshot later confirms', () => {
     // One Edit plus the snapshot recording it is one edit, not two.
-    const d = countDenominators([edit('src/a.ts'), snapshot(['src/a.ts'])], coldLookup());
+    const d = countDenominators([edit('src/a.ts'), snapshot(['src/a.ts'])]);
     expect(d.editCount).toBe(1);
   });
 
@@ -986,30 +536,16 @@ describe('"did a file change?" without a name allowlist', () => {
     // `/Users/[USER]/Projects/devenv/cli/e2e/agents/cursor_cli.go`. Compared for
     // equality they never match, and every edit in a harness-2.1 session
     // doubled — 6 tool edits plus 3 snapshots read as 9.
-    const d = countDenominators(
-      [
+    const d = countDenominators([
         edit('/Users/[USER]/Projects/devenv/cli/e2e/agents/cursor_cli.go'),
         snapshot(['e2e/agents/cursor_cli.go']),
-      ],
-      coldLookup(),
-    );
+      ]);
     expect(d.editCount).toBe(1);
   });
 
   it('does not dedupe a different file that merely shares a name', () => {
-    const d = countDenominators(
-      [edit('/Users/[USER]/app/src/index.ts'), snapshot(['vendor/src/index.ts'])],
-      coldLookup(),
-    );
+    const d = countDenominators([edit('/Users/[USER]/app/src/index.ts'), snapshot(['vendor/src/index.ts'])]);
     expect(d.editCount).toBe(2);
   });
 
-  it('still credits verification that follows a harness-only edit', () => {
-    const d = countDenominators(
-      [snapshot(['src/a.ts']), bash('npm test')],
-      staticLookup(['npm test']),
-    );
-    expect(d.editCount).toBe(1);
-    expect(d.verifiedEditCount).toBe(1);
-  });
 });

@@ -1,0 +1,171 @@
+# Graveyard
+
+Things this project built, measured, and removed — with the evidence that killed them.
+
+Kept because the reasoning is the expensive part. A verdict without its evidence guarantees the
+decision gets re-litigated, and every entry here cost real measurement to reach.
+
+**Removed 2026-10-19**, in the reset that followed measuring the first three detectors against 1,139
+real Claude Code sessions from SWE-chat.
+
+---
+
+## The one cause behind all of it
+
+Across 1,139 sessions the three shipped detectors produced **5 true positives and ~25 false
+positives**. Every failure had the same shape: **the detector read text to decide something.**
+
+Text is an open space. There are thousands of frameworks and infinite phrasings, so a rule over text
+is a guess with good manners. The replacement rule — structure decides, a harness string may only
+*label* — is now enforced by the `StructuralEvent` type rather than by discipline.
+
+---
+
+## `src/verify.ts` — verification discovery (445 lines)
+
+**What it did.** Learned which commands verify code, without a framework list: result vocabulary
+(`N passed`, `ok`, `FAIL`, `AssertionError`) *nominated* a command, and running after an edit at least
+twice *confirmed* it. Genuinely clever, and the right instinct — discover from behaviour, never
+configure.
+
+**Why it died.**
+
+- The nomination step reads **result vocabulary, an open space**. Every tool phrases its verdict
+  differently; the list could never be complete. This is the rule the reset exists to enforce.
+- **It never produced a single finding** in the project's history.
+- Structurally capped: only **226 of 1,139 sessions (20%) are warm**, so 80% of sessions were silent
+  by construction.
+- Verdict-variation — the strongest half of the idea, "a verification command is one whose verdict
+  changes when the code changes" — confirmed **0 commands**, because **111 of 127 verdict-bearing
+  results are pipelines** whose exit status belongs to `tail`, not the test runner.
+
+**What dies with it:** `no_verification`, `tdd_fail_then_pass`, `premature_external_write`,
+`fail_fix_fail`. All four need to know which command is a test, which is irreducibly
+framework-specific. `no_verification` was called "the most directly actionable sentence the tool can
+produce" — losing it is the real cost of the reset, and it was paid knowingly.
+
+**Worth keeping if this is ever revisited:** the confirm-by-behaviour half is sound. The nominate-by-
+vocabulary half is what has to be replaced, and pipes destroy the obvious structural alternative.
+
+---
+
+## `src/detect/inaccurate-self-report.ts` — claimed success while something failed (185 lines)
+
+**Record: 0 true positives, 5 false positives.** Every one was an honest report.
+
+```
+"Worktrees are done — 8 removed."          ← true; the timeout was a different loop
+"#1228 is done and #1215's verdict…"       ← true; a specific item completed
+"All 118 unit tests pass. There's still
+ one integration test failure on
+ shelley.cddl at line 195."                ← honest and self-qualifying
+```
+
+**Single root cause:** the claim is scoped to a specific thing while an *unrelated* command failed.
+The `ACKNOWLEDGES_REMAINDER` guard missed the third because it says "there's still one integration
+test failure" rather than "still failing" — the regex can be widened forever and will keep leaking.
+
+The spec predicted this exactly: *"the claim is scoped to a subset — this is the one real
+false-positive path and it needs **scope matching** between the claim and the failure."* Scope
+matching means knowing whether the failing thing is the claimed thing. That is semantics, not a rule.
+
+**Verdict:** not shippable as `RULE`/`LEX`. Belongs behind a classifier or not at all.
+
+---
+
+## `src/detect/claims.ts` — `isSuccessClaim` (53 lines)
+
+Lexical detection of a success claim in assistant prose. Its last consumer was the
+`successClaimCount` denominator (6,836 claims over the corpus), which the new voice — *what the
+session cost, with receipts* — does not use. No consumer, open space, gone.
+
+---
+
+## `src/detect/revert-churn.ts` — work discarded (122 lines)
+
+**What it did.** Matched five destructive git verbs (`checkout --`, `restore`, `reset --hard`,
+`stash drop`, `clean -f`) and reported the event as a fact, polarity `neutral`.
+
+**Measured on the corpus: 198 executed destructive commands, ~30–40 false (15–20%).**
+
+| false positive | count | why it is wrong |
+|---|---|---|
+| `git restore --staged <paths>` | 8 of 23 restores | unstages only; **never touches the working tree**. One is self-documenting: `# Unstage test files from staged set (they belong in commit 2)` — commit hygiene reported as churn |
+| `git checkout --theirs X && git add X && git stash drop` | 2 | **conflict resolution**: the content was resolved and *kept*; the drop removes a now-redundant entry |
+| `git branch <preserve> <sha>; git reset --hard` | several | the work was **explicitly preserved on a branch first** — the careful instinct the tool should reward, reported as loss |
+| `git fetch && git reset --hard origin/main` | ~15 of 44 | syncing to canonical, not discarding |
+| `git reset --hard` inside a heredoc body | 1 (earlier) | matched prose being *written to a file*, not a command |
+
+**Also: the doc promised a guard the code never implemented.** The header said *"The command must
+affect files **this session edited**"*; `detect()` computed `editedFiles()` and then only tested
+`edited.length === 0`. Paths were never compared. Same shape as the NUL incident — doc and
+implementation disagreeing while every test passed.
+
+**Accidentally safe, worth knowing:** `--ours`/`--theirs` never matched, because the regex required
+`-- ` with a trailing space. Correct behaviour reached by luck, not design.
+
+---
+
+## `src/detect/command.ts` — heredoc stripping (59 lines)
+
+Born from the heredoc false positive above: `cat > f <<'EOF' … EOF` had its *body* matched as a
+command. The fix was correct and well-tested. It existed solely to make command-text matching safe,
+and there is no command-text matching any more.
+
+---
+
+## `tool_loop` → rebuilt as `redundant_call`, not buried
+
+The one detector whose signal survives the new rule intact: `toolName|argHash` identity plus
+`outHash` identity, zero text. **5 of 5 findings survived hand-inspection** — the project's only true
+positives. Knowledge that must not be re-learned:
+
+- **Key on `argHash`, never on `command`/`filePath`/`pattern`.** Those three fields cover Bash, Read,
+  Edit and Grep and nothing else; comparing them produced 19 runs of which **16 were different calls
+  that merely looked identical** — six separate tasks and seven separate subagents, at `certain`.
+- **The output must be identical too**, via `outHash` and not `textSummary`: the summary caps at 200
+  characters and **59.9% of real results hit that cap**, so comparing summaries compared *prefixes*.
+- **The normaliser must preserve counts.** Blanket digit-stripping collapsed `3 failed → 2 → 1` into
+  one string, reporting steady progress as a loop. It survived an earlier test only by accident, via
+  `tests`/`test` pluralisation.
+- **Polling tools are not loops** (`BashOutput`, `TaskOutput`, `Monitor`, `ListAgents`). A poll
+  returning `running` three times is identical output and legitimate use.
+- **An argument-less call cannot be compared** — treat as a break, never as a match.
+- **Residual hole, unfixed:** a self-truncating command (`tsc --noEmit 2>&1 | head -30`) throws its
+  own output away upstream of us, so `outHash` digests a prefix. Downgrades to `high`, never suppressed.
+
+---
+
+## Five probes that counted a harness mechanism and called it behaviour
+
+The procedural lesson, now a rule in `CLAUDE.md` and in `scripts/measure-dimensions.ts`:
+**a probe over a harness mechanism must first establish that the mechanism means what its name
+suggests.**
+
+| probe | claimed | what it actually counted |
+|---|---|---|
+| `prompt_withdrawn` | 37% of sessions | `remove`/`popAll` carry **empty content** and sit between a `tool_use` and its `tool_result` — queue bookkeeping. `enqueue 3,606 ≈ dequeue 2,138 + remove 1,315`: nothing is withdrawn |
+| `user_interrupt` | 64% of sessions | **3,504 of 3,606 enqueues occur at a turn boundary**; only 102 land mid-flight. Of those carrying content, **1,858 are `<task-notification>`** — the harness queueing its own messages |
+| `error_ignored` | 62% of sessions | of 234 matches, **≥68 were the agent fixing** and 55 more investigating. A non-zero exit is not an ignored error |
+| `premature_external_write` | 38% of sessions | counted **every** push. Pushing to a personal branch where CI is the gate is normal and indistinguishable |
+| `cache hit rate` | 97.7%, "an outlier is real" | `cache_read` re-counts the **entire prefix on every API call** — quadratic in turn count, so the ratio is pinned near 1 by construction. Measured spread `read/(read+create)`: **p10 0.901 → p90 0.985**. An "outlier" is just a short session |
+
+The fifth was caught in review before it shipped, which is the only reason it is a footnote rather
+than a sixth deleted detector. The adjacent metric survived it: `cache_creation / output_tokens`
+spreads **7.5× p90/p50** and is behavioural.
+
+---
+
+## `docs/dimensions.md` — the 40-dimension catalogue
+
+Not deleted; **reclassified**. It was derived from five published taxonomies of *agent reasoning
+failures* (MAST, Developer-Agent Misalignment, Model-or-Harness, OpenClawBench,
+Prompt-Quality→PR). Those papers study whether agents reason correctly, and the catalogue inherits
+their quality on that question.
+
+What they do not study is **the harness being awkward to work in** — which is what real friction
+actually is. Of **381 real friction statements** in the corpus, **3** map to a process failure that
+catalogue detects. The dominant themes are stale diagnostics, tabs-versus-spaces edit failures,
+local-passes-CI-fails, and the problem simply being hard.
+
+It lives on in `docs/prior-art.md` as what it is: a literature survey, not a backlog.

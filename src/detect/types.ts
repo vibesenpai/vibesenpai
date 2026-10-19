@@ -19,11 +19,31 @@
  * session, so the runner isolates failures, but a detector that returns no
  * candidates when confused is better than one that throws and loses the rest of
  * the window's findings.
+ *
+ * ── It cannot read text, and that is a compile error ────────────────────────
+ *
+ * `events` is `StructuralEvent[]`, which omits `command`, `pattern` and
+ * `textSummary`. Reading any of them in a detector does not fail review — it
+ * fails to build.
+ *
+ * This is not stylistic. Three detectors shipped on text and produced 5 true
+ * positives against ~25 false positives across 1,139 real sessions; each failure
+ * was a rule over an open space. Where a harness string genuinely adds
+ * something, the **runner** attaches it as a label to an already-valid finding
+ * (`labelFor` in `./labels.ts`), so a harness change loses a label and never a
+ * detection. `GRAVEYARD.md` holds the evidence.
  */
 
 import type { Candidate } from '../finding.ts';
-import type { VerificationLookup } from '../verify.ts';
-import type { Confidence, Denominator, Event, Method, Polarity, Preset, Skeleton } from '../types.ts';
+import type {
+  Confidence,
+  Denominator,
+  Method,
+  Polarity,
+  Preset,
+  Skeleton,
+  StructuralEvent,
+} from '../types.ts';
 
 export type DetectorContext = {
   /**
@@ -32,7 +52,7 @@ export type DetectorContext = {
    * Deliberately not a `Window`: the scope is the detector's own choice, and
    * only a window-scoped detector gets a skeleton at all.
    */
-  events: Event[];
+  events: StructuralEvent[];
   /**
    * The skeleton, for window-scoped detectors only.
    *
@@ -95,22 +115,14 @@ export type Scope =
  *
  * Deliberately small. Anything that grows here is a hint that the thing wants to
  * be a session-level pass rather than a detector.
+ *
+ * It once carried a learned verification registry — "what counts as a test in
+ * this project". That is removed: identifying a test command means reading
+ * command text, which is irreducibly framework-specific. See `GRAVEYARD.md`.
  */
 export type SessionFacts = {
   sessionId: string;
   project: string;
-  /**
-   * What verifies code in this project — **learned**, not configured.
-   *
-   * A hardcoded list was built first and discarded: there are thousands of
-   * toolchains, so accuracy would track how well the author guessed the user's
-   * stack. See src/verify.ts.
-   *
-   * `cold` means nothing has been learned yet, which is a different claim from
-   * "nothing was verified" and must not produce findings. The spec is explicit
-   * that a project with no known test suite needs a state, not a finding.
-   */
-  verification: VerificationLookup;
   /** True when the session is still being written to. */
   live: boolean;
 };

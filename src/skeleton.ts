@@ -27,7 +27,7 @@
  * so revisiting this is a one-line change rather than a redesign.
  */
 
-import { executablePart } from './detect/command.ts';
+import { executablePart } from './command.ts';
 import { stamp } from './schema.ts';
 import type { Event, Skeleton, SkeletonLine, TurnRef } from './types.ts';
 
@@ -57,11 +57,18 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/** Git operations worth promoting out of a plain tool line. */
+/**
+ * Git operations worth promoting out of a plain tool line.
+ *
+ * Display tier: this reads command text, which no *detector* may do. It marks a
+ * skeleton line so the token budget keeps it and a human reading the evidence
+ * sees where a commit or a revert landed. It produces no finding, so a wrong
+ * label is visible and harmless — see `src/command.ts`.
+ */
 function gitMeta(command: string | undefined): 'commit' | 'revert' | undefined {
   if (command === undefined) return undefined;
-  // Same heredoc trap as `revert_churn`: a doc file mentioning `git commit`
-  // would otherwise render as a commit that never happened.
+  // A doc file mentioning `git commit` would otherwise render as a commit that
+  // never happened.
   const exec = executablePart(command);
   if (/\bgit\s+(?:-\S+\s+)*commit\b/.test(exec)) return 'commit';
   if (/\bgit\s+(?:revert|reset\s+--hard)\b|\bgit\s+checkout\s+--/.test(exec)) return 'revert';
