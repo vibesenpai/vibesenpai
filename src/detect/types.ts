@@ -23,6 +23,7 @@
 
 import type { Candidate } from '../finding.ts';
 import type { Window } from '../skeleton.ts';
+import type { VerificationLookup } from '../verify.ts';
 import type { Confidence, Denominator, Method, Polarity, Preset } from '../types.ts';
 
 export type DetectorContext = {
@@ -41,14 +42,17 @@ export type SessionFacts = {
   sessionId: string;
   project: string;
   /**
-   * Verification commands this project actually has — from `package.json`
-   * scripts, a Makefile, and the configured list.
+   * What verifies code in this project — **learned**, not configured.
    *
-   * Empty means **no verification is available here**, which is a different
-   * claim from "nothing was verified" and must not produce findings. The spec is
-   * explicit that a project with no test suite needs a state, not a finding.
+   * A hardcoded list was built first and discarded: there are thousands of
+   * toolchains, so accuracy would track how well the author guessed the user's
+   * stack. See src/verify.ts.
+   *
+   * `cold` means nothing has been learned yet, which is a different claim from
+   * "nothing was verified" and must not produce findings. The spec is explicit
+   * that a project with no known test suite needs a state, not a finding.
    */
-  verificationCommands: string[];
+  verification: VerificationLookup;
   /** True when the session is still being written to. */
   live: boolean;
 };

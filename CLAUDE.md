@@ -65,6 +65,30 @@ is the S4 Self-Initiated Overreach failure this tool exists to detect.
 - **Config expresses intent, never side effects.** Setting `preset: standard` does not trigger a
   download.
 
+## Discover, do not configure
+
+A hardcoded list of frameworks means accuracy tracks how well we guessed the user's stack. There are
+thousands of toolchains; we will guess wrong. **Verification is discovered from behaviour, not named
+in a list** (`src/verify.ts`):
+
+- Output shape says a command *reports* a verdict — result vocabulary (`N passed`, `ok`, `FAIL`,
+  `AssertionError`) is far more universal than command names, because every tool reports to a human.
+- A command must have **executed**. Reading a test file looks identical to running one; measured, the
+  first version matched `Read`, `grep expect(` and `cat >> test.ts`.
+- **A verification command is one whose verdict changes when the code changes.** Seeing the same
+  command both pass and fail proves it with no vocabulary at all, and it is what excludes
+  `git log --oneline`, which matched on shape alone.
+- What one session learns is persisted, so confidence grows with history. User config is an
+  **override**, never the mechanism.
+
+The cost is a cold start: a new project yields no findings for a session or two. That is the correct
+trade — the same rule that makes `tool_loop` skip calls it cannot distinguish.
+
+**No invisible characters in source.** A literal NUL was authored into `src/verify.ts`, and the damage
+was not the constant but a doc comment holding one: a later edit targeting that comment matched
+nothing, applied silently, and left a type and its implementation disagreeing while every test passed.
+`test/source-hygiene.test.ts` makes it a build failure.
+
 ## Precision over recall
 
 A false flag destroys trust permanently, and a stranger who gets one never tells you why.

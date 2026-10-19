@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import {
-  runDetectors,
-  detectorsFor,
-  countDenominators,
-  isVerification,
-} from '../src/detect/index.ts';
+import { runDetectors, detectorsFor, countDenominators } from '../src/detect/index.ts';
+import { staticLookup, coldLookup } from '../src/verify.ts';
 import { toolLoop, runsOf, signatureOf } from '../src/detect/tool-loop.ts';
 import { revertChurn, destructiveKind } from '../src/detect/revert-churn.ts';
 import { inaccurateSelfReport } from '../src/detect/inaccurate-self-report.ts';
@@ -32,7 +28,7 @@ function ev(over: Partial<Event> & Pick<Event, 'turnType'>): Event {
 const facts = (over: Partial<SessionFacts> = {}): SessionFacts => ({
   sessionId: 's1',
   project: 'proj',
-  verificationCommands: ['npm test'],
+  verification: staticLookup(['npm test']),
   live: false,
   ...over,
 });
@@ -358,7 +354,7 @@ describe('denominators — one pass, never incremental', () => {
         edit('src/a.ts'),
         bash('npm test'),
       ],
-      ['npm test'],
+      staticLookup(['npm test']),
     );
     expect(d).toMatchObject({ turnCount: 1, editCount: 1, toolCallCount: 2 });
   });
@@ -367,7 +363,7 @@ describe('denominators — one pass, never incremental', () => {
     // One test run clears the edits that preceded it, which is what happened.
     const d = countDenominators(
       [edit('a.ts'), edit('b.ts'), bash('npm test')],
-      ['npm test'],
+      staticLookup(['npm test']),
     );
     expect(d.verifiedEditCount).toBe(2);
   });
@@ -375,7 +371,7 @@ describe('denominators — one pass, never incremental', () => {
   it('leaves edits after the last verification uncredited', () => {
     const d = countDenominators(
       [edit('a.ts'), bash('npm test'), edit('b.ts')],
-      ['npm test'],
+      staticLookup(['npm test']),
     );
     expect(d.verifiedEditCount).toBe(1);
   });
@@ -386,23 +382,17 @@ describe('denominators — one pass, never incremental', () => {
     const claims = ['Fixed — all tests pass now.', 'Done.', 'That works now'];
     const notClaims = ['Let me check whether that passes', 'This might be fixed by', 'Running tests'];
     for (const t of claims) {
-      expect(countDenominators([ev({ turnType: 'assistant_msg', textSummary: t })], []).successClaimCount).toBe(1);
+      expect(countDenominators([ev({ turnType: 'assistant_msg', textSummary: t })], coldLookup()).successClaimCount).toBe(1);
     }
     for (const t of notClaims) {
-      const n = countDenominators([ev({ turnType: 'assistant_msg', textSummary: t })], []).successClaimCount;
+      const n = countDenominators([ev({ turnType: 'assistant_msg', textSummary: t })], coldLookup()).successClaimCount;
       expect(n, `should not count: ${t}`).toBe(0);
     }
   });
 
-  it('reports no verification when the project has no commands', () => {
+  it('credits nothing when the project is cold', () => {
     // "Cannot tell" is a different claim from "nothing was verified".
-    expect(isVerification(bash('npm test'), [])).toBe(false);
-    expect(countDenominators([edit('a.ts'), bash('npm test')], []).verifiedEditCount).toBe(0);
-  });
-
-  it('matches the project\'s own commands, not a fixed list', () => {
-    expect(isVerification(bash('uv run pytest -q'), ['pytest'])).toBe(true);
-    expect(isVerification(bash('npm test'), ['pytest'])).toBe(false);
+    expect(countDenominators([edit('a.ts'), bash('npm test')], coldLookup()).verifiedEditCount).toBe(0);
   });
 });
 
@@ -683,7 +673,7 @@ describe('precision guards learned from real false positives', () => {
           ev({ turnType: 'tool_result', isError: true, textSummary: 'FAIL' }),
           ev({ turnType: 'assistant_msg', textSummary: 'Fixed.' }),
         ],
-        session: facts({ verificationCommands: [] }),
+        session: facts({ verification: coldLookup() }),
         detectors: [inaccurateSelfReport()],
         now: 'T',
       })

@@ -113,3 +113,26 @@ Kept because the discarded answer is the one a reader will reach for next.
 | Action | Note |
 |---|---|
 | `cleanupPeriodDays: 3650` on the development machine | One-time, on request, to stop transcript loss during development. **The product never does this.** |
+
+## D31 — verification is discovered, not configured
+
+**Decision:** no hardcoded framework list and no required user config. A command is verification when
+it executed, its output reports a verdict, and — for anything that produces a finding — its verdict has
+been observed to vary. Learned per project and persisted; user config is an override.
+
+**Why the obvious design was discarded.** A list plus a config field was built first. It is wrong on
+its face: there are thousands of toolchains, so the detector's accuracy would track how well the
+author guessed the user's stack. Measured on a public corpus, a hand-written list missed `mise run`,
+`bun run` and `go build` — most of what those repos actually ran.
+
+**Evidence.** Output-shape matching alone found 108 candidates across 253 sessions, but included
+`Read` of a test file, `grep expect(`, `cat >> test.ts` and `WebFetch` of a page about testing —
+reading a test looks exactly like running one. Requiring execution and excluding file-writes cut that
+to 39 clean candidates, discovering `uv run pyright`, `pytest`, `vitest`, `tsc --noEmit`, `go test`,
+`mise run test:ci` and `ruff check` with none of them named. Behavioural confirmation then excluded
+`git log --oneline`, which matched shape once and never varies.
+
+**Cost, stated:** a cold start. On the validation corpus 26 of 27 projects were cold, because almost
+every "project" there is a single-session fixture directory with no history to confirm from. Real use
+accrues confirmation across sessions in the same repo. Until it does, detectors stay silent — which is
+the `unknown` beats guessing rule, applied to the question "what counts as a test here".

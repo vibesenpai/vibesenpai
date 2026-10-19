@@ -21,6 +21,12 @@ export const SCHEMA = {
   catalog: 1,
   /** SQLite migrations. Bump on every forward migration. */
   store: 1,
+  /**
+   * The learned verification registry — which commands check code in which
+   * project. Bump discards what was learned and forces rediscovery, which costs
+   * a cold start rather than wrong findings.
+   */
+  verification: 1,
 } as const;
 
 export type SchemaName = keyof typeof SCHEMA;

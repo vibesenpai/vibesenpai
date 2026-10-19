@@ -47,7 +47,6 @@
  */
 
 import { isSuccessClaim } from './claims.ts';
-import { executablePart } from './command.ts';
 import type { Candidate } from '../finding.ts';
 import type { Event, TurnRef } from '../types.ts';
 import type { Detector, DetectorContext } from './types.ts';
@@ -85,21 +84,6 @@ const NOT_A_VERIFICATION_FAILURE =
  */
 const ACKNOWLEDGES_REMAINDER =
   /\b(?:still (?:failing|fails|broken|red)|one (?:test|case) (?:is )?still|remaining (?:failure|test)|except (?:for )?|apart from|other than|but (?:\w+\s+){0,3}(?:still|fail)|\d+ (?:test|failure)s? (?:still )?(?:fail|remain))/i;
-
-/**
- * Did this call verify anything?
- *
- * Checked against the project's own commands, so `pytest` counts in a Python
- * repo and `npm test` in a Node one. When the project has no known verification
- * commands this is always false, which correctly makes the detector silent
- * rather than guessing.
- */
-function isVerificationCall(call: Event | undefined, verificationCommands: string[]): boolean {
-  if (call === undefined || verificationCommands.length === 0) return false;
-  const exec = executablePart(call.command).toLowerCase();
-  if (exec.trim() === '') return false;
-  return verificationCommands.some((v) => exec.includes(v.toLowerCase()));
-}
 
 export function inaccurateSelfReport(): Detector {
   return {
@@ -144,7 +128,7 @@ export function inaccurateSelfReport(): Detector {
         }
 
         if (e.turnType === 'tool_result') {
-          const verified = isVerificationCall(lastCall, ctx.session.verificationCommands);
+          const verified = ctx.session.verification.isVerification(lastCall?.command);
           const denied = NOT_A_VERIFICATION_FAILURE.test(e.textSummary ?? '');
           lastFailure = isFailure(e) && verified && !denied ? e : undefined;
           continue;

@@ -25,6 +25,7 @@ import { buildWindows, type SkeletonOptions } from '../skeleton.ts';
 import type { Event, Finding, Preset } from '../types.ts';
 import type { Detector, SessionFacts } from './types.ts';
 import { hasSuccessClaim } from './claims.ts';
+import type { VerificationLookup } from '../verify.ts';
 import { toolLoop } from './tool-loop.ts';
 import { revertChurn } from './revert-churn.ts';
 import { inaccurateSelfReport } from './inaccurate-self-report.ts';
@@ -71,7 +72,7 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 export function countDenominators(
   events: Event[],
-  verificationCommands: string[],
+  verification: VerificationLookup,
 ): Denominators {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
   const d: Denominators = {
@@ -94,7 +95,7 @@ export function countDenominators(
       if (EDIT_TOOLS.has(e.toolName ?? '')) {
         d.editCount++;
         pendingEdits++;
-      } else if (isVerification(e, verificationCommands)) {
+      } else if (verification.isVerification(e.command)) {
         d.verifiedEditCount += pendingEdits;
         pendingEdits = 0;
       }
@@ -105,22 +106,6 @@ export function countDenominators(
   }
 
   return d;
-}
-
-/**
- * Does this call verify anything?
- *
- * Matched against the project's own commands rather than a fixed list, because
- * "the test command" is `pytest` in one repo and `npm test` in the next. An
- * empty list means this project has no known verification, which the caller must
- * treat as "cannot tell" rather than "nothing was verified".
- */
-export function isVerification(e: Event, verificationCommands: string[]): boolean {
-  if (verificationCommands.length === 0) return false;
-  const cmd = e.command;
-  if (cmd === undefined) return false;
-  const lower = cmd.toLowerCase();
-  return verificationCommands.some((v) => lower.includes(v.toLowerCase()));
 }
 
 export type RunInput = {
@@ -164,7 +149,7 @@ export async function runDetectors(input: RunInput): Promise<RunResult> {
       project: input.session.project,
       now,
     }),
-    denominators: countDenominators(input.events, input.session.verificationCommands),
+    denominators: countDenominators(input.events, input.session.verification),
     windows: windows.length,
     failures,
   };
