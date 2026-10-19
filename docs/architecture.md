@@ -42,7 +42,7 @@ Nine terms do most of the work in this document.
 | **event** | One turn after parsing — normalised into the same shape regardless of harness. |
 | **window** | A slice of 6–12 consecutive turns. Detectors look at windows, not whole sessions. |
 | **skeleton** | A window with the bulk stripped out — no file contents, no long output. Roughly 5–10% of the original size. |
-| **dimension** | One measurable pattern, e.g. `constraint_decay` or `no_verification`. There are 40 catalogued; 13 in the first release. |
+| **dimension** | One measurable pattern, e.g. `edit_retry`. [dimensions.md](dimensions.md) holds what is detected and measured; [dimension-survey.md](dimension-survey.md) holds the 40-dimension literature survey it replaced. |
 | **finding** | One occurrence of a dimension in a session, with its evidence attached. |
 | **guard** | A generated hook that prevents or catches a mistake mechanically, instead of relying on anyone remembering. |
 
@@ -171,9 +171,9 @@ a sibling subtree off that spine is abandoned **if it contains a human prompt** 
 dead branch does and a parallel tool call's `tool_result` stub never does. Those records are flagged
 rather than dropped, and detectors ignore them by default.
 
-That matters because the dropped records were `tool_result`s, and `no_verification`,
-`fail_fix_fail` and `error_ignored` are precisely the detectors that need to know whether anything was
-run. The bug would not have crashed; it would have produced confident wrong findings.
+That matters because the dropped records were `tool_result`s — and a `tool_result` is where the
+harness records whether a call failed and who refused it. `edit_retry` reads exactly that. The bug
+would not have crashed; it would have produced confident wrong findings.
 
 Three more wrinkles in the same file:
 

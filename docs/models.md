@@ -1,5 +1,11 @@
 # Semantic analysis (models)
 
+> **Note (2026-10-19):** examples below may name dimensions that were deleted in the reset —
+> `tool_loop`, `revert_churn`, `inaccurate_self_report`, `no_verification`. The mechanics they
+> illustrate still hold; the dimension names do not. See [dimensions.md](dimensions.md) for what is
+> actually detected and `GRAVEYARD.md` for why.
+
+
 ## How models and classifiers actually work here
 
 The MVP ships **no models** — `core` is all rules. This section specifies the M5 tier, because two of

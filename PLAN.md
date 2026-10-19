@@ -350,9 +350,10 @@ classification with four states and its test matrix, `PROMPT` generation, the `c
 Parquet adapter, `MEMORY` diffs, the running-score rate engine with four honesty guards, and
 incremental persistence. The seam is natural:
 
-- **M2a — a shippable tool.** The 8 detectors needing no outcome, incremental persistence, and the
+- **M2a — a shippable tool.** The detectors needing no outcome, incremental persistence, and the
   running score. At the end of M2a `npx agentsensei` produces the Quickstart's first-run output for
-  real. **This is the first point the product exists.**
+  real. **This is the first point the product exists.** (Originally scoped at 8 detectors; after the
+  2026-10-19 reset it is 4, chosen by measurement rather than by catalogue order.)
 - **M2b — outcomes and artifacts.** Outcome classification with its tri-state test matrix,
   `convergent_iteration` then `rework_loop` + `fail_fix_fail`, `PROMPT`/`MEMORY` generation, the
   `claude-md` audit, and the SWE-chat adapter.
@@ -360,42 +361,50 @@ incremental persistence. The seam is natural:
 M2a first means the score and persistence are exercised by real use before the riskiest detectors
 land on top of them.
 
-> **Superseded by measurement — see [docs/findings-frequency.md](docs/findings-frequency.md).**
-> The order below was "cheapest and most certain first", which put the three *rarest* dimensions at
-> the front: measured over 1,139 real sessions, `revert_churn` occurs in 9% of sessions, `tool_loop`
-> in 4%, `inaccurate_self_report` in 1%. All three are built and all three produce ~nothing.
+> **M2a was restarted on 2026-10-19.** The order below was "cheapest and most certain first", which
+> put the three *rarest* dimensions at the front — and all three read text to decide. Across 1,139
+> real sessions they produced **5 true positives against ~25 false positives**, and all three are now
+> deleted. See `GRAVEYARD.md` for each one with its evidence, and
+> [docs/findings-frequency.md](docs/findings-frequency.md) for the measurement.
 >
-> **The measured order is:**
+> The replacement rule is enforced by the compiler: `DetectorContext.events` is `StructuralEvent`, so
+> reading `command`, `pattern` or `textSummary` in a detector is a build failure. A harness string may
+> *name* a finding via `src/detect/labels.ts`, applied by the runner after the finding already exists.
 >
-> 1. **`user_correction`** — 63,710 labelled instances, pushback in 50% of turns (the paper's own
->    headline). The catalogue's "anchor signal", unbuilt, and SWE-chat's `prompt_pushback` gives a
->    ready-made silver label set so precision and recall are measurable without hand-labelling.
-> 2. **`prompt_withdrawn`** *(new dimension)* — 37% of sessions. Purely structural.
-> 3. **`edit_retry_friction`** *(new dimension)* — 33% of sessions. Purely structural, and the one
->    dimension that is unambiguous waste rather than a judgment call.
-> 4. **`user_interrupt`** — 64% of sessions, but needs the published 4.5% baseline to separate
->    friction from healthy steering.
-> 5. **`no_verification`** — 12%, capped by the 20% of sessions that are warm.
->
-> Deprioritised with reasons: `error_ignored` ranks 2nd by frequency but its probe over-counts badly
-> (of 234 matches, ≥68 were the agent *fixing* the error); `premature_external_write` needs branch
-> awareness.
+> **The verification family went with it** — `no_verification`, `tdd_fail_then_pass`,
+> `premature_external_write`, `fail_fix_fail` — because identifying a test command is irreducibly
+> framework-specific. `no_verification` was the most actionable sentence this tool could produce, and
+> that cost was accepted knowingly.
 
-**M2a**, in this order — cheapest and most certain first *(original ordering, retained for the record)*:
+### M2a, restarted — build order by anchorability, not frequency
 
-1. `user_correction` (lexical) — the anchor signal; 91.5% of episodes involve it
-2. `inaccurate_self_report` → `no_verification` → `tool_loop` → `error_ignored` → `revert_churn` →
-   `premature_external_write` — all `certain`, all pure rules, no outcome needed
-3. `constraint_decay` (command-shaped) — plus the constraint extraction the `claude-md` audit reuses
-4. `tdd_fail_then_pass`, `effective_correction` — the strengths that need no outcome
-5. **Incremental persistence + the running-score rate engine**, including all four honesty guards
+A finding needs a turn to point at. That, not how often something occurs, sets the order.
 
-**M2a status: foundation + 3 of 10 detectors.** Done: window→events plumbing, finding identity and
-merge, the detector framework with failure isolation, the denominator pass, and `tool_loop`,
-`revert_churn`, `inaccurate_self_report`. Remaining: 7 detectors, SQLite persistence, the score engine.
+| # | dimension | status | measured |
+|---|---|---|---|
+| 1 | **`edit_retry`** | **done** | 380/1,139 sessions (33.4%), 927 instances, 0 false positives in 28 hand-read findings |
+| 2 | `file_churn` | next | 11% of sessions, 401 instances |
+| 3 | `context_reingest` | next | p50 12.0, p90 93.4 — session **metadata**, not a finding |
+| 4 | `redundant_call` | next | 0.4% of sessions; kept on precision, out of `core` |
+
+Then: incremental persistence and the running-score rate engine with its four honesty guards.
+
+**Known gap, not a decision:** `Config` has no `preset` and no per-dimension `mute`, so a dimension
+someone does not care about cannot be silenced. That has to land before more dimensions ship.
+
+Deliberately unbuilt, each with its reason in [docs/dimensions.md](docs/dimensions.md):
+`reading_spiral` (51% but sidechain-confounded, widest set A/B gap in the table),
+`permission_denied` (20% and structural, but declining is the person exercising control),
+`user_correction` (needs the 200-char prompt cap raised first — 40% of prompts hit it),
+`user_interrupt` (the published 64% was counting turn-boundary enqueues and `<task-notification>`).
+
+**M2a status: foundation + 1 of 4 detectors.** Done: window→events plumbing, finding identity and
+merge, the detector contract with failure isolation and a text-free event view, the denominator pass
+including the harness-billed token totals, the label tier, and `edit_retry`. Remaining: 3 detectors,
+the config/mute surface, SQLite persistence, the score engine.
 
 **Every one of the framework's first three real-data findings was a false positive**, and each bought
-a rule:
+a rule. Kept because the rules outlived the detectors that earned them:
 
 | Finding | Why it was wrong | Rule added |
 |---|---|---|

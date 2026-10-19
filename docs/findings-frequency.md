@@ -1,43 +1,67 @@
-# Which dimensions developers actually hit
+# What we measured, and what we got wrong measuring it
 
-**Measured 2026-10-19** over 1,139 real Claude Code sessions from SWE-chat, plus the dataset's own
+**Re-measured 2026-10-19** over 1,139 real Claude Code sessions from SWE-chat, plus the dataset's own
 annotations over 11,607,572 turns. Reproduce with `npm run measure`.
 
 This document exists because three detectors shipped, 346 tests passed, and across 255 real sessions
-they produced **0 findings and 19 false positives**. Rather than build a fourth from the catalogue's
-assumed order, we measured the order.
+they produced **0 findings and 19 false positives**. Its first version then ranked the dimensions by
+frequency — and **three of those rankings were themselves wrong, in the same way.** Both rounds are
+kept here, because the error is more instructive than the number.
 
 ---
 
-## The headline
+## The current measurement
 
-**The three detectors we built rank 10th, 11th and 14th out of 14 measured dimensions.** Three
-patterns that are *not in the catalogue at all* rank 4th, 6th and 7th.
-
-| occurs in | set A | set B | instances | dimension | probe | in catalogue |
-|---|---|---|---|---|---|---|
-| **64%** | 66% | 60% | 9,929 | `user_interrupt` | structural | yes |
-| **62%** | 69% | 53% | 3,352 | `error_ignored` | structural | yes ⚠ over-counts |
-| **38%** | 43% | 32% | 1,989 | `premature_external_write` | structural | yes |
-| **37%** | 39% | 34% | 4,898 | **`prompt_withdrawn`** | structural | **NO** |
-| **34%** | 43% | 22% | 1,056 | `reading_spiral` | structural | yes |
-| **33%** | 37% | 29% | 893 | **`edit_retry_friction`** | structural | **NO** |
-| 18% | 18% | 18% | 398 | **`permission_friction`** | structural | **NO** |
-| 12% | 14% | 10% | 1,533 | `no_verification` | structural | yes |
-| 9% | 11% | 7% | 159 | `tdd_fail_then_pass` | structural | yes |
-| 9% | 9% | 8% | 190 | `revert_churn` | structural | **built** |
-| 4% | 5% | 3% | 64 | `tool_loop` | structural | **built** |
-| 1% | 1% | 1% | 15 | `scope_overreach` | structural | yes |
-| 1% | 1% | 1% | 13 | `fail_fix_fail` | structural | yes |
-| 1% | 0% | 1% | 8 | `inaccurate_self_report` | lexical | **built** |
+| occurs in | set A | set B | instances | dimension | probe |
+|---|---|---|---|---|---|
+| **51%** | 62% | 37% | 2,182 | `reading_spiral` | structural |
+| **33%** | 37% | 28% | 927 | **`edit_retry`** | **detector** |
+| 20% | 20% | 19% | 443 | `permission_denied` | structural |
+| 11% | 12% | 10% | 125 | `context_reingest` | structural |
+| 11% | 12% | 9% | 401 | `file_churn` | structural |
+| 0.4% | 1% | 0% | 5 | `redundant_call` | structural |
 
 **Set A** (n=640) is the friction-annotated subset and is therefore biased upward. **Set B** (n=499)
-is a uniform random sample of Claude Code sessions. The ranking is stable across both, which is the
-check that matters — `reading_spiral` is the only row where the bias is large (43% vs 22%).
+is a uniform random sample. The ranking is stable across both except `reading_spiral`, whose 62%/37%
+gap is the widest in the table and the reason it is not built.
 
-Denominators for the run: 15,911 prompts, 31,028 edits, 156,654 tool calls, 5,354 failures, 6,836
-success claims. Verification was learned for 1,949 commands; **226 of 1,139 sessions (20%) are warm**,
-which is the ceiling on anything verification-dependent.
+Denominators: 15,911 prompts, 35,574 edits, 156,654 tool calls, 5,354 harness-declared failures.
+Tokens: 97.1M output, 694.7M cache creation. `cache_creation/output` per session: **p50 12.0, p90
+93.4, p99 857.6**.
+
+`edit_retry`'s row says `probe: detector` — the shipped rule itself ran, so the figure and the product
+cannot disagree. That is now a rule: **a built dimension is measured by its own detector, never by a
+probe that resembles it.** The loose `tool_loop` probe reported 4% of sessions where the real detector
+found 0.4%.
+
+## The five probes that were wrong, and the one thing they had in common
+
+**Each counted a harness mechanism and assumed it meant what its name suggested.**
+
+| probe | claimed | what it actually counted |
+|---|---|---|
+| `user_interrupt` | 64% of sessions | **3,504 of 3,606 enqueues sit at a turn boundary**; only 102 land mid-flight, and of those carrying content **1,858 are `<task-notification>`** — the harness queueing its own messages |
+| `prompt_withdrawn` | 37% — and "not in the catalogue" | not a dimension at all. `remove`/`popAll` carry **empty content** and sit between a `tool_use` and its `tool_result`. The arithmetic gives it away: `enqueue 3,606 ≈ dequeue 2,138 + remove 1,315` |
+| `error_ignored` | 62% | of 234 matches, **≥68 were the agent fixing** and 55 more investigating. A non-zero exit is not an ignored error |
+| `premature_external_write` | 38% | every push. Pushing to a personal branch where CI is the gate is normal and indistinguishable here |
+| cache hit rate | 97.7%, "an outlier is real" | `cache_read` re-counts the **whole prefix on every call**, so it grows with the square of the turn count. Measured `read/(read+creation)`: **p10 0.901 → p90 0.985**. An "outlier" is just a short session |
+
+`permission_friction` was also published as new; it is the second clause of the catalogue's existing
+`user_interrupt` entry ("…**or denies a tool permission**").
+
+The fifth was caught in review before it shipped, which is the only reason it is a row here rather
+than a sixth deleted detector. The metric beside it survived: `cache_creation/output_tokens` spreads
+7.5× p90/p50 and is behavioural.
+
+### Two softer forms of the same error
+
+Both caught later, by making every number reproducible:
+
+- **Signal availability is not frequency.** 84% of sessions carry `file-history-snapshot` records;
+  **11%** have file churn. The first number describes the format, not the developer.
+- **A threshold-defined frequency is tautological.** `context_reingest`'s probe asks "above p90", so
+  ~10% is arithmetic. Magnitude per session is the real question — which is why it is session
+  metadata and not a finding.
 
 ## What the dataset's own annotations say
 
@@ -52,6 +76,10 @@ From `datasets-server` statistics over all **11,607,572 turns** — validated la
 | `queue_op_subtype = user_prompt_discarded` | 18,638 | — |
 | `bash_category = test/build` | 29,331 | **1.8% of 1.64M bash calls** |
 
+Over just the 1,029 sessions whose transcripts we hold: 12,012 annotated prompts, **4,664
+corrections (39%)**, 1,073 failure reports, 147 rejections. That is a ready-made silver label set, and
+it is why `user_correction` is measurable rather than guesswork once the prompt cap is raised.
+
 Persona, Claude Code sessions only (n=12,417):
 
 | persona | sessions | median success | p10 |
@@ -64,69 +92,32 @@ Persona, Claude Code sessions only (n=12,417):
 The paper's own headline numbers: users push back in **50% of turns**, only **59% of agent-written
 code survives into commits**, 41% of sessions are "vibe coded", 25% have the human writing everything.
 
-## Three dimensions the catalogue is missing
+## Why the original catalogue ranked things wrong
 
-These came out of reading 381 real friction statements in `summary_friction`, then measuring them.
+The 40 dimensions came from five published taxonomies of **agent reasoning failures** — MAST,
+Developer-Agent Misalignment, Model-or-Harness, OpenClawBench, Prompt-Quality→PR. Those papers study
+whether agents reason correctly, and the catalogue inherits their rigour on that question.
 
-**`prompt_withdrawn` — 37% of sessions, 4,898 instances.** The user types a prompt while the agent is
-working, then takes it back (`remove`/`popAll` on the queue). They had something to say, reconsidered,
-and cancelled. SWE-chat annotates the same event as `user_prompt_discarded` (18,638 dataset-wide).
+What they do not study is **the harness being awkward to work in**. Reading 381 real friction
+statements, the dominant themes are stale LSP diagnostics, tabs-versus-spaces edit failures,
+local-passes-CI-fails, and the problem simply being hard. **Of those 381, 3 map to a process failure
+that catalogue detects.**
 
-**`edit_retry_friction` — 33% of sessions, 893 instances.** An edit fails and the agent retries the
-same file. Of 811 edit calls in an earlier sample, 45 failed and 35 were retried; the reasons split
-between *string-not-found* (whitespace or a stale read) and *file-not-read-first*. This is the agent
-fighting the tool's exact-match contract, and it is pure waste.
-
-**`permission_friction` — 18% of sessions, 398 instances.** A tool call the user declined. Not
-necessarily friction — declining is control — but it is frequent, structural, and currently invisible.
-
-## Why the catalogue ranked these wrong
-
-The 40 dimensions were derived from five published taxonomies of **agent reasoning failures** — MAST,
-Developer-Agent Misalignment, Model-or-Harness, OpenClawBench, Prompt-Quality→PR. Those papers studied
-whether agents reason correctly. They are good at that and the catalogue inherits their quality.
-
-What they do not study is **the harness being awkward to work in**. Reading the friction text, the
-dominant themes are stale LSP diagnostics, tabs-versus-spaces edit failures, local-passes-CI-fails,
-and the problem simply being hard. Of 381 friction statements, 3 map to a process failure our
-catalogue detects.
-
-## Recommended build order
-
-Ranked by measured frequency, with feasibility accounted for.
-
-1. **`user_correction`** — the dataset labels 63,710 instances and the paper puts pushback at 50% of
-   turns. It is the catalogue's own "anchor signal", it is unbuilt, and **SWE-chat's `prompt_pushback`
-   is a ready-made silver label set, so precision and recall are measurable without hand-labelling.**
-2. **`prompt_withdrawn`** (new) — 37%, purely structural, no text anywhere in the path.
-3. **`edit_retry_friction`** (new) — 33%, purely structural, and the one dimension that is unambiguous
-   waste rather than a judgment call.
-4. **`user_interrupt`** — 64%, but needs the published 4.5% baseline to separate signal from steering,
-   since interrupting to add information is healthy.
-5. **`no_verification`** — 12%, and capped at the 20% of sessions that are warm. Still the most
-   directly actionable sentence the tool can produce.
-
-**Deprioritised, with the reason stated:** `error_ignored` ranks 2nd by frequency but its probe
-over-counts badly — of 234 matches, ≥68 were the agent fixing or re-checking and 55 more were
-investigating. It needs an allowlist of benign non-zero exits before the number means anything.
-`premature_external_write` needs branch awareness. `inaccurate_self_report`, `tool_loop` and
-`revert_churn` are built and stay, but should not be the surfaces the product leads with.
+That is the finding that drove the reset — and `edit_retry`, at 33% of sessions, is exactly a
+harness-awkwardness dimension that no reviewed paper names.
 
 ## Confounds, stated because a number without them is not reportable
 
-Every probe in the table carries its confound in `scripts/measure-dimensions.ts` output. The ones that
-most limit the figures above:
-
-- **`error_ignored` over-counts**, as described. Treat 62% as an upper bound.
-- **`premature_external_write`** counts a push with no verification since the last edit. Pushing to a
-  personal branch where CI is the gate is normal and indistinguishable here.
 - **`reading_spiral`** does not exclude sidechains, where a parallel fan-out legitimately re-reads the
-  same files. Its set A/B gap (43% vs 22%) is the largest in the table and suggests annotation bias
-  as well.
-- **`no_verification`** is silent on cold projects, so 12% is measured against the 20% of sessions
-  where we know what verification means. Verification outside the session is invisible.
-- **`tool_loop`** needs both an argument digest and identical output; a piped command masks its own
-  exit status, and 111 of 127 verdict-bearing results are pipelines.
+  same files. Widest set A/B gap in the table (62% vs 37%), which suggests annotation bias too.
+- **`permission_denied`** counts the person declining, which is control rather than friction.
+- **`context_reingest`** is a session ratio with no turn to anchor to — metadata, not a finding.
+- **`file_churn`** counts from first touch, so a long session inflates versions. It needs the p90 of 5
+  as a threshold, never an absolute count.
+- **`redundant_call`** needs identical arguments *and* identical output, and a self-truncating command
+  discards its own output upstream of us, so the digest compares a prefix.
+- **`edit_retry`** counts only `failureKind: 'tool'`, so a declined or hook-blocked edit is excluded,
+  and the attempt ends at the next user prompt.
 - **`session_success` and `user_persona` are LLM-annotated** — silver, not ground truth.
 - **Set A is selected**, being the sessions an LLM judge found worth annotating. Trust set B for rates.
 
@@ -135,8 +126,9 @@ most limit the figures above:
 - `scripts/pull-swechat.ts` — pinned fetch of the per-turn label columns and both transcript sets.
   Reads Parquet with byte ranges, so the label columns cost **70 MB of a 6,127 MB file — 1.1% of the
   bytes for 100% of the labels**. Dev-only dependency, never in `src/`.
-- `scripts/measure-dimensions.ts` — one probe per dimension, structural wherever possible, each
-  declaring its own confound.
+- `scripts/measure-dimensions.ts` — one probe per dimension, each declaring its own confound, and a
+  built dimension measured by its own detector. Now under the typechecker, which it was not: the
+  reset silently broke it while every check stayed green.
 - Dataset pinned at revision `202b071f18e03c79df5a7287565ce2ebc5ee7756`. Transcripts fetched to
   scratch, never vendored.
 

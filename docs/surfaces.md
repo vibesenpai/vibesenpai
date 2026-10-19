@@ -1,5 +1,11 @@
 # Surfaces & principles
 
+> **Note (2026-10-19):** examples below may name dimensions that were deleted in the reset —
+> `tool_loop`, `revert_churn`, `inaccurate_self_report`, `no_verification`. The mechanics they
+> illustrate still hold; the dimension names do not. See [dimensions.md](dimensions.md) for what is
+> actually detected and `GRAVEYARD.md` for why.
+
+
 ## The product, top-down
 
 **One sentence:** install it once, and it watches your coding sessions across every harness you use,

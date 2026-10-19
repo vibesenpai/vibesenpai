@@ -90,6 +90,20 @@ Planned 2026-10-12/15, before any code existed.
 | D42 | The plugin **bundles the analyzer**; npm is never required for normal use. | [docs/distribution.md](docs/distribution.md) |
 | D43 | Reuse the MIT-licensed [`claude-code-history-viewer`](https://github.com/jhlee0409/claude-code-history-viewer) parser — it already solves `parentUuid` tree reconstruction and sidechain attribution. | [docs/data-sources.md](docs/data-sources.md) |
 
+## The 2026-10-19 reset
+
+| # | Decision | Where |
+|---|---|---|
+| D45 | **A detector reads structure; the compiler enforces it.** `DetectorContext.events` is `Omit<Event, 'command' \| 'pattern' \| 'textSummary'>`, so reading text in a detector is a build failure. Reverses the "text may nominate" half of D31: nominating still led to deciding. | [CLAUDE.md](CLAUDE.md), [GRAVEYARD.md](GRAVEYARD.md) |
+| D46 | **A harness string may name a finding; never produce one.** The runner applies `labels.ts` after a detector has emitted a valid candidate, so a reworded message costs a label, never a detection. Chosen over pure-structure (no advice possible) and string-decides (the thing being removed). | [src/detect/labels.ts](src/detect/labels.ts) |
+| D47 | **The verification family is deleted.** Identifying a test command is irreducibly framework-specific. Cost: `no_verification`, called the most actionable sentence this tool could produce. Accepted knowingly — `src/verify.ts` never produced a finding and was capped at the 20% of sessions that were warm. | [GRAVEYARD.md](GRAVEYARD.md) |
+| D48 | **The format has no error codes, but it has an envelope.** All 5,354 failing results are plain strings; the harness nonetheless *frames* its errors. `Event.failureKind` records who rejected a call, derived in the harness-specific parser. Only `tool` is agent waste — reporting the person's own hook would be worse than silence. | [src/parsers/claude-code.ts](src/parsers/claude-code.ts) |
+| D49 | **`cache_read` is not a hit rate.** It re-counts the whole prefix per call, so `read/(read+creation)` runs p10 0.901 → p90 0.985 by construction. `cache_creation/output_tokens` is the behavioural metric and spreads 7.5x p90/p50. Caught in review, one step from becoming the lead pillar. | [docs/findings-frequency.md](docs/findings-frequency.md) |
+| D50 | **An aggregate is not a finding.** A session-wide ratio has no turn to anchor to, so token totals are catalog metadata shown beside findings — never a finding, never a score. Keeps "two outputs, never a third". | [src/detect/index.ts](src/detect/index.ts) |
+| D51 | **Voice: what the session cost, with receipts** — not "you made a mistake". Naming a mistake requires knowing intent, which is what produced the false positives. | [docs/dimensions.md](docs/dimensions.md) |
+| D52 | **A built dimension is measured by its own detector**, never by a probe that resembles it. The loose `tool_loop` probe said 4% of sessions where the detector found 0.4%. `scripts/` is now under the typechecker, which it was not. | [scripts/measure-dimensions.ts](scripts/measure-dimensions.ts) |
+| D53 | **`core` membership is about precision, not frequency.** The three detectors that led `core` on assumed frequency were the ones deleted; `redundant_call` fires on 0.4% and earns its place by never being wrong. | [docs/dimensions.md](docs/dimensions.md) |
+
 ## Reversed or corrected during planning
 
 Kept because the discarded answer is the one a reader will reach for next.

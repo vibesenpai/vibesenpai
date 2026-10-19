@@ -65,63 +65,99 @@ is the S4 Self-Initiated Overreach failure this tool exists to detect.
 - **Config expresses intent, never side effects.** Setting `preset: standard` does not trigger a
   download.
 
-## Discover, do not configure
+## A detector reads structure. The compiler enforces it.
 
-A hardcoded list of frameworks means accuracy tracks how well we guessed the user's stack. There are
-thousands of toolchains; we will guess wrong. **Verification is discovered from behaviour, not named
-in a list** (`src/verify.ts`):
+```ts
+export type StructuralEvent = Omit<Event, 'command' | 'pattern' | 'textSummary'>;
+```
 
-- Output shape says a command *reports* a verdict — result vocabulary (`N passed`, `ok`, `FAIL`,
-  `AssertionError`) is far more universal than command names, because every tool reports to a human.
-- A command must have **executed**. Reading a test file looks identical to running one; measured, the
-  first version matched `Read`, `grep expect(` and `cat >> test.ts`.
-- **A verification command is one whose verdict changes when the code changes.** Seeing the same
-  command both pass and fail proves it with no vocabulary at all, and it is what excludes
-  `git log --oneline`, which matched on shape alone.
-- What one session learns is persisted, so confidence grows with history. User config is an
-  **override**, never the mechanism.
+`DetectorContext.events` is `StructuralEvent[]`, so reading command text in a detector is a **build
+failure**, not a review comment. This is the project's central rule and it was bought expensively:
+three detectors shipped on text and, across 1,139 real sessions, produced **5 true positives against
+~25 false positives**. `GRAVEYARD.md` has each one with the evidence that killed it.
 
-The cost is a cold start: a new project yields no findings for a session or two. That is the correct
-trade — the same rule that makes `tool_loop` skip calls it cannot distinguish.
+Text is an open space. There are thousands of toolchains and infinite phrasings, so a rule over text
+is a guess with good manners — it cannot even tell you what it missed.
 
-**No invisible characters in source.** A literal NUL was authored into `src/verify.ts`, and the damage
+**A harness string may name a finding; it may never produce one.** `src/detect/labels.ts` maps the
+harness's own reasons to advice, and the **runner** applies it after a detector has already produced
+a valid candidate. The dependency runs one way: reword a message and `reasonOf` returns `undefined`,
+the finding still fires, the report says the reason is unknown. Losing a label is cosmetic; losing a
+detection would be silent.
+
+**The format has no error codes** — verified across all 5,354 failing results; every one is a plain
+string. What it does have is an *envelope*, and the envelope is structure:
+
+```
+<tool_use_error>…</tool_use_error>   the tool itself refused        1424
+The user doesn't want to proceed…    the person said no             398
+Sibling tool call errored            the call never ran             113
+PreToolUse:Edit hook error: …        the person's OWN hook blocked   45
+```
+
+`Event.failureKind` records that distinction, derived in the harness-specific parser where harness
+coupling belongs. Detectors read an enum. Telling someone their own hook is waste would be worse
+than saying nothing.
+
+**No invisible characters in source.** A literal NUL was authored into `src/verify.ts` (since deleted), and the damage
 was not the constant but a doc comment holding one: a later edit targeting that comment matched
 nothing, applied silently, and left a type and its implementation disagreeing while every test passed.
 `test/source-hygiene.test.ts` makes it a build failure.
+
+Related, and the same lesson: a `//` comment *mentioning* `@ts-expect-error` **is** one. Explaining
+that guard in prose created a fourth directive and a confusing build error.
+
+## A mechanism is not a behaviour
+
+**A probe over a harness mechanism must first establish that the mechanism means what its name
+suggests.** Five instances, each of which looked authoritative until broken down:
+
+| claimed | what it actually counted |
+|---|---|
+| `user_interrupt`, 64% of sessions | **3,504 of 3,606 enqueues sit at a turn boundary**; 1,858 are `<task-notification>` |
+| `prompt_withdrawn`, 37% | `remove`/`popAll` carry empty content; the queue operations balance |
+| `error_ignored`, 62% | of 234 matches, **≥68 were the agent fixing** and 55 investigating |
+| `premature_external_write`, 38% | every push, including to a personal branch where CI is the gate |
+| cache hit rate, 97.7% | `cache_read` re-counts the whole prefix per call, so `read/(read+creation)` runs **p10 0.901 → p90 0.985** whatever anyone does |
+
+Two softer forms of the same error, both caught by making the numbers reproducible: *signal
+availability is not frequency* (84% of sessions carry file-history records; 11% have file churn), and
+**a threshold-defined frequency is tautological** (a probe asking "above p90" reports ~10%).
 
 ## Scope is a property of the detector, not of the pipeline
 
 The window exists for a **token budget** — it is what a model can afford to read. That is a different
 question from the span a *rule* should evaluate, and conflating them was a precision bug: measured
-across 255 sessions, of 363 genuinely verified edits **293 (81%) are verified by a command in a later
-window.** A per-window `no_verification` would have called every one of them unverified.
+across 255 sessions, of 363 genuinely verified edits **293 (81%) were covered by a command in a later
+window.** A per-window rule would have called every one of them unverified.
 
 | scope | the question | who |
 |---|---|---|
 | `window` | what can a model afford to read? | semantic tier, evidence display |
-| `thread` | what did **this actor** do, in order? | `tool_loop` — locality is the signal |
-| `session` | did this happen **anywhere**, by anyone? | everything else |
+| `thread` | what did **this actor** do, in order? | `redundant_call` — locality is the signal |
+| `session` | did this happen **anywhere**, by anyone? | everything else, incl. `edit_retry` |
 | `project` | has this happened **before**? | `constraint_decay` — declared, refused until M3 |
 
 `thread` is not `session`: a flat array interleaves subagent events among main-thread ones, which
-breaks consecutive-run detection. `session` is not `thread`: a subagent edits a file and the main
-thread runs the tests.
+breaks consecutive-run detection. `session` is not `thread`: a subagent edits a file the main thread
+then retries.
 
-## Prefer a structural signal, then a behavioural one, then nothing
+**A span also ends at the next user prompt.** A new instruction is a new request, so what the agent
+does afterwards does not belong to what came before. It is the one bound that is a fact about the
+session rather than a guess about attention — which is why `edit_retry` uses it and does *not* also
+cap the gap at N turns.
 
-Reading tool output as prose is a pattern list over an open space, and it decides as well as
-nominates — the thing D31 forbids. The ladder, strongest first:
+## What survives a pipe
 
-1. **Structural** — what the harness itself records: `is_error`, `Exit code N`,
-   `file-history-snapshot` versions. Closed, published, no guessing.
-2. **Behavioural** — what the agent *did*: ran a command after an edit, re-ran the same check,
-   committed. Survives the things that destroy structure, notably piping.
-3. **Text** — may **nominate** a candidate; must never decide alone.
-4. **Nothing** — say "cannot tell" and stay silent.
+Structure is best where it exists, and simply absent where it does not. Measured: **111 of 127
+verdict-bearing results come from pipelines**, so the exit status belongs to `tail` rather than to the
+test runner. A self-truncating command (`tsc --noEmit 2>&1 | head -30`) throws its own output away
+*upstream of us*, so even an output digest compares a prefix.
 
-Measured lesson: 111 of 127 verdict-bearing results come from pipelines, so the exit status belongs to
-`tail` rather than the test runner. Structure is best where it exists and simply absent where it does
-not — which is why rung 2 exists.
+The honest responses are to downgrade confidence or to say nothing. The dishonest one is to read the
+text instead, which is how this project spent most of a week.
+
+**`unknown` beats guessing**, and it is a first-class answer rather than a gap to paper over.
 
 ## Precision over recall
 
@@ -131,7 +167,7 @@ A false flag destroys trust permanently, and a stranger who gets one never tells
   "flagged by a model at 0.7".
 - Thresholds are tuned to **miss rather than over-fire**, calibrated on the gold set.
 - **`unknown` beats guessing.** When outcome or backend is unavailable, report absence — never infer.
-  `rework_loop` fires only on `abandoned` or `reverted`, never on `unknown`.
+  An unrecognised harness reason reads as "reason unknown", never as the nearest familiar one.
 - Ambient surfacing requires `certain` or `high`.
 - No percentages on small samples — show `3 → 1`, not "+50%".
 - Every problem dimension's healthy twin must work before the dimension ships.
@@ -157,6 +193,11 @@ deliberate.
 - `scripts/` entrypoints take paths and session id from **arguments and env**, never Claude-specific
   assumptions — the plugin layout is multi-harness by design.
 - Vitest. Pinned versions. No telemetry. No network in the shipped analysis path.
+- `tsconfig` covers `src/`, `test/` **and `scripts/`**. It did not, and the reset silently broke
+  `npm run measure` while every check stayed green.
+- **Every published frequency comes from `npm run measure`**, over the pinned corpus, so a number in
+  a doc can be reproduced instead of trusted. A built dimension is measured by its own detector and
+  never by a probe that resembles it.
 - The redactor is written and tested **before** anything is stored or displayed.
 - `src/catalog.ts` must never gain a file-copy path. It imports no write target under the store
   except `index.json`.
@@ -168,11 +209,24 @@ redactor, skeletonizer, reader modes, and the `scan` / `doctor` / `config` / `sk
 `report` CLI. Validated against 231 public transcripts plus local sessions; `npm run verify:corpus`
 is the gate and fails on count drift or any leak.
 
-**M2a in progress** — the first real product value: 8 outcome-free detectors, incremental
-persistence, the running score. Foundation and 3 detectors land; see PLAN.md for what the first
-real-data findings corrected.
+**M2a in progress, restarted 2026-10-19.** The three original detectors are deleted — see
+`GRAVEYARD.md`. `edit_retry` is the first replacement and the first detector in this project's
+history to produce a real finding: **380 of 1,139 sessions (33.4%)**, 927 instances, every one
+`certain`, 926 of 927 labelled with the harness's own reason.
 
-**A detector is not done until its findings have been read on real data.** All three of the first
-framework findings were false positives that every unit test passed — one matched a command inside a
-heredoc, one mistook a denied permission for a test failure, one flagged an honest scoped report.
+Next, in order of how clearly each can point at a turn: `file_churn`, `context_reingest`,
+`redundant_call`. Still unbuilt and deliberately so: `permission_denied` (20% and now structural, but
+declining is the person exercising control and it is not obvious it should ever be surfaced) and
+`user_correction` (needs parser work — 40% of prompts hit the 200-char cap).
+
+**A detector is not done until its findings have been read on real data.** This is the only check
+that has ever caught anything here.
+
+- The first three framework findings were all false positives that every unit test passed — one
+  matched a command inside a heredoc, one mistook a denied permission for a test failure, one flagged
+  an honest scoped report.
+- `edit_retry` passed every test and still mis-paired verdicts with calls, because **tool-call ids
+  are not unique**: one pinned-corpus file reuses 90 of them. Reading the evidence showed a verdict
+  at seq 627 answering an edit at seq 628, which cannot happen.
+
 Counts look plausible when they are wrong; evidence does not.

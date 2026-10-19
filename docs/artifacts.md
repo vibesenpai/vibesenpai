@@ -1,5 +1,11 @@
 # From finding to something applicable
 
+> **Note (2026-10-19):** examples below may name dimensions that were deleted in the reset —
+> `tool_loop`, `revert_churn`, `inaccurate_self_report`, `no_verification`. The mechanics they
+> illustrate still hold; the dimension names do not. See [dimensions.md](dimensions.md) for what is
+> actually detected and `GRAVEYARD.md` for why.
+
+
 ## From finding to something applicable
 
 Everything above *detects*. This section specifies the other half: how a finding becomes something you

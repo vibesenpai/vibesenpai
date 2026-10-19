@@ -187,13 +187,16 @@ required and no CLI invocation.
   Scanned 34 sessions over 18 days · copied nothing (catalog: 31 KB)
 
   COSTING YOU
-  ✗ no_verification         23 of 41 edits unverified          /agentsensei:fix 1
-  ✗ constraint_decay        "use pnpm, never npm" ×7           /agentsensei:fix 2
-  ✗ inaccurate_self_report  claimed success, 2 failing ×3      /agentsensei:fix 3
+  ✗ edit_retry              9 edits refused, then retried       /agentsensei:fix 1
+                            7× read the file before editing it
+                            2× the anchor matched several places
+  ✗ file_churn              src/api.ts went through 12 versions /agentsensei:fix 2
 
   DOING WELL
   ✓ convergent_iteration    11 of 13 loops resolved
-  ✓ tdd_fail_then_pass      6 sessions wrote the test first
+
+  THIS SESSION COST
+    412k in · 38k out · 3 compactions · 2.1M re-ingested
 
   No trend yet — deltas appear from your next run onward.
 
@@ -235,7 +238,7 @@ Plus the ambient surface, which needs no command at all:
   Run /agentsensei:now to view more details.
 
 [later, after a commit lands]
-  ⌁ 3 edits unverified · +1 more          ← statusline only. never interrupts.
+  ⌁ 3 edits refused then retried · +1 more   ← statusline only. never interrupts.
 ```
 
 ### `fix` in the harness, which is where it gets good

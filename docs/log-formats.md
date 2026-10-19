@@ -1,5 +1,11 @@
 # Claude Code log format
 
+> **Note (2026-10-19):** examples below may name dimensions that were deleted in the reset —
+> `tool_loop`, `revert_churn`, `inaccurate_self_report`, `no_verification`. The mechanics they
+> illustrate still hold; the dimension names do not. See [dimensions.md](dimensions.md) for what is
+> actually detected and `GRAVEYARD.md` for why.
+
+
 What a Claude Code transcript actually contains, measured rather than assumed.
 
 **Method.** 2,336 records across 3 catalogued sessions, read on 2026-10-15 with the parser and ad-hoc
