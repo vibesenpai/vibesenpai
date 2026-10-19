@@ -110,5 +110,11 @@ redactor, skeletonizer, reader modes, and the `scan` / `doctor` / `config` / `sk
 `report` CLI. Validated against 231 public transcripts plus local sessions; `npm run verify:corpus`
 is the gate and fails on count drift or any leak.
 
-**M2a next**, and it is the first real product value: 8 outcome-free detectors, incremental
-persistence, the running score.
+**M2a in progress** — the first real product value: 8 outcome-free detectors, incremental
+persistence, the running score. Foundation and 3 detectors land; see PLAN.md for what the first
+real-data findings corrected.
+
+**A detector is not done until its findings have been read on real data.** All three of the first
+framework findings were false positives that every unit test passed — one matched a command inside a
+heredoc, one mistook a denied permission for a test failure, one flagged an honest scoped report.
+Counts look plausible when they are wrong; evidence does not.

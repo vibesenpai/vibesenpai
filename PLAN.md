@@ -369,6 +369,27 @@ land on top of them.
 4. `tdd_fail_then_pass`, `effective_correction` — the strengths that need no outcome
 5. **Incremental persistence + the running-score rate engine**, including all four honesty guards
 
+**M2a status: foundation + 3 of 10 detectors.** Done: window→events plumbing, finding identity and
+merge, the detector framework with failure isolation, the denominator pass, and `tool_loop`,
+`revert_churn`, `inaccurate_self_report`. Remaining: 7 detectors, SQLite persistence, the score engine.
+
+**Every one of the framework's first three real-data findings was a false positive**, and each bought
+a rule:
+
+| Finding | Why it was wrong | Rule added |
+|---|---|---|
+| `tool_loop` ×16 | `command`/`filePath`/`pattern` cover Bash, Read, Edit and Grep only, so six separate `TaskCreate` calls looked like one call repeated | `Event.argHash` — a digest of the call's **full** arguments |
+| `inaccurate_self_report` "done" | The "failure" was a **user denying a tool permission** | a failure must come from a recognised verification command |
+| `inaccurate_self_report` "fixed" | *"fixed all the sidechain tests. Only one test is still failing"* — an honest, self-qualifying report | an acknowledged remainder disqualifies the claim |
+| `revert_churn` | matched `git reset --hard` **inside a heredoc body** — this project's own docs | heredoc bodies stripped before any command match |
+
+**After the fixes: 0 findings across 227 sessions.** Precision is therefore unfalsified rather than
+demonstrated, and **recall is entirely unvalidated on real data** — positives exist only in synthetic
+fixtures. Two things follow. The published 22.6% for `inaccurate_self_report` is not a comparable
+baseline (it comes from human-labelled misalignment episodes, not arbitrary sessions), and only 37 of
+the 227 sessions exceed 20 events, so the corpus is mostly short fixtures. This is exactly the gap the
+**M4 gold set** closes, and it is the strongest argument for not deferring it.
+
 **M2b**, once M2a is in real use:
 
 6. **Outcome classification** with its four states, `unknown` included — the gate for what follows

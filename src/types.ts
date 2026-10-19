@@ -69,6 +69,24 @@ export type Event = {
   command?: string;
   pattern?: string;
 
+  /**
+   * Digest of the tool call's full arguments — the only way to tell two calls
+   * to the same tool apart.
+   *
+   * `filePath`, `command` and `pattern` cover Bash, Read, Edit and Grep and
+   * nothing else, so without this every `TaskUpdate`, `Agent` or `TaskCreate`
+   * call collapses into one indistinguishable signature. Measured: of 19
+   * repeated-call runs across 227 sessions, **16 were different calls that
+   * merely looked identical** — six separate tasks, seven separate subagents —
+   * and `tool_loop` would have reported them at `certain` confidence.
+   *
+   * A digest rather than the arguments themselves: it answers "same call?",
+   * which is all any detector needs, while storing no content. Computed over the
+   * redacted form, so it cannot serve as an oracle for a secret that appeared in
+   * an argument.
+   */
+  argHash?: string;
+
   exitCode?: number;
   isError?: boolean;
 
@@ -143,6 +161,24 @@ export type Polarity = 'lower-is-better' | 'higher-is-better' | 'neutral';
 
 export type ArtifactKind = 'prompt' | 'guard' | 'rule';
 
+/**
+ * What a rate divides by. Deltas are computed on rates, never raw counts: ten
+ * sessions this period against ten last period are not comparable if the
+ * sessions differ in length.
+ */
+export type Denominator =
+  | 'per-session'
+  | 'per-turn'
+  | 'per-edit'
+  | 'per-success-claim'
+  | 'per-tool-call';
+
+/**
+ * Which dimensions run by default. `core` is the trust-building set — every
+ * member is `certain` or `high` and needs no model.
+ */
+export type Preset = 'core' | 'standard' | 'all';
+
 export type Finding = Versioned<'finding'> & {
   /** Per-session instance: hash(dimension + sessionId + subject). */
   id: string;
@@ -164,6 +200,15 @@ export type Finding = Versioned<'finding'> & {
 
   /** Grows over time. Never part of either identity. */
   evidence: TurnRef[];
+  /**
+   * One ref per instance — what `occurrences` counts.
+   *
+   * Distinct from `evidence`, which may cite supporting turns:
+   * `inaccurate_self_report` shows both the failing check and the claim, but
+   * that is **one** false claim. Tying the count to evidence reported every such
+   * finding at double its real size.
+   */
+  anchors: TurnRef[];
   occurrences: number;
 
   confidence: Confidence;

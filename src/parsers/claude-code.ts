@@ -70,6 +70,7 @@ import type {
   ToolUseBlock,
   Usage,
 } from '@anthropic-ai/sdk/resources/messages';
+import { createHash } from 'node:crypto';
 import { redact } from '../redact.ts';
 import type { Event, TurnType } from '../types.ts';
 
@@ -173,6 +174,30 @@ type AnyBlock = {
  * 59 paths from `file-history-*` records. A single choke point means a new site
  * cannot quietly forget.
  */
+/**
+ * Stable digest of a tool call's arguments.
+ *
+ * Keys are sorted so that `{a:1,b:2}` and `{b:2,a:1}` are the same call, and the
+ * canonical form is redacted before hashing — a hash of a secret should not be
+ * usable as a confirmation oracle, and redacting also makes two users' home
+ * paths agree, which is what we want for "same call?".
+ *
+ * Returns undefined for a call with no arguments at all, so a detector can tell
+ * "no arguments" from "arguments we failed to read" instead of treating every
+ * such call as identical.
+ */
+function argDigest(input: unknown): string | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (typeof input === 'object' && Object.keys(input as object).length === 0) return undefined;
+  let canonical: string;
+  try {
+    canonical = JSON.stringify(input, Object.keys(input as object).sort());
+  } catch {
+    return undefined;
+  }
+  return createHash('sha256').update(redact(canonical).text).digest('hex').slice(0, 16);
+}
+
 function cleanPath(p: string | undefined): string | undefined {
   return p === undefined ? undefined : redact(p).text;
 }
@@ -542,6 +567,9 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
                 ...(b.name !== undefined ? { toolName: b.name } : {}),
                 ...(b.id !== undefined ? { toolCallId: b.id } : {}),
                 ...toolTarget(b.name, b.input),
+                ...(argDigest(b.input) !== undefined
+                  ? { argHash: argDigest(b.input) as string }
+                  : {}),
                 ...(tokens !== undefined ? { tokens } : {}),
               });
               break;

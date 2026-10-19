@@ -27,6 +27,7 @@
  * so revisiting this is a one-line change rather than a redesign.
  */
 
+import { executablePart } from './detect/command.ts';
 import { stamp } from './schema.ts';
 import type { Event, Skeleton, SkeletonLine, TurnRef } from './types.ts';
 
@@ -59,8 +60,11 @@ export function estimateTokens(text: string): number {
 /** Git operations worth promoting out of a plain tool line. */
 function gitMeta(command: string | undefined): 'commit' | 'revert' | undefined {
   if (command === undefined) return undefined;
-  if (/\bgit\s+(?:-\S+\s+)*commit\b/.test(command)) return 'commit';
-  if (/\bgit\s+(?:revert|reset\s+--hard)\b|\bgit\s+checkout\s+--/.test(command)) return 'revert';
+  // Same heredoc trap as `revert_churn`: a doc file mentioning `git commit`
+  // would otherwise render as a commit that never happened.
+  const exec = executablePart(command);
+  if (/\bgit\s+(?:-\S+\s+)*commit\b/.test(exec)) return 'commit';
+  if (/\bgit\s+(?:revert|reset\s+--hard)\b|\bgit\s+checkout\s+--/.test(exec)) return 'revert';
   return undefined;
 }
 
@@ -312,6 +316,18 @@ function fitToBudget(
 }
 
 /**
+ * A window: the evidence a detector reads, plus the skeleton a human reads.
+ *
+ * `events` is the **full** event span the skeleton's lines cover, including the
+ * records the skeleton dropped or folded away. That difference is load-bearing:
+ * a successful `tool_result` produces no line, so a detector asking "was this
+ * edit ever verified" would conclude *no* from the skeleton while the transcript
+ * plainly shows a passing test. The skeleton is for reading; the events are for
+ * deciding.
+ */
+export type Window = { skeleton: Skeleton; events: Event[] };
+
+/**
  * Split events into windows and reduce each to a `Skeleton`.
  *
  * Sidechains get their own windows rather than being merged into the main
@@ -324,6 +340,14 @@ export function buildSkeletons(
   events: Event[],
   opts: SkeletonOptions = {},
 ): Skeleton[] {
+  return buildWindows(sessionId, events, opts).map((w) => w.skeleton);
+}
+
+export function buildWindows(
+  sessionId: string,
+  events: Event[],
+  opts: SkeletonOptions = {},
+): Window[] {
   const width = opts.width ?? DEFAULTS.width;
   const stride = opts.stride ?? width;
   const budget = opts.tokenBudget ?? DEFAULTS.tokenBudget;
@@ -338,7 +362,7 @@ export function buildSkeletons(
     else bucket.push(e);
   }
 
-  const out: Skeleton[] = [];
+  const out: Window[] = [];
   for (const [sidechainId, threadEvents] of threads) {
     const { lines, dropsAt } = toLines(threadEvents);
     if (lines.length === 0) continue;
@@ -361,14 +385,28 @@ export function buildSkeletons(
         }
       }
 
+      // The event span this window covers, sliced from **its own thread**. A
+      // sidechain window slicing the global array would pick up every
+      // main-thread event that happens to sit between its seq numbers.
+      //
+      // The first and last window extend to the thread's edges so that records
+      // before the first line and after the last — dropped types, mostly — land
+      // in exactly one window rather than nowhere.
+      const lo = i === 0 ? -Infinity : (first.ref.seq ?? 0);
+      const hi = end >= lines.length ? Infinity : (last.ref.seq ?? 0);
+      const windowEvents = threadEvents.filter((e) => e.seq >= lo && e.seq <= hi);
+
       out.push({
-        ...stamp('skeleton'),
-        sessionId,
-        window: { from: first.ref, to: last.ref },
-        lines: fitted.lines,
-        ...(fitted.elided !== undefined ? { elided: fitted.elided } : {}),
-        ...(sidechainId !== undefined ? { sidechainId } : {}),
-        ...(Object.keys(dropped).length > 0 ? { dropped } : {}),
+        skeleton: {
+          ...stamp('skeleton'),
+          sessionId,
+          window: { from: first.ref, to: last.ref },
+          lines: fitted.lines,
+          ...(fitted.elided !== undefined ? { elided: fitted.elided } : {}),
+          ...(sidechainId !== undefined ? { sidechainId } : {}),
+          ...(Object.keys(dropped).length > 0 ? { dropped } : {}),
+        },
+        events: windowEvents,
       });
 
       // A final partial window is emitted, but a stride shorter than the width
