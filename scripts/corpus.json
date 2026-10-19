@@ -30,7 +30,13 @@
     "harness's own is_error/exit-code verdict) and the token totals the harness",
     "billed. `detectorFindings` stays 0 because the registry is deliberately empty;",
     "the gate still runs, and it is what will catch the first real finding.",
-    "See GRAVEYARD.md."
+    "See GRAVEYARD.md.",
+    "",
+    "detectorFindings moved 0 -> 12 with `edit_retry`, the first detector built",
+    "after the reset and the first to produce a real finding. All 12 were read",
+    "against the transcript by hand, plus 16 on SWE-chat; that reading found a",
+    "mis-pairing (tool-call ids are reused -- one file here reuses 90 of them) that",
+    "every unit test passed through. Evidence caught it; counts did not."
   ],
   "corpora": [
     {
@@ -60,7 +66,7 @@
     "leaks": 0,
     "skeletonWindows": 463,
     "skeletonsOverTarget": 0,
-    "detectorFindings": 0,
+    "detectorFindings": 12,
     "detectorFailures": 0,
     "editCount": 393,
     "unclassifiedTouchCount": 7,

@@ -37,6 +37,8 @@ import { buildWindows, threadsOf, type SkeletonOptions, type Window } from '../s
 import type { Event, Finding, Preset } from '../types.ts';
 import type { Detector, DetectorContext, SessionFacts } from './types.ts';
 import { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../edits.ts';
+import { editRetry } from './edit-retry.ts';
+import { reasonOf } from './labels.ts';
 
 export type { Detector, DetectorContext, SessionFacts } from './types.ts';
 // Re-exported so existing callers and tests keep one import site.
@@ -56,7 +58,7 @@ export { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../ed
  * detector that disagrees with the measurement that justified it is wrong.
  */
 export function allDetectors(): Detector[] {
-  return [];
+  return [editRetry()];
 }
 
 const PRESET_RANK: Record<Preset, number> = { core: 0, standard: 1, all: 2 };
@@ -262,16 +264,45 @@ export async function runDetectors(input: RunInput): Promise<RunResult> {
     }
   }
 
+  const findings = collect(candidates, {
+    sessionId: input.session.sessionId,
+    project: input.session.project,
+    now,
+  });
+
   return {
-    findings: collect(candidates, {
-      sessionId: input.session.sessionId,
-      project: input.session.project,
-      now,
-    }),
+    findings: findings.map((f) => label(f, ordered)),
     denominators: countDenominators(input.events),
     windows: windows.length,
     failures,
   };
+}
+
+/**
+ * Attach the harness's own reasons to a finding that already exists.
+ *
+ * ── Why the runner does this and not the detector ──────────────────────────
+ *
+ * A detector cannot read text — `StructuralEvent` omits the fields. Doing it
+ * here keeps the dependency one-way: the finding was already valid on structure
+ * alone, and the label only decides how specific the advice can be. If the
+ * harness rewords a message, `reasonOf` returns undefined, the tally comes back
+ * empty, and the finding is unchanged.
+ *
+ * Keyed on **anchors**, one per instance, so the tally sums to `occurrences`
+ * rather than to the number of turns cited as evidence.
+ */
+function label(f: Finding, events: Event[]): Finding {
+  const byUuid = new Map(events.map((e) => [e.uuid, e]));
+  const reasons: Record<string, number> = {};
+  for (const a of f.anchors) {
+    const e = byUuid.get(a.uuid);
+    if (e === undefined) continue;
+    const r = reasonOf(e);
+    if (r === undefined) continue;
+    reasons[r] = (reasons[r] ?? 0) + 1;
+  }
+  return Object.keys(reasons).length === 0 ? f : { ...f, reasons };
 }
 
 /**

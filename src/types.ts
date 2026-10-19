@@ -139,6 +139,35 @@ export type Event = {
    */
   abandoned?: boolean;
 
+  /**
+   * **Who** rejected a failed call, from the harness's own envelope.
+   *
+   * Set only when the call failed. The harness frames its errors rather than
+   * just describing them, and the frame is the closest thing this format has to
+   * an error code — there are no codes anywhere in it, verified across all
+   * 5,354 failing results.
+   *
+   * Measured over 1,135 failed edit calls:
+   *
+   * ```
+   *   1031  <tool_use_error>…</tool_use_error>   the tool itself rejected it
+   *     49  The user doesn't want to proceed…    the person said no
+   *     41  PreToolUse:Edit hook error: …        the person's OWN hook blocked it
+   *      4  Claude requested permissions to …    still waiting on a decision
+   *     10  unenveloped
+   * ```
+   *
+   * `cascade` is split out of the first group: `Sibling tool call errored`
+   * means the call never ran, so re-issuing it is correct rather than wasteful.
+   * It was 32 of the 991 findings the first version produced.
+   *
+   * Why it is a field and not a detector's business: those last three are not
+   * the agent fighting a tool. Counting a `hook` rejection as waste blames the
+   * developer's own guardrail for working. A detector reads this enum; only the
+   * harness-specific parser reads the envelope, which is exactly its job.
+   */
+  failureKind?: 'tool' | 'denied' | 'hook' | 'permission' | 'cascade' | 'other';
+
   /** Short and redacted. Never raw file contents. */
   textSummary?: string;
 
@@ -286,6 +315,16 @@ export type Finding = Versioned<'finding'> & {
 
   /** May be empty — report-only findings are a first-class answer. */
   artifacts: ArtifactKind[];
+
+  /**
+   * What the harness said went wrong, by reason, with a count each.
+   *
+   * Attached by the **runner** once the finding already exists, never by a
+   * detector — see `src/detect/labels.ts`. Absent when nothing was recognised,
+   * and a reason the harness has reworded simply stops appearing. The finding
+   * stands either way; this only decides how specific the advice can be.
+   */
+  reasons?: Record<string, number>;
 
   firstSeen: string;
   lastSeen: string;

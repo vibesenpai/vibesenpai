@@ -11,6 +11,9 @@ import {
 } from '../src/detect/index.ts';
 import { collect, mergeFindings, materialise, findingId, subjectIdOf } from '../src/finding.ts';
 import type { Event, Finding } from '../src/types.ts';
+import { editRetry, retriedFailures } from '../src/detect/edit-retry.ts';
+import { reasonOf, adviceFor } from '../src/detect/labels.ts';
+import { failureKindOf } from '../src/parsers/claude-code.ts';
 import type { Detector, SessionFacts } from '../src/detect/types.ts';
 
 let seq = 0;
@@ -362,10 +365,12 @@ describe('runner — isolation and presets', () => {
     }
   });
 
-  it('registers no detector yet, and says so rather than pretending', () => {
-    // The 2026-10-19 reset removed all three. This asserts the honest empty
-    // state so a silent zero is never mistaken for "nothing found".
-    expect(allDetectors()).toEqual([]);
+  it('registers only detectors that read structure', () => {
+    // The 2026-10-19 reset removed every detector that read text to decide.
+    // Anything registered here must survive `StructuralEvent`, which the
+    // compiler already guarantees — this pins the roster itself so a
+    // reintroduction is a visible change rather than a quiet one.
+    expect(allDetectors().map((d) => d.dimension)).toEqual(['edit_retry']);
   });
 });
 
@@ -548,4 +553,233 @@ describe('"did a file change?" without a name allowlist', () => {
     expect(d.editCount).toBe(2);
   });
 
+});
+
+/**
+ * Fixtures below use the harness's **real** messages, copied from the corpus.
+ *
+ * Invented strings are how a detector passes its tests and fails on real data:
+ * every one of this project's first three real-data findings was a false
+ * positive that every unit test passed. The envelope in particular has to be
+ * exact, because it is what separates the tool refusing an edit from the
+ * person's own hook refusing it.
+ */
+const HARNESS = {
+  notRead:
+    '<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>',
+  stale:
+    '<tool_use_error>File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.</tool_use_error>',
+  ambiguous:
+    '<tool_use_error>Found 3 matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true.</tool_use_error>',
+  denied:
+    "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the user rejected the edit).",
+  hook:
+    'PreToolUse:Edit hook error: [python3 ${CLAUDE_PLUGIN_ROOT}/hooks/security_reminder_hook.py]: You are editing a sensitive file.',
+  reworded:
+    '<tool_use_error>Something entirely new that no release has ever said.</tool_use_error>',
+  cascade: '<tool_use_error>Sibling tool call errored</tool_use_error>',
+  denyRule:
+    '<tool_use_error>File is covered by a Read deny rule in your permission settings</tool_use_error>',
+} as const;
+
+describe('edit_retry — the harness refused, the agent pushed on', () => {
+  let n = 0;
+  const editCall = (filePath: string): Event => {
+    n += 1;
+    return ev({
+      turnType: 'tool_use',
+      toolName: 'Edit',
+      filePath,
+      toolCallId: `call-${n}`,
+      argHash: hash(`${filePath}-${n}`),
+    });
+  };
+  /** The harness answering a specific call, parsed exactly as production does. */
+  const failure = (call: Event, text: string): Event =>
+    ev({
+      turnType: 'tool_result',
+      toolCallId: call.toolCallId as string,
+      isError: true,
+      failureKind: failureKindOf(text),
+      textSummary: text,
+    });
+
+  const run = async (events: Event[]): Promise<Finding[]> =>
+    (
+      await runDetectors({
+        events,
+        session: facts(),
+        detectors: [editRetry()],
+        now: '2026-10-19T00:00:00.000Z',
+      })
+    ).findings;
+
+  it('fires when a refused edit is followed by another edit to the same file', async () => {
+    const a = editCall('/repo/src/api.ts');
+    const f = await run([a, failure(a, HARNESS.notRead), editCall('/repo/src/api.ts')]);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.subject).toBe('/repo/src/api.ts');
+    expect(f[0]!.occurrences).toBe(1);
+    // Attempt, verdict and retry: readable without opening the transcript.
+    expect(f[0]!.evidence).toHaveLength(3);
+  });
+
+  it('stays silent when the agent accepts the refusal', async () => {
+    // One refused edit is the tool doing its job. The retry is the waste.
+    const a = editCall('/repo/src/api.ts');
+    expect(await run([a, failure(a, HARNESS.notRead)])).toEqual([]);
+  });
+
+  it('stays silent when the retry is to a different file', async () => {
+    const a = editCall('/repo/src/api.ts');
+    expect(await run([a, failure(a, HARNESS.notRead), editCall('/repo/src/other.ts')])).toEqual([]);
+  });
+
+  it('never blames the person for declining', async () => {
+    // Their control, working as intended.
+    const a = editCall('/repo/src/api.ts');
+    expect(await run([a, failure(a, HARNESS.denied), editCall('/repo/src/api.ts')])).toEqual([]);
+  });
+
+  it("never blames the person's own hook for blocking an edit", async () => {
+    // The product-level error this detector is built around: telling someone
+    // their safety rail is a problem is worse than saying nothing.
+    const a = editCall('/repo/src/api.ts');
+    expect(await run([a, failure(a, HARNESS.hook), editCall('/repo/src/api.ts')])).toEqual([]);
+  });
+
+  it('counts instances, not the turns cited for them', async () => {
+    const a = editCall('/repo/src/api.ts');
+    const b = editCall('/repo/src/api.ts');
+    const f = await run([
+      a,
+      failure(a, HARNESS.notRead),
+      b,
+      failure(b, HARNESS.stale),
+      editCall('/repo/src/api.ts'),
+    ]);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.occurrences).toBe(2); // two refusals, one subject
+  });
+
+  it('tallies the harness reasons, summing to the occurrence count', async () => {
+    const a = editCall('/repo/src/api.ts');
+    const b = editCall('/repo/src/api.ts');
+    const c = editCall('/repo/src/api.ts');
+    const f = await run([
+      a,
+      failure(a, HARNESS.notRead),
+      b,
+      failure(b, HARNESS.notRead),
+      c,
+      failure(c, HARNESS.ambiguous),
+      editCall('/repo/src/api.ts'),
+    ]);
+    expect(f[0]!.reasons).toEqual({ 'not-read-first': 2, 'ambiguous-target': 1 });
+    const tallied = Object.values(f[0]!.reasons as Record<string, number>).reduce((x, y) => x + y, 0);
+    expect(tallied).toBe(f[0]!.occurrences);
+  });
+
+  it('still fires when the harness reword leaves the reason unknown', async () => {
+    // The point of the label tier. A new message costs a label, never the
+    // detection — losing a label is cosmetic, losing a detection is silent.
+    const a = editCall('/repo/src/api.ts');
+    const f = await run([a, failure(a, HARNESS.reworded), editCall('/repo/src/api.ts')]);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.reasons).toBeUndefined();
+  });
+
+  it('does not blame the agent when a sibling call cancelled its edit', async () => {
+    // Found by reading 991 real findings: 32 were this. The edit never ran, so
+    // re-issuing it is correct behaviour and reporting it is a false positive.
+    const a = editCall('/repo/src/api.ts');
+    expect(failureKindOf(HARNESS.cascade)).toBe('cascade');
+    expect(await run([a, failure(a, HARNESS.cascade), editCall('/repo/src/api.ts')])).toEqual([]);
+  });
+
+  it("does not blame the agent for the person's own deny rule", async () => {
+    // Inside the harness envelope, but the rejecter is the person's settings.
+    const a = editCall('/repo/src/secrets.ts');
+    expect(failureKindOf(HARNESS.denyRule)).toBe('permission');
+    expect(await run([a, failure(a, HARNESS.denyRule), editCall('/repo/src/secrets.ts')])).toEqual([]);
+  });
+
+  it('pairs a verdict with the call BEFORE it when an id is reused', async () => {
+    // A tool-call id is not unique across a transcript: one file in the pinned
+    // corpus reuses 90 of them, and 91 results there have a same-id call
+    // sitting after them. Keeping the last occurrence bound verdicts to the
+    // wrong call — visible as evidence citing a verdict at seq 627 for an edit
+    // at seq 628. Found by reading evidence; every test passed regardless.
+    const first = ev({
+      turnType: 'tool_use', toolName: 'Edit', filePath: '/repo/a.ts',
+      toolCallId: 'reused', argHash: hash('first'), seq: 10,
+    });
+    const verdict = ev({
+      turnType: 'tool_result', toolCallId: 'reused', isError: true,
+      failureKind: 'tool', textSummary: HARNESS.notRead, seq: 11,
+    });
+    const retry = ev({
+      turnType: 'tool_use', toolName: 'Edit', filePath: '/repo/a.ts',
+      toolCallId: 'reused', argHash: hash('retry'), seq: 12,
+    });
+    const hits = retriedFailures([first, verdict, retry]);
+    expect(hits).toHaveLength(1);
+    // The verdict belongs to the call that preceded it, never the later one.
+    expect(hits[0]!.failure.seq).toBe(10);
+    expect(hits[0]!.result.seq).toBe(11);
+    expect(hits[0]!.retry.seq).toBe(12);
+    expect(hits[0]!.failure.seq).toBeLessThan(hits[0]!.result.seq);
+  });
+
+  it('needs the retry to come after the verdict, not just after the attempt', async () => {
+    // Otherwise a second edit issued in the same block — before the harness
+    // had answered — would read as the agent pushing on after being told no.
+    const a = ev({
+      turnType: 'tool_use', toolName: 'Edit', filePath: '/repo/a.ts',
+      toolCallId: 'c1', argHash: hash('a'), seq: 10,
+    });
+    const sameBlock = ev({
+      turnType: 'tool_use', toolName: 'Edit', filePath: '/repo/a.ts',
+      toolCallId: 'c2', argHash: hash('b'), seq: 11,
+    });
+    const verdict = ev({
+      turnType: 'tool_result', toolCallId: 'c1', isError: true,
+      failureKind: 'tool', textSummary: HARNESS.notRead, seq: 12,
+    });
+    expect(retriedFailures([a, sameBlock, verdict])).toEqual([]);
+  });
+
+  it('reads the envelope, never the sentence inside it', async () => {
+    // `failureKind` comes from the frame the harness emits. Proof it is the
+    // frame doing the work: an unrecognised message in a known envelope still
+    // produces a finding (above), and a known reason in NO envelope does not.
+    expect(failureKindOf(HARNESS.notRead)).toBe('tool');
+    expect(failureKindOf(HARNESS.reworded)).toBe('tool');
+    expect(failureKindOf(HARNESS.hook)).toBe('hook');
+    expect(failureKindOf(HARNESS.denied)).toBe('denied');
+    expect(failureKindOf('File has not been read yet.')).toBe('other');
+  });
+
+  it('names a reason only inside the harness envelope', async () => {
+    // A file's own contents quoted back must not read as a harness verdict —
+    // the mistake that made a line-numbered Read of a doc file look like a
+    // permission denial.
+    const quoted = ev({
+      turnType: 'tool_result',
+      isError: true,
+      failureKind: 'other',
+      textSummary: '1\tFile has not been read yet. Read it first before writing to it.',
+    });
+    expect(reasonOf(quoted)).toBeUndefined();
+  });
+
+  it('gives every reason a line of advice', () => {
+    // CLAUDE.md allows two outputs: evidence, and something applicable. A
+    // reason with no advice is a dimension that cannot pay for itself.
+    for (const text of [HARNESS.notRead, HARNESS.stale, HARNESS.ambiguous]) {
+      const r = reasonOf(ev({ turnType: 'tool_result', isError: true, failureKind: 'tool', textSummary: text }));
+      expect(r, text).toBeDefined();
+      expect(adviceFor(r!).length).toBeGreaterThan(10);
+    }
+  });
 });

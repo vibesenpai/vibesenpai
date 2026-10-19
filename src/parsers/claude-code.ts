@@ -280,6 +280,47 @@ function extractExitCode(text: string | undefined): number | undefined {
   return m?.[1] !== undefined ? Number(m[1]) : undefined;
 }
 
+/**
+ * Who rejected a failed call, read off the harness's framing.
+ *
+ * Envelope only — never the sentence inside it. `<tool_use_error>` is a
+ * delimiter the harness emits, the way a JSON key is; "File has not been read
+ * yet" is prose that can be reworded. Detection depends on the first and only
+ * presentation depends on the second, so a reworded message costs a label and
+ * never a finding.
+ *
+ * Two messages *inside* the envelope name a different rejecter, so they are
+ * read here too. This is not the envelope rule leaking — it is the same
+ * question answered correctly:
+ *
+ *   - `Sibling tool call errored` — the call never ran. Re-issuing it is right,
+ *     not waste, so it must not read as the tool refusing this call.
+ *   - `File is covered by a Read deny rule in your permission settings` — the
+ *     person's own settings. Same class as a hook or a decline.
+ *
+ * Both were found by reading 991 real findings: 32 of them were a cascade and 1
+ * a permission rule, i.e. 3.2% of what the first version reported.
+ *
+ * Returns `other` rather than guessing when the framing is unfamiliar: a new
+ * harness version adding a frame should show up as an unclassified failure, not
+ * get silently folded into `tool`.
+ */
+export function failureKindOf(text: string | undefined): NonNullable<Event['failureKind']> {
+  if (text === undefined) return 'other';
+  const t = text.trimStart();
+  if (t.startsWith('<tool_use_error>')) {
+    const inner = t.slice('<tool_use_error>'.length).trimStart();
+    if (inner.startsWith('Sibling tool call errored')) return 'cascade';
+    if (inner.startsWith('File is covered by a Read deny rule')) return 'permission';
+    return 'tool';
+  }
+  // `PreToolUse:Edit`, `PostToolUse:Write`, … — the user's own hook, by name.
+  if (/^(?:Pre|Post)ToolUse:\w+ hook error:/.test(t)) return 'hook';
+  if (t.startsWith("The user doesn't want to proceed")) return 'denied';
+  if (t.startsWith('Claude requested permissions')) return 'permission';
+  return 'other';
+}
+
 function tokensOf(usage: Partial<Usage> | undefined): Event['tokens'] | undefined {
   if (!usage) return undefined;
   const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
@@ -565,7 +606,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
                 ...(outHash !== undefined ? { outHash } : {}),
                 ...(text !== undefined ? { outBytes: Buffer.byteLength(text) } : {}),
                 ...(b.is_error === true || (exitCode !== undefined && exitCode !== 0)
-                  ? { isError: true }
+                  ? { isError: true, failureKind: failureKindOf(text) }
                   : {}),
                 ...sum(text),
               });

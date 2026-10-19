@@ -156,12 +156,14 @@ export function mergeFindings(a: Finding, b: Finding): Finding {
   const anchors = dedupeEvidence([...(a.anchors ?? a.evidence), ...(b.anchors ?? b.evidence)]);
   const earlier = a.firstSeen <= b.firstSeen ? a : b;
   const later = a.lastSeen >= b.lastSeen ? a : b;
+  const reasons = mergeReasons(a.reasons, b.reasons);
 
   return {
     ...later,
     evidence,
     anchors,
     occurrences: anchors.length,
+    ...(reasons !== undefined ? { reasons } : {}),
     firstSeen: earlier.firstSeen,
     lastSeen: later.lastSeen,
     surfaced: a.surfaced || b.surfaced,
@@ -170,6 +172,24 @@ export function mergeFindings(a: Finding, b: Finding): Finding {
       ? { suppressedBy: a.suppressedBy ?? b.suppressedBy }
       : {}),
   } as Finding;
+}
+
+/**
+ * Add two reason tallies.
+ *
+ * Summed rather than replaced: merging two halves of the same finding must not
+ * lose that two of its instances failed for one reason and one for another,
+ * which is the whole value of the tally.
+ */
+function mergeReasons(
+  a: Record<string, number> | undefined,
+  b: Record<string, number> | undefined,
+): Record<string, number> | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  const out: Record<string, number> = { ...a };
+  for (const [k, n] of Object.entries(b)) out[k] = (out[k] ?? 0) + n;
+  return out;
 }
 
 /** Fold candidates from many windows into one finding per subject. */
