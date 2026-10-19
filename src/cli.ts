@@ -21,6 +21,12 @@ import { countDenominators, detectorsFor, runDetectors, unknownDimensions } from
 import { render as renderFindings } from './render.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
+import {
+  addHook, addStatusLine, describeChange, planFor, remove, setStatusLine, type Settings,
+} from './install.ts';
+import { readBreaker, isTripped } from './breaker.ts';
+import { readQueue, lineFor, pick } from './queue.ts';
+import { copyFileSync, writeFileSync } from 'node:fs';
 
 type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
 
@@ -96,6 +102,8 @@ Usage
   agentsensei skeleton <id>      print a session's windows as evidence
   agentsensei now                the session you are in, read live
   agentsensei report             retrospective over a date range
+  agentsensei install           add the Stop hook + statusline (prints first)
+  agentsensei uninstall         take them back out
 
 Options
   --source <path>    transcript source (repeatable)
@@ -112,6 +120,12 @@ skeleton / now
   --session <id>     which session \`now\` should read
   --skeleton         also dump the token-budget windows (debug view)
   --window <n>       print only window n (1-based)
+
+install / uninstall
+  (prints what it would do and writes NOTHING by default)
+  --apply            actually write it; a backup is taken first
+  --print-only       emit the merged JSON, write nothing, paste it yourself
+  --no-statusline    install the hook only
 
 report
   --last <7d|4w|6m>  relative range (default 7d)
@@ -220,6 +234,31 @@ function cmdDoctor(a: Argv): number {
       /* not present */
     }
     console.log(`  source     ${s}  (${detail})`);
+  }
+
+  // The ambient layer's own health. "Degrading to silence beats degrading to
+  // noise" is only honest if something says when it has gone silent.
+  const breaker = readBreaker(config.archive);
+  if (isTripped(breaker)) {
+    console.log(
+      `  ambient    DISABLED after ${breaker.consecutiveFailures} consecutive failures` +
+        (breaker.trippedAt !== undefined ? ` (since ${breaker.trippedAt.slice(0, 16)})` : ''),
+    );
+    console.log(`             ${breaker.reason ?? 'no reason recorded'}`);
+    console.log(`             one successful analysis closes it; nothing to reset by hand`);
+  } else if (breaker.consecutiveFailures > 0) {
+    console.log(`  ambient    ${breaker.consecutiveFailures} recent failure(s), still enabled`);
+  } else {
+    const q = readQueue(config.archive);
+    const line = lineFor(pick(q), q.entries.length);
+    console.log(
+      `  ambient    ${q.entries.length} queued · ${q.boundaries} boundaries seen` +
+        (line === '' ? ' · nothing showing' : ''),
+    );
+    if (line !== '') console.log(`             showing: ${line}`);
+  }
+  if (process.env['AGENTSENSEI_DISABLE'] === '1') {
+    console.log(`  ambient    AGENTSENSEI_DISABLE=1 is set — every hook exits on line one`);
   }
 
   const d = describeCatalog(config.archive);
@@ -452,6 +491,129 @@ function projectOf(source: string): string {
   return parts.at(-2) ?? 'unknown';
 }
 
+/** Where this checkout lives, so the installed commands are absolute. */
+function repoRoot(): string {
+  return join(import.meta.dirname, '..');
+}
+
+function settingsPath(home: string): string {
+  return join(home, '.claude', 'settings.json');
+}
+
+function readSettings(path: string): Settings {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as Settings;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Install the ambient surface into the harness's settings.
+ *
+ * ── Safe by default ────────────────────────────────────────────────────────
+ *
+ * Prints what it would do and writes nothing. The write needs `--apply`, which
+ * is consent by explicit act rather than a prompt nobody reads — and it means
+ * the dangerous path cannot be reached by a typo or a stray shell history entry.
+ *
+ * Writing someone's config is the "Self-Initiated Overreach" failure this tool
+ * exists to detect, so: a timestamped backup first, a merge that touches only
+ * our own entries, and a re-read afterwards that restores the backup if what
+ * landed is not what was intended.
+ */
+function cmdInstall(a: Argv): number {
+  const home = typeof a.flags['home'] === 'string' ? a.flags['home'] : homedir();
+  const path = settingsPath(home);
+  const before = readSettings(path);
+  const plan = planFor(repoRoot());
+
+  const wantStatusLine = a.flags['no-statusline'] !== true;
+  let after = addHook(before, plan);
+
+  if (wantStatusLine) {
+    if (addStatusLine(after) === 'occupied') {
+      console.log(`statusline: already set to something else — left alone.`);
+      console.log(`  ${before.statusLine?.command ?? ''}`);
+      console.log(`  a statusline is a single slot, and yours is not ours to take.`);
+      console.log(`  install the hook only with --no-statusline, or free the slot first.\n`);
+      after = addHook(before, plan);
+    } else {
+      after = setStatusLine(after, plan);
+    }
+  }
+
+  if (a.flags['print-only'] === true) {
+    // Nothing written: the JSON goes to stdout so it can be pasted by hand.
+    console.log(JSON.stringify(after, null, 2));
+    return 0;
+  }
+
+  const change = describeChange(before, after);
+  console.log(`settings: ${path}\n`);
+  if (change.length === 0) {
+    console.log('already installed — nothing would change.');
+    return 0;
+  }
+  console.log('this would change:');
+  for (const l of change) console.log(l);
+
+  if (a.flags['apply'] !== true) {
+    console.log('\nnothing written. re-run with --apply to write it,');
+    console.log('or --print-only to get the JSON and paste it yourself.');
+    console.log('`agentsensei uninstall --apply` reverses exactly this.');
+    return 0;
+  }
+
+  const backup = `${path}.agentsensei-backup`;
+  try {
+    copyFileSync(path, backup);
+  } catch {
+    console.error(`could not back up ${path} — refusing to write without one.`);
+    return 1;
+  }
+
+  writeFileSync(path, `${JSON.stringify(after, null, 2)}\n`);
+
+  // Re-read and verify. A merge that produced something else must not stand,
+  // and the backup is right there.
+  const verify = readSettings(path);
+  if (JSON.stringify(verify) !== JSON.stringify(after)) {
+    copyFileSync(backup, path);
+    console.error('\nwhat landed was not what was intended — restored from backup.');
+    return 1;
+  }
+
+  console.log(`\nwritten. backup at ${backup}`);
+  console.log('reverse it with `agentsensei uninstall --apply`.');
+  return 0;
+}
+
+/** Take ours out and leave everything else exactly as it was. */
+function cmdUninstall(a: Argv): number {
+  const home = typeof a.flags['home'] === 'string' ? a.flags['home'] : homedir();
+  const path = settingsPath(home);
+  const before = readSettings(path);
+  const after = remove(before);
+
+  const change = describeChange(before, after);
+  console.log(`settings: ${path}\n`);
+  if (change.length === 0) {
+    console.log('nothing of ours is installed.');
+    return 0;
+  }
+  console.log('this would change:');
+  for (const l of change) console.log(l);
+
+  if (a.flags['apply'] !== true) {
+    console.log('\nnothing written. re-run with --apply.');
+    return 0;
+  }
+  writeFileSync(path, `${JSON.stringify(after, null, 2)}\n`);
+  console.log('\nremoved.');
+  return 0;
+}
+
 async function cmdReport(a: Argv): Promise<number> {
   const { config } = configFromFlags(a);
   const f = a.flags;
@@ -593,6 +755,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdNow(a);
     case 'report':
       return cmdReport(a);
+    case 'install':
+      return cmdInstall(a);
+    case 'uninstall':
+      return cmdUninstall(a);
     case undefined:
     case 'help':
       console.log(USAGE);
