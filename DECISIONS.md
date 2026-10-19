@@ -104,6 +104,11 @@ Planned 2026-10-12/15, before any code existed.
 | D52 | **A built dimension is measured by its own detector**, never by a probe that resembles it. The loose `tool_loop` probe said 4% of sessions where the detector found 0.4%. `scripts/` is now under the typechecker, which it was not. | [scripts/measure-dimensions.ts](scripts/measure-dimensions.ts) |
 | D53 | **`core` membership is about precision, not frequency.** The three detectors that led `core` on assumed frequency were the ones deleted; `redundant_call` fires on 0.4% and earns its place by never being wrong. | [docs/dimensions.md](docs/dimensions.md) |
 
+| D54 | **The ambient layer installs via `settings.json`, not a plugin manifest.** A merge needs no packaging and let the surface be judged on a real machine today. Cost, recorded: absolute paths to the checkout, so moving the repo breaks the hook until re-install. | [docs/surfaces.md](docs/surfaces.md), [src/install.ts](src/install.ts) |
+| D55 | **Nothing of the user's config is written without `--apply`**, after a printed diff that also names what is left alone, with a backup and a verify-or-restore. `--print-only` emits **fragments to merge**, never a replacement file — printing the whole merged file would invite pasting over the original and defeat the merge guarantee by following our own instructions. | [src/cli.ts](src/cli.ts) |
+| D56 | **An existing statusline is never taken over.** It is a single slot, and a terminal prompt someone built is not ours to replace; the CLI reports the refusal rather than working around it. | [src/install.ts](src/install.ts) |
+| D57 | **A nudge is scoped to the session it is about.** Two windows share one archive, so an unscoped pick showed one session a finding about another's turns. The statusline reads its session id from the payload it already receives. | [src/queue.ts](src/queue.ts) |
+
 ## Reversed or corrected during planning
 
 Kept because the discarded answer is the one a reader will reach for next.

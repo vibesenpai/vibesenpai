@@ -51,7 +51,9 @@ function main(): void {
   // here rather than in the statusline because this is a single serialised
   // moment, while a statusline runs often and on its own schedule.
   let q = advance(readQueue(config.archive));
-  const showing = pick(q);
+  // Scoped to this session, so the mark matches what this window's statusline
+  // will actually render.
+  const showing = pick(q, payload.session_id);
   if (showing !== undefined) q = markShown(q, showing);
   writeQueue(config.archive, q);
 

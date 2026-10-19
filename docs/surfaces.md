@@ -52,6 +52,27 @@ plugins, none ship one, because `statusLine` is a `settings.json` field rather t
 capability. So the ambient surface needs a consented write, and `/agentsensei:setup` is where that is
 asked.
 
+### Built via settings.json, not the plugin manifest — 2026-10-19
+
+The layout below is still the distribution plan, but **the ambient layer that
+actually ships today installs into `~/.claude/settings.json`** via
+`agentsensei install`, not through `hooks/hooks.json` and `${extensionPath}`.
+There is no plugin manifest yet.
+
+Why: the goal was to see findings on a real machine, and a settings merge needs
+no packaging, no marketplace, and no install step beyond a command. The plugin
+route adds a build and a publish before anything can be judged.
+
+What that costs, stated so it is not rediscovered: the commands carry
+**absolute paths to this checkout**, so moving or renaming the repo breaks them
+until `agentsensei install --apply` is re-run. The plugin layout exists partly
+to avoid exactly that, which is the argument for doing it before anyone else
+installs this.
+
+The merge itself is the careful part — this machine already had ten populated
+hook events and its own `Stop` hook — and it lives in `src/install.ts` with the
+round-trip property verified against a copy of the real file.
+
 ### What gets installed
 
 **v1 ships Claude Code only** — one harness done properly, and the one where both your own data and

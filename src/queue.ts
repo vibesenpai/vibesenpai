@@ -199,23 +199,39 @@ export function advance(q: Queue): Queue {
  *
  * Read-only, and the rate limit and first-boundary rule are applied here so
  * both the hook and the statusline get the same answer from the same state.
+ *
+ * **Scoped to a session when one is given, and that is not optional in
+ * practice.** Two Claude Code windows on two projects share one archive, so an
+ * unscoped pick would show window B a nudge about window A's work — a finding
+ * pointing at turns that are not in the session you are looking at. The
+ * statusline receives the session id in its JSON payload, so it has no excuse.
+ * Omitting the argument means "any session", which is only right for `doctor`.
  */
-export function pick(q: Queue): QueueEntry | undefined {
+export function pick(q: Queue, sessionId?: string): QueueEntry | undefined {
   // Never on the first boundary: a nudge before any work has happened reads as
   // a verdict on work that has not happened yet.
   if (q.boundaries < 1) return undefined;
 
-  const lastShown = q.entries.reduce<number>(
+  const mine = sessionId === undefined ? q.entries : q.entries.filter((e) => e.sessionId === sessionId);
+  if (mine.length === 0) return undefined;
+
+  const lastShown = mine.reduce<number>(
     (n, e) => (e.shownAt !== undefined && e.shownAt > n ? e.shownAt : n),
     -Infinity,
   );
   if (q.boundaries - lastShown < MIN_BOUNDARIES_BETWEEN) {
     // Inside the rate limit: keep showing whatever is already current rather
     // than going blank, because a line that flickers is worse than a stale one.
-    return q.entries.find((e) => e.shownAt === lastShown);
+    return mine.find((e) => e.shownAt === lastShown);
   }
   // Oldest unshown first — the queue is a queue.
-  return q.entries.find((e) => e.shownAt === undefined) ?? q.entries.find((e) => e.shownAt === lastShown);
+  return mine.find((e) => e.shownAt === undefined) ?? mine.find((e) => e.shownAt === lastShown);
+}
+
+/** How many entries belong to a session, for the "+N more" count. */
+export function countFor(q: Queue, sessionId?: string): number {
+  if (sessionId === undefined) return q.entries.length;
+  return q.entries.filter((e) => e.sessionId === sessionId).length;
 }
 
 /** Record that an entry was shown, so the rate limit and decay can see it. */

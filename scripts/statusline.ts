@@ -27,16 +27,38 @@
  * render. There is no analysis here and no write — just a file read.
  */
 
-import { readQueue, pick, lineFor } from '../src/queue.ts';
+import { readFileSync } from 'node:fs';
+import { countFor, lineFor, pick, readQueue } from '../src/queue.ts';
 import { resolveConfig } from '../src/config.ts';
+
+/** The payload Claude Code sends a statusline command on stdin. */
+type StatusPayload = { session_id?: string };
+
+/**
+ * Read the payload, or nothing.
+ *
+ * Nothing is a usable answer: an unscoped line is still better than a crash,
+ * and `pick` treats a missing session id as "any session".
+ */
+function readPayload(): StatusPayload {
+  try {
+    return JSON.parse(readFileSync(0, 'utf8')) as StatusPayload;
+  } catch {
+    return {};
+  }
+}
 
 function main(): void {
   if (process.env['AGENTSENSEI_DISABLE'] === '1') return;
 
+  // Scoped to THIS session. Two windows on two projects share one archive, so
+  // an unscoped line would point at turns that are not in the session being
+  // looked at — a finding about somebody else's work.
+  const sessionId = readPayload().session_id;
+
   const { config } = resolveConfig();
   const q = readQueue(config.archive);
-  const entry = pick(q);
-  const line = lineFor(entry, q.entries.length);
+  const line = lineFor(pick(q, sessionId), countFor(q, sessionId));
   if (line !== '') process.stdout.write(line);
 }
 

@@ -12,7 +12,7 @@ import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  advance, emptyQueue, enqueue, lineFor, markShown, pick, readQueue, writeQueue,
+  advance, countFor, emptyQueue, enqueue, lineFor, markShown, pick, readQueue, writeQueue,
   DECAY_BOUNDARIES, MIN_BOUNDARIES_BETWEEN,
 } from '../src/queue.ts';
 import { closed, isTripped, readBreaker, recordFailure, recordSuccess, TRIP_AFTER } from '../src/breaker.ts';
@@ -128,6 +128,44 @@ describe('queue — Principle One: the nudge paces itself and gives up', () => {
     let q = enqueue(emptyQueue(), 's1', [finding('/a.ts')]);
     q = enqueue(q, 's1', [finding('/a.ts')]);
     expect(q.entries).toHaveLength(1);
+  });
+});
+
+describe('queue — a nudge belongs to the session it is about', () => {
+  const forSession = (sid: string, subject: string): ReturnType<typeof enqueue> =>
+    enqueue(emptyQueue(), sid, [finding(subject)]);
+
+  it('never shows one session a finding from another', () => {
+    // Two windows on two projects share one archive. An unscoped pick pointed
+    // window B at turns that are not in window B's session.
+    let q = forSession('session-A', '/a.ts');
+    q = advance(q);
+    expect(pick(q, 'session-A')).toBeDefined();
+    expect(pick(q, 'session-B')).toBeUndefined();
+  });
+
+  it('counts only its own session in the "+N more"', () => {
+    let q = enqueue(emptyQueue(), 'session-A', [finding('/a.ts'), finding('/b.ts')]);
+    q = enqueue(q, 'session-B', [finding('/c.ts')]);
+    expect(countFor(q, 'session-A')).toBe(2);
+    expect(countFor(q, 'session-B')).toBe(1);
+    expect(countFor(q)).toBe(3); // unscoped, for doctor
+  });
+
+  it('falls back to the whole queue only when no session is named', () => {
+    // `doctor` reports everything; a statusline always names its session.
+    const q = advance(forSession('session-A', '/a.ts'));
+    expect(pick(q)).toBeDefined();
+  });
+
+  it('rate-limits per the shared clock, not per session', () => {
+    // The boundary count is the session's own, and the limit is about how often
+    // a human should see the line change — not about how many queues exist.
+    let q = advance(enqueue(emptyQueue(), 'A', [finding('/a.ts'), finding('/b.ts')]));
+    const first = pick(q, 'A');
+    q = markShown(q, first as never);
+    q = advance(q);
+    expect(pick(q, 'A')?.subject).toBe(first?.subject);
   });
 });
 

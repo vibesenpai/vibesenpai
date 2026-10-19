@@ -124,7 +124,7 @@ skeleton / now
 install / uninstall
   (prints what it would do and writes NOTHING by default)
   --apply            actually write it; a backup is taken first
-  --print-only       emit the merged JSON, write nothing, paste it yourself
+  --print-only       emit the fragments to merge by hand, write nothing
   --no-statusline    install the hook only
 
 report
@@ -250,6 +250,8 @@ function cmdDoctor(a: Argv): number {
     console.log(`  ambient    ${breaker.consecutiveFailures} recent failure(s), still enabled`);
   } else {
     const q = readQueue(config.archive);
+    // Unscoped on purpose: `doctor` reports the whole queue, while a statusline
+    // only ever shows its own session.
     const line = lineFor(pick(q), q.entries.length);
     console.log(
       `  ambient    ${q.entries.length} queued · ${q.boundaries} boundaries seen` +
@@ -544,8 +546,21 @@ function cmdInstall(a: Argv): number {
   }
 
   if (a.flags['print-only'] === true) {
-    // Nothing written: the JSON goes to stdout so it can be pasted by hand.
-    console.log(JSON.stringify(after, null, 2));
+    // **Fragments, not the whole file.** Printing the merged settings would
+    // invite pasting it over the original, which discards whatever formatting
+    // was there and makes the merge guarantee pointless — the one path where
+    // "we never replace your config" could be defeated by following our own
+    // instructions.
+    const ours = (after.hooks?.['Stop'] ?? [])
+      .flatMap((m) => m.hooks)
+      .filter((h) => h.__agentsensei === true);
+    console.log(`// add to hooks.Stop in ${path} — keep your existing entries`);
+    console.log(JSON.stringify({ hooks: { Stop: [{ hooks: ours }] } }, null, 2));
+    if (after.statusLine !== undefined && after.statusLine !== null) {
+      console.log(`\n// set statusLine in ${path}`);
+      console.log(JSON.stringify({ statusLine: after.statusLine }, null, 2));
+    }
+    console.log('\n// these are fragments to merge, NOT a replacement file.');
     return 0;
   }
 
@@ -560,7 +575,7 @@ function cmdInstall(a: Argv): number {
 
   if (a.flags['apply'] !== true) {
     console.log('\nnothing written. re-run with --apply to write it,');
-    console.log('or --print-only to get the JSON and paste it yourself.');
+    console.log('or --print-only for the fragments to merge in by hand.');
     console.log('`agentsensei uninstall --apply` reverses exactly this.');
     return 0;
   }
