@@ -72,7 +72,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import { createHash } from 'node:crypto';
 import { redact } from '../redact.ts';
-import { outputDigest } from '../normalise.ts';
+import { outputDigest, isPlausibleTimestamp } from '../normalise.ts';
 import type { Event, TurnType } from '../types.ts';
 
 /**
@@ -560,7 +560,9 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       uuid: r.uuid ?? `synthetic-${seq}`,
       parentUuid: r.parentUuid ?? null,
       isSidechain: r.isSidechain === true,
-      ts: r.timestamp ?? '',
+      // Omitted rather than coerced to ''. A `file-history-snapshot` has no
+      // timestamp, and an empty string is a type lying about the data.
+      ...(isPlausibleTimestamp(r.timestamp) ? { ts: r.timestamp } : {}),
     };
 
     const push = (turnType: TurnType, extra: Partial<Event> = {}): void => {

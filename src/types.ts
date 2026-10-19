@@ -60,7 +60,18 @@ export type Event = {
   isSidechain: boolean;
   sidechainId?: string;
 
-  ts: string;
+  /**
+   * The record's own timestamp, when it has a usable one.
+   *
+   * **Optional, because 107 records in one real session had none** — every
+   * `file-history-snapshot` carries no `timestamp` at all. The parser used to
+   * coerce that to `''`, which is a type claiming a timestamp exists: the empty
+   * string then sorted below every real one, became a session's start, and made
+   * its duration unreadable. Validated through
+   * `isPlausibleTimestamp` at the parser boundary, so anything present here is
+   * usable without re-checking.
+   */
+  ts?: string;
   turnType: TurnType;
 
   toolName?: string;

@@ -73,12 +73,28 @@ const PRESET_RANK: Record<Preset, number> = { core: 0, standard: 1, all: 2 };
  * never being wrong, while the three detectors that led `core` on assumed
  * frequency were the ones removed.
  */
-export function detectorsFor(preset: Preset, only?: string[]): Detector[] {
+export function detectorsFor(preset: Preset, only?: string[], mute?: string[]): Detector[] {
   const wanted = only === undefined ? undefined : new Set(only);
+  const silenced = new Set(mute ?? []);
   return allDetectors().filter((d) => {
+    // Muting wins over everything, including an explicit `only`. It is the
+    // user's decision, and a flag that re-enables what they silenced would make
+    // the silence unreliable — which is worse than not offering it.
+    if (silenced.has(d.dimension)) return false;
     if (wanted !== undefined) return wanted.has(d.dimension);
     return PRESET_RANK[d.preset] <= PRESET_RANK[preset];
   });
+}
+
+/**
+ * Mute entries that name no dimension.
+ *
+ * Reported rather than ignored: a typo that silently mutes nothing is worse
+ * than an error, because you would believe it had worked.
+ */
+export function unknownDimensions(names: string[]): string[] {
+  const known = new Set(allDetectors().map((d) => d.dimension));
+  return names.filter((n) => !known.has(n));
 }
 
 /**

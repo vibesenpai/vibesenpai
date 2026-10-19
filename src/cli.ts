@@ -17,6 +17,10 @@ import { parse, registry } from './parsers/index.ts';
 import { readSession, resolveCurrentSession, findSessionSource } from './read.ts';
 import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
+import { countDenominators, detectorsFor, runDetectors, unknownDimensions } from './detect/index.ts';
+import { render as renderFindings } from './render.ts';
+import type { Detector } from './detect/index.ts';
+import type { Preset } from './types.ts';
 
 type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
 
@@ -33,10 +37,11 @@ function parseArgv(argv: string[]): Argv {
     if (next === undefined || next.startsWith('--')) {
       out.flags[key] = true;
     } else {
-      // --source is repeatable
-      if (key === 'source') {
-        const prev = out.flags['source'];
-        out.flags['source'] = Array.isArray(prev) ? [...prev, next] : [next];
+      // Repeatable flags collect into an array even when given once, so a
+      // single `--mute x` is not silently a string the caller then drops.
+      if (key === 'source' || key === 'mute') {
+        const prev = out.flags[key];
+        out.flags[key] = Array.isArray(prev) ? [...prev, next] : [next];
       } else {
         out.flags[key] = next;
       }
@@ -62,8 +67,24 @@ function configFromFlags(a: Argv) {
       ...(typeof f['archive'] === 'string' ? { archive: f['archive'] } : {}),
       ...(typeof f['models'] === 'string' ? { models: f['models'] } : {}),
       ...(typeof f['config'] === 'string' ? { config: f['config'] } : {}),
+      ...(typeof f['preset'] === 'string' ? { preset: f['preset'] } : {}),
+      ...(Array.isArray(f['mute']) ? { mute: f['mute'] as string[] } : {}),
     },
   });
+}
+
+/**
+ * The detectors this invocation will run, with the user's choices applied.
+ *
+ * Warnings are printed rather than thrown. A bad preset or a mistyped mute
+ * entry should not stop the analysis — but it must not pass silently either,
+ * because believing a dimension is muted when it is not is worse than an error.
+ */
+function detectorsFromConfig(cfg: { preset: Preset; mute: string[] }): Detector[] {
+  for (const w of unknownDimensions(cfg.mute)) {
+    console.error(`warning: --mute ${w} names no dimension — nothing was silenced by it`);
+  }
+  return detectorsFor(cfg.preset, undefined, cfg.mute);
 }
 
 const USAGE = `agentsensei — find the turns where you and your agent wasted effort
@@ -82,9 +103,14 @@ Options
   --models <path>    model location
   --config <path>    config file
 
+dimensions
+  --preset <name>    core | standard | all   (default core)
+  --mute <name>      silence a dimension (repeatable); wins over everything
+
 skeleton / now
   --live             read past the catalog offset, to the end of the file
   --session <id>     which session \`now\` should read
+  --skeleton         also dump the token-budget windows (debug view)
   --window <n>       print only window n (1-based)
 
 report
@@ -93,7 +119,8 @@ report
   --until <date>     YYYY-MM-DD
   --project <name>   accepted, not yet applied (needs M2a findings)
 
-Not yet implemented (see PLAN.md): fix, explain, claude-md, eval, trends.
+Not yet implemented (see PLAN.md): fix, explain, claude-md, eval, trends,
+and the ambient statusline.
 `;
 
 function cmdScan(a: Argv): number {
@@ -120,18 +147,32 @@ function cmdScan(a: Argv): number {
 }
 
 function cmdConfig(a: Argv): number {
-  const { config, provenance } = configFromFlags(a);
+  const { config, provenance, warnings } = configFromFlags(a);
   const show = (k: string, v: string, l: Layer): void =>
     console.log(`  ${k.padEnd(9)} ${v}  (${l})`);
   console.log('resolved config');
   show('sources', config.sources.join(', '), provenance.sources);
   show('archive', config.archive, provenance.archive);
   show('models', config.models, provenance.models);
+  show('preset', config.preset, provenance.preset);
+  show('mute', config.mute.length === 0 ? '(nothing)' : config.mute.join(', '), provenance.mute);
 
   console.log(
     `  ${'config'.padEnd(9)} ${config.configFile ?? '(none)'}` +
       `  (${config.configFile && existsSync(config.configFile) ? 'present' : 'absent'})`,
   );
+
+  // A rejected value is printed, never swallowed: provenance alone would show
+  // `preset core (default)` and leave someone believing they had set `all`.
+  for (const w of warnings) console.error(`  ! ${w}`);
+
+  const selected = detectorsFor(config.preset, undefined, config.mute);
+  console.log(
+    `\ndetectors for this config: ${selected.length === 0 ? '(none)' : selected.map((d) => d.dimension).join(', ')}`,
+  );
+  for (const u of unknownDimensions(config.mute)) {
+    console.error(`  ! mute "${u}" names no dimension — nothing is silenced by it`);
+  }
   return 0;
 }
 
@@ -340,7 +381,7 @@ function cmdSkeleton(a: Argv): number {
  * The in-session view. Reads live by definition — the point is the turns that
  * have happened since the last scan, which is to say the ones you just made.
  */
-function cmdNow(a: Argv): number {
+async function cmdNow(a: Argv): Promise<number> {
   const { config } = configFromFlags(a);
   const flagSession = a.flags['session'];
   const current = resolveCurrentSession(config.sources, {
@@ -358,12 +399,60 @@ function cmdNow(a: Argv): number {
   }
 
   a.flags['live'] = true;
-  const rc = printSkeletons(a, current.sessionId, current.source, undefined, true);
-  console.log('\nno detectors yet — findings arrive in M2a (see PLAN.md)');
-  return rc;
+
+  // Live by definition: the interesting turns are the ones since the last scan,
+  // which is to say the ones just made. `readSession` already tails past the
+  // catalogued offset, so this is a parameter rather than a second code path.
+  const read = readSession({ source: current.source, sessionId: current.sessionId, mode: 'live' });
+  const parsed = parse(current.source, read.text, current.sessionId);
+
+  const detectors = detectorsFromConfig(config);
+  const res = await runDetectors({
+    events: parsed.events,
+    session: { sessionId: current.sessionId, project: projectOf(current.source), live: true },
+    detectors,
+  });
+
+  process.stdout.write(
+    renderFindings({
+      findings: res.findings,
+      denominators: res.denominators,
+      sessionId: current.sessionId,
+      events: parsed.events,
+      ...(config.mute.length > 0 ? { muted: config.mute } : {}),
+    }),
+  );
+
+  for (const [dim, n] of Object.entries(res.failures)) {
+    // Never swallowed: a silent zero would read as "nothing found".
+    console.error(`warning: ${dim} failed ${n}x and reported nothing`);
+  }
+  if (detectors.length === 0) {
+    console.error(
+      `warning: preset "${config.preset}" selected no detectors — nothing could be found`,
+    );
+  }
+
+  // The window dump is a debug view, not the product. `agentsensei skeleton`
+  // exists for it; `--skeleton` keeps it reachable from here too.
+  if (a.flags['skeleton'] === true) {
+    return printSkeletons(a, current.sessionId, current.source, undefined, true);
+  }
+  return 0;
 }
 
-function cmdReport(a: Argv): number {
+/**
+ * The project a transcript belongs to.
+ *
+ * The harness encodes it in the directory name; findings are keyed on it so the
+ * same subject in two projects is two subjects.
+ */
+function projectOf(source: string): string {
+  const parts = source.split(/[\\/]/).filter((p) => p !== '');
+  return parts.at(-2) ?? 'unknown';
+}
+
+async function cmdReport(a: Argv): Promise<number> {
   const { config } = configFromFlags(a);
   const f = a.flags;
   const range = resolveRange(
@@ -404,11 +493,91 @@ function cmdReport(a: Argv): number {
   console.log('\ncoverage');
   for (const l of describeCoverage(segments)) console.log(l);
 
-  console.log('\nno detectors yet — findings arrive in M2a (see PLAN.md)');
+  // Findings are recomputed rather than read from a store. Measured on real
+  // transcripts: parse is 95% of the cost (423ms for 19.9MB) and detection 5%,
+  // so ~2s across the design target of 40 sessions. Persistence buys trends,
+  // surfaced-dedup and dismissals — none of which this surface needs yet, and
+  // a store that can disagree with the transcript is worse than a short wait.
+  const detectors = detectorsFromConfig(config);
+  if (detectors.length === 0) {
+    console.error(`\nwarning: preset "${config.preset}" selected no detectors`);
+    return 0;
+  }
+
+  // Entries, not `describeCatalog`'s spans: the entry carries the session id and
+  // the source path, so there is nothing to look up and nothing to mismatch.
+  const catalog = readCatalog(config.archive);
+  const inRange = Object.values(catalog?.entries ?? {}).filter((e) => {
+    if (e.gone !== undefined) return false; // the harness TTL took it
+    const t = Date.parse(e.firstTs ?? e.firstSeenAt);
+    return (
+      Number.isFinite(t) && t >= range.range.from.getTime() && t <= range.range.to.getTime()
+    );
+  });
+
+  if (inRange.length === 0) {
+    console.log('\nno catalogued sessions in this range');
+    return 0;
+  }
+
+  console.log(`\nfindings · ${inRange.length} session(s) re-analysed`);
+  let total = 0;
+  let unreadable = 0;
+  const byDimension = new Map<string, number>();
+
+  for (const entry of inRange.sort((x, y) => (x.firstTs ?? '').localeCompare(y.firstTs ?? ''))) {
+    let parsed;
+    try {
+      const read = readSession({ source: entry.source, sessionId: entry.sessionId, mode: 'live' });
+      parsed = parse(entry.source, read.text, entry.sessionId);
+    } catch {
+      // Catalogued but no longer readable. Counted, not silently skipped: a
+      // report that quietly analysed fewer sessions than it claimed is the
+      // implied-coverage problem the depth labelling exists to prevent.
+      unreadable++;
+      continue;
+    }
+    const res = await runDetectors({
+      events: parsed.events,
+      session: {
+        sessionId: entry.sessionId,
+        project: projectOf(entry.source),
+        live: false,
+      },
+      detectors,
+    });
+    for (const fi of res.findings) {
+      total++;
+      byDimension.set(fi.dimension, (byDimension.get(fi.dimension) ?? 0) + fi.occurrences);
+    }
+    if (res.findings.length > 0) {
+      process.stdout.write(
+        renderFindings({
+          findings: res.findings,
+          denominators: res.denominators,
+          sessionId: entry.sessionId,
+          events: parsed.events,
+        }),
+      );
+    }
+  }
+
+  if (unreadable > 0) {
+    console.log(`  ${unreadable} catalogued session(s) could no longer be read`);
+  }
+  if (total === 0) {
+    console.log('  none');
+  } else {
+    console.log('  by dimension');
+    for (const [dim, n] of [...byDimension].sort((x, y) => y[1] - x[1])) {
+      console.log(`    ${dim.padEnd(20)} ${n} occurrence(s)`);
+    }
+  }
+  if (config.mute.length > 0) console.log(`  muted: ${config.mute.join(', ')}`);
   return 0;
 }
 
-export function main(argv = process.argv.slice(2)): number {
+export async function main(argv = process.argv.slice(2)): Promise<number> {
   const a = parseArgv(argv);
   const cmd = a._[0];
   switch (cmd) {
@@ -437,7 +606,7 @@ export function main(argv = process.argv.slice(2)): number {
 
 if (import.meta.filename === process.argv[1]) {
   try {
-    process.exit(main());
+    process.exit(await main());
   } catch (err) {
     // A bad flag is a user error, not a crash. No stack trace.
     console.error(err instanceof Error ? err.message : String(err));

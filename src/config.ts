@@ -11,6 +11,7 @@
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { readFileSync } from 'node:fs';
+import type { Preset } from './types.ts';
 
 export type Config = {
   /** Transcript source directories, searched for *.jsonl. */
@@ -26,6 +27,26 @@ export type Config = {
    * running as a plugin so it is removed on uninstall.
    */
   models: string;
+  /**
+   * Which dimensions run by default.
+   *
+   * `core` is the trust-building set: `certain` or `high`, rule-only, no model.
+   * Membership is about precision, never frequency — the three detectors that
+   * led `core` on assumed frequency are the ones in GRAVEYARD.md.
+   */
+  preset: Preset;
+  /**
+   * Dimensions to silence, by name.
+   *
+   * A dimension someone does not care about has to be silenceable, or the only
+   * way to stop seeing it is to stop using the tool. Muting is the user's
+   * decision and is never second-guessed: a muted dimension is not computed,
+   * not counted, and not mentioned.
+   *
+   * An unknown name is reported rather than ignored, because a typo that
+   * silently mutes nothing is worse than an error — you would believe it worked.
+   */
+  mute: string[];
   configFile: string | undefined;
 };
 
@@ -39,10 +60,27 @@ export type ResolveInput = {
     archive?: string;
     models?: string;
     config?: string;
+    preset?: string;
+    mute?: string[];
   };
   env?: NodeJS.ProcessEnv;
   home?: string;
 };
+
+const PRESETS: readonly Preset[] = ['core', 'standard', 'all'];
+
+/**
+ * A preset name, or undefined when the value is not one.
+ *
+ * Returning undefined lets the layer fall through to the next one, and the
+ * caller reports what was rejected. Silently coercing a typo to `core` would
+ * leave someone believing they had enabled `all`.
+ */
+function asPreset(v: unknown): Preset | undefined {
+  return typeof v === 'string' && (PRESETS as readonly string[]).includes(v)
+    ? (v as Preset)
+    : undefined;
+}
 
 /**
  * Directories we would rather not put our store inside.
@@ -84,6 +122,8 @@ function splitList(v: string | undefined): string[] | undefined {
 export function resolveConfig(input: ResolveInput = {}): {
   config: Config;
   provenance: Provenance;
+  /** Values that were rejected, so a typo is visible instead of silent. */
+  warnings: string[];
 } {
   const env = input.env ?? process.env;
   const home = input.home ?? homedir();
@@ -104,6 +144,17 @@ export function resolveConfig(input: ResolveInput = {}): {
   }
 
   const dataHome = xdg(env, 'XDG_DATA_HOME', join('.local', 'share'), home);
+  const warnings: string[] = [];
+
+  for (const [layer, raw] of [
+    ['--preset', input.flags?.preset],
+    ['AGENTSENSEI_PRESET', env['AGENTSENSEI_PRESET']],
+    ['config file', fromFile.preset],
+  ] as const) {
+    if (raw !== undefined && asPreset(raw) === undefined) {
+      warnings.push(`${layer}: "${String(raw)}" is not a preset (${PRESETS.join(', ')}) — ignored`);
+    }
+  }
 
   const pick = <K extends keyof Omit<Config, 'configFile'>>(
     key: K,
@@ -143,8 +194,29 @@ export function resolveConfig(input: ResolveInput = {}): {
       : join(archive, 'models'),
   );
 
+  const [preset, pPreset] = pick(
+    'preset',
+    asPreset(input.flags?.preset),
+    asPreset(env['AGENTSENSEI_PRESET']),
+    'core',
+  );
+
+  const [mute, pMute] = pick(
+    'mute',
+    input.flags?.mute,
+    splitList(env['AGENTSENSEI_MUTE']),
+    [],
+  );
+
   return {
-    config: { sources, archive, models, configFile },
-    provenance: { sources: pSources, archive: pArchive, models: pModels },
+    config: { sources, archive, models, preset, mute, configFile },
+    provenance: {
+      sources: pSources,
+      archive: pArchive,
+      models: pModels,
+      preset: pPreset,
+      mute: pMute,
+    },
+    warnings,
   };
 }

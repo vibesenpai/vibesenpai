@@ -41,6 +41,7 @@ import { SCHEMA, checkVersion, stamp, type Versioned } from './schema.ts';
 // The byte reader lives in read.ts, which owns reading and imports nothing from
 // here — one implementation, and no cycle.
 import { readRange } from './read.ts';
+import { isPlausibleTimestamp } from './normalise.ts';
 import { detectVersion } from './parsers/registry.ts';
 
 export type CatalogEntry = {
@@ -320,7 +321,7 @@ function timestampSpan(text: string): { first?: string; last?: string } {
     } catch {
       continue;
     }
-    if (typeof ts !== 'string' || !isPlausibleTimestamp(ts)) continue;
+    if (!isPlausibleTimestamp(ts)) continue;
     // Lexicographic comparison is correct for ISO-8601 in UTC, which is what the
     // harness writes.
     if (first === undefined || ts < first) first = ts;
@@ -329,17 +330,6 @@ function timestampSpan(text: string): { first?: string; last?: string } {
   return { ...(first !== undefined ? { first } : {}), ...(last !== undefined ? { last } : {}) };
 }
 
-/**
- * Second line of defence, in case a future record type puts something else in
- * `timestamp`. A value outside a sane window cannot be a session time, and the
- * cost of accepting one is a coverage claim spanning years.
- */
-function isPlausibleTimestamp(v: string): boolean {
-  const t = Date.parse(v);
-  if (Number.isNaN(t)) return false;
-  const floor = Date.UTC(2023, 0, 1); // predates any Claude Code transcript
-  return t >= floor && t <= Date.now() + 86_400_000;
-}
 
 function minIso(a: string | undefined, b: string | undefined): string | undefined {
   if (a === undefined) return b;

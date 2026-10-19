@@ -58,3 +58,30 @@ export function outputDigest(text: string | undefined): string | undefined {
   if (norm === '') return undefined; // empty output tells a detector nothing
   return createHash('sha256').update(norm).digest('hex').slice(0, 16);
 }
+
+/**
+ * Is this string a timestamp a session could actually have?
+ *
+ * One definition, used at both boundaries that take timestamps from untrusted
+ * text: the catalog, which reads the top-level `timestamp` of raw JSONL, and the
+ * parser, which puts it on an `Event`. They must agree — a value the catalog
+ * rejects but the parser keeps would make a session's span disagree with its own
+ * events.
+ *
+ * A regex over raw text was tried first and is unsafe: `"timestamp"` appears
+ * inside tool results that echoed a CI payload, a lockfile or a server log, and
+ * one pasted line carrying `"timestamp": "2019-03-04…"` would set a session's
+ * start to 2019 — making `report` claim full depth across years holding nothing.
+ * Measured on the public corpus, 9 of 219 files already had a wider span that
+ * way; none catastrophically, which is exactly why it would have shipped.
+ *
+ * So this is the second line of defence: a value outside a sane window cannot be
+ * a session time, whatever a future record type puts in the field.
+ */
+export function isPlausibleTimestamp(v: unknown): v is string {
+  if (typeof v !== 'string' || v === '') return false;
+  const t = Date.parse(v);
+  if (Number.isNaN(t)) return false;
+  const floor = Date.UTC(2023, 0, 1); // predates any Claude Code transcript
+  return t >= floor && t <= Date.now() + 86_400_000;
+}
