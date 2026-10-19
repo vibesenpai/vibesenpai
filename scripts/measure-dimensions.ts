@@ -34,6 +34,8 @@ import { parse } from '../src/parsers/index.ts';
 import { editEvidenceOf, READ_TOOLS } from '../src/edits.ts';
 import { callFailed, countDenominators } from '../src/detect/index.ts';
 import { retriedFailures } from '../src/detect/edit-retry.ts';
+import { runsOf, sameAnswerThroughout } from '../src/detect/redundant-call.ts';
+import { sessionStats } from '../src/stats.ts';
 import { reasonOf } from '../src/detect/labels.ts';
 import type { Event } from '../src/types.ts';
 
@@ -133,85 +135,49 @@ const PROBES: ProbeDef[] = [
   },
 
   // ── Measured, not yet built: the next detectors, in build order ───────────
+  // ── Reported as session metadata, not as findings ────────────────────────
+  // Both were planned as detectors and neither survived measurement: churn
+  // correlates with friction at 15% against a 9% base rate, and a
+  // re-ingestion ratio is session-wide with no turn to anchor to. Kept here so
+  // the figures behind that decision stay reproducible. See src/stats.ts.
   {
-    dimension: 'file_churn  [next]',
-    denominator: 'per file touched',
-    probe: 'structural',
-    confound:
-      'the harness tracks a file from first touch, so a long session inflates versions; ' +
-      'needs the p90 of 5 as a threshold rather than any absolute count',
-    inCatalogue: false,
-    // `file-history-snapshot` records a version per path regardless of HOW the
-    // file changed — Edit, sed, an MCP server, a subagent. The one signal in
-    // the format that is immune to the user's stack.
-    count: (c) => {
-      const versions = new Map<string, number>();
-      for (const e of c.ev) {
-        if (e.systemKind !== 'file-history') continue;
-        for (const path of e.changedFiles ?? []) {
-          versions.set(path, (versions.get(path) ?? 0) + 1);
-        }
-      }
-      // p90 across the corpus is 5 versions; count the paths that exceed it.
-      return [...versions.values()].filter((n) => n > 5).length;
-    },
-  },
-  {
-    dimension: 'context_reingest  [next]',
+    dimension: 'file_churn  [metadata]',
     denominator: 'per session',
     probe: 'structural',
     confound:
-      'cache_creation/output is a session ratio with no turn to point at, so it is ' +
-      'metadata until anchored to the turns where creation spiked',
+      'half the highest-churn paths are files whose purpose is to be rewritten; the edit-call ' +
+      'count informs but cannot filter, because a shell-driven edit makes no edit-tool call',
     inCatalogue: false,
-    // Exact, universal, and free of text: it describes the API call, not the
-    // work, so it means the same thing for every language and every tool.
-    // Measured p50 11.4, p90 83, p99 598 — a real long tail.
+    count: (c) => (sessionStats(c.ev).rewritten[0]?.versions ?? 0) > 5 ? 1 : 0,
+  },
+  {
+    dimension: 'context_reingest  [metadata]',
+    denominator: 'per session',
+    probe: 'structural',
+    confound:
+      'a session ratio with no turn to anchor to; the heaviest turns ARE nameable because half ' +
+      'the re-ingestion comes from 6% of turns, which is why this is metadata and not a finding',
+    inCatalogue: false,
     count: (c) => {
       const d = countDenominators(c.ev);
       if (d.tokens.output === 0) return 0;
-      return d.tokens.cacheCreation / d.tokens.output > 83 ? 1 : 0;
+      return d.tokens.cacheCreation / d.tokens.output > 93.4 ? 1 : 0;
     },
   },
   {
-    dimension: 'redundant_call  [next]',
+    dimension: 'redundant_call',
     denominator: 'per tool call',
-    probe: 'structural',
+    probe: 'detector',
     confound:
-      'a self-truncating command (`| head -30`) discards its own output upstream of us, ' +
-      'so outHash compares a prefix; polling tools are excluded by name',
+      'a self-truncating command (`| head`) discards its own output upstream of us, so the ' +
+      'digest compares a prefix and the finding drops to `high`; polling tools are excluded by name',
     inCatalogue: true,
-    // Consecutive identical calls whose answers were also identical. The old
-    // `tool_loop`, kept honest: the loose version of this probe said 4% of
-    // sessions where the shipped detector found 0.4%.
-    count: (c) => {
-      const POLLING = new Set(['BashOutput', 'TaskOutput', 'Monitor', 'ListAgents']);
-      let hits = 0;
-      let runArgs: string | undefined;
-      let runLen = 0;
-      const outs: (string | undefined)[] = [];
-      const flush = (): void => {
-        if (runLen >= 3 && outs.length >= runLen && new Set(outs).size === 1 && !outs.includes(undefined)) {
-          hits++;
-        }
-        runArgs = undefined;
-        runLen = 0;
-        outs.length = 0;
-      };
-      for (const e of c.ev) {
-        if (e.turnType === 'tool_result') { outs.push(e.outHash); continue; }
-        if (e.turnType === 'user_prompt') { flush(); continue; }
-        if (e.turnType !== 'tool_use') continue;
-        const sig = e.argHash === undefined ? undefined : `${e.toolName ?? '?'}|${e.argHash}`;
-        if (sig === undefined || POLLING.has(e.toolName ?? '') || editEvidenceOf(e) === 'tool') { flush(); continue; }
-        if (sig === runArgs) { runLen++; } else { flush(); runArgs = sig; runLen = 1; }
-      }
-      flush();
-      return hits;
-    },
+    // The detector's own grouping and answer test, not a lookalike. The loose
+    // version of this probe said 4% of sessions where the detector finds 0.4%.
+    count: (c) =>
+      runsOf(c.ev).filter((r) => r.calls.length >= 3 && sameAnswerThroughout(r.outputs, r.calls.length))
+        .length,
   },
-
-  // ── Structural, candidates with no detector yet ───────────────────────────
   {
     dimension: 'permission_denied',
     denominator: 'per tool call',

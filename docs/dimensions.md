@@ -86,29 +86,84 @@ contract, which is the harness being awkward to work in.
 
 That last row is the label tier working as designed: reword a message and the detection is unaffected.
 
-## Next, in build order
+### `redundant_call` — the same call, the same answer
 
-Ordered by **how clearly each can point at a turn**, not by frequency. A finding needs an anchor.
+`RULE+T` · conf **`certain`** (or `high`) · scope `thread` · per-tool-call · **standard**
 
-| dimension | signal | measured | why this order |
-|---|---|---|---|
-| `file_churn` | `version` per path in `file-history-snapshot` | **11%** of sessions, 401 instances | the only signal immune to the user's stack — it records a change however it happened: `Edit`, `sed`, an MCP server, a subagent |
-| `context_reingest` | `cache_creation / output_tokens` | p50 **12.0**, p90 **93.4**, p99 **857.6** | exact, universal, zero text — but a session ratio, so **metadata, not a finding**, until anchored to the turns where creation spiked |
-| `redundant_call` | same `toolName\|argHash` → same `outHash` | **0.4%** of sessions, 5 instances | kept on precision, not frequency: 5 of 5 survived hand-inspection. Out of `core` |
+| measured | |
+|---|---|
+| sessions with a finding | **0.4%** — 5 across 1,139 |
+| hand-verified | **5 of 5**, zero false positives |
 
-### Two corrections to our own measurement, recorded so they are not repeated
+**Kept on precision, not frequency.** The rarest thing here and the only one
+that has never been wrong: five identical typechecks with nothing between them,
+four identical `TodoWrite`s, three identical greps, three identical
+`go generate` runs. A rare detector that never cries wolf is worth more than a
+frequent one that needs defending. It ships in `standard`, not `core`, for the
+same reason — at 0.4% it is not a first impression.
 
-- **`file_churn` is 11%, not 84%.** 84% is how many sessions carry file-history records *at all* —
-  signal availability, not dimension frequency.
-- **`context_reingest`'s 11% is tautological.** The probe asks "above p90", so ~10% is arithmetic.
-  Magnitude per session is the real question, which is why it is metadata.
+Seven guards, each a measured false positive from its first life as `tool_loop`:
+`argHash` not individual fields (16 of 19 runs were different calls that looked
+identical), `outHash` not `textSummary` (59.9% of results hit the 200-char cap,
+so summaries compared prefixes), counts preserved by the normaliser
+(`3 failed → 2 → 1` once read as a loop), polling tools excluded by name, and an
+argument-less call, an edit, or a new instruction each breaking the run.
 
-### `redundant_call`'s known hole, recorded rather than papered over
+**The truncation downgrade fires.** `Event.truncatesOwnOutput` is set in the
+parser when a pipeline ends in `head` or `tail`, and the one finding that hit it
+— `npx tsc --noEmit 2>&1 | head -30` ×5 — came back `high` rather than
+`certain`, because the digest compared a prefix. Honest limit: `sed -n`,
+`awk NR<`, `cut` and a bare `| less` go undetected and stay `certain`. A
+narrower claim than `failureKind`, whose envelope set is genuinely closed.
 
-A self-truncating command (`tsc --noEmit 2>&1 | head -30`) throws its own output away **upstream of
-us**, so `outHash` compares a prefix. The structural facts still hold — consecutive, identical
-arguments, nothing in between — so this downgrades confidence from `certain` to `high`, and never
-suppresses.
+## Reported as metadata, not as findings
+
+Both were planned as detectors. **Neither survived measurement**, for different
+reasons.
+
+### `file_churn` — the correlation is not there
+
+High-churn paths that also show edit friction: **15%**, against a **9%** base
+rate. That does not support a finding. Worse, of the 91 highest-churn paths in
+the corpus, **30 are never touched by `Edit` at all** — `.continue-here.md` at
+27 versions, `.planning/HANDOFF.json` at 27, `69-UAT.md` at 19. Those are files
+whose purpose is to be rewritten, and reporting them as waste would repeat
+exactly the mistake `revert_churn` made about a branch whose work had been
+deliberately preserved.
+
+**The obvious fix is also wrong.** "No `Edit` calls means regenerated" was the
+plan, until a real local session showed `src/archive.ts` at **51 versions and 1
+edit call** — heavy genuine editing done through `python3` heredocs in `Bash`.
+Filtering on the edit count would have hidden the most-worked file in the
+session. So both numbers are shown and neither filters: a reader seeing
+`HANDOFF.json 27 versions, no edit-tool calls` beside `server.ts 18 versions, 59
+edit calls` can tell those apart, and a filter guessing for them could not.
+
+### `context_reingest` — exact, universal, unanchorable as a ratio
+
+`cache_creation / output_tokens` per session: **p50 12.0, p90 93.4, p99 857.6**.
+Exact, text-free, identical in meaning for every language and tool. But a
+session-wide ratio has no turn to point at, and CLAUDE.md is explicit that
+nothing is reported as a number without evidence behind it.
+
+What *is* anchorable: **half a session's re-ingestion comes from 6% of its
+turns** (p50; p10 is 1.3%). Concentrated, so the heaviest turns can be named —
+a ranking, needing no threshold.
+
+```
+  SESSION COST
+    3.8M out · 27.1M re-ingested · ratio 7.1 (corpus median 12.0)
+    heaviest at turns 3586, 3587, 3588 — 11% of it
+
+  MOST REWRITTEN
+    51 versions  agentsensei/src/archive.ts                1 edit call
+    34 versions  ~/.claude/plans/rosy-seeking-feather.md   81 edit calls
+```
+
+**`cacheRead` is recorded and never divided.** It re-counts the whole prefix on
+every call, so `read/(read+creation)` runs p10 0.901 → p90 0.985 by
+construction and an "outlier" is just a short session. `test/render.test.ts`
+asserts it never reaches the output.
 
 ## Deliberately not built
 
@@ -214,8 +269,8 @@ place by never being wrong. `core` membership is about precision.
 
 | Preset | Count | Who it's for |
 |---|---|---|
-| **`core`** *(default)* | 1 — `edit_retry` | `certain`, rule-only, no model, and hand-verified at 0 false positives. The first finding a stranger sees decides whether they keep the tool. |
-| `standard` | — | Adds dimensions that are sound but either noisier or needing outcome classification. `redundant_call` lands here, not in `core`. |
+| **`core`** *(default)* | 1 — `edit_retry` | `certain`, rule-only, no model, and hand-verified at 0 false positives across 28 findings. The first finding a stranger sees decides whether they keep the tool. |
+| `standard` | 2 — adds `redundant_call` | Sound, hand-verified 5/5, and far rarer at 0.4% of sessions. Precision earns it a place; frequency decides it is not the default. |
 | `all` | — | Everything implemented, including low-confidence and experimental. |
 
 **There is no mute surface yet.** `Config` carries no `preset` and no per-dimension `mute`, so the

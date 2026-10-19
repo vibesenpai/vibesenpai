@@ -179,6 +179,21 @@ export type Event = {
    */
   failureKind?: 'tool' | 'denied' | 'hook' | 'permission' | 'cascade' | 'other';
 
+  /**
+   * The command discards part of its own output before we ever see it.
+   *
+   * Set when a shell pipeline ends in `head` or `tail`, so `outHash` digests a
+   * **prefix** rather than the output. Two runs can then look identical while
+   * the part that changed was thrown away upstream of us — which is why
+   * `redundant_call` downgrades from `certain` to `high` rather than suppressing.
+   *
+   * **Partial coverage, stated rather than implied.** `head` and `tail` are the
+   * overwhelmingly common forms, but `sed -n`, `awk NR<`, `cut` and a bare
+   * `| less` are not detected, and findings on those stay `certain`. This is a
+   * narrower claim than `failureKind`, whose envelope set is genuinely closed.
+   */
+  truncatesOwnOutput?: boolean;
+
   /** Short and redacted. Never raw file contents. */
   textSummary?: string;
 

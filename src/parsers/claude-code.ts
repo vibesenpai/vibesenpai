@@ -321,6 +321,22 @@ export function failureKindOf(text: string | undefined): NonNullable<Event['fail
   return 'other';
 }
 
+/**
+ * Does this command throw away part of its own output?
+ *
+ * Matched on the shell's own grammar — a pipe into `head` or `tail` — which is
+ * POSIX and closed, not a guess about what a tool does. Deliberately narrow:
+ * this exists so a detector can lower its confidence, and over-claiming here
+ * would lower it on calls that were in fact fully observed.
+ *
+ * The flag is not negative evidence. `sed -n '1,30p'` truncates too and is not
+ * matched; see `Event.truncatesOwnOutput`.
+ */
+export function truncatesOutput(command: string | undefined): boolean {
+  if (command === undefined) return false;
+  return /\|\s*(?:head|tail)\b/.test(command);
+}
+
 function tokensOf(usage: Partial<Usage> | undefined): Event['tokens'] | undefined {
   if (!usage) return undefined;
   const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
@@ -629,13 +645,17 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
             case 'tool_use':
             case 'server_tool_use': {
               if (b.id !== undefined && b.name !== undefined) toolById.set(b.id, b.name);
+              const target = toolTarget(b.name, b.input);
               push('tool_use', {
                 ...(b.name !== undefined ? { toolName: b.name } : {}),
                 ...(b.id !== undefined ? { toolCallId: b.id } : {}),
-                ...toolTarget(b.name, b.input),
+                ...target,
                 ...(argDigest(b.input) !== undefined
                   ? { argHash: argDigest(b.input) as string }
                   : {}),
+                // Recorded here so a detector never has to read the command to
+                // know its own output was clipped before we saw it.
+                ...(truncatesOutput(target.command) ? { truncatesOwnOutput: true } : {}),
                 ...(tokens !== undefined ? { tokens } : {}),
               });
               break;

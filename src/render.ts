@@ -33,6 +33,7 @@
 import type { Denominators } from './detect/index.ts';
 import type { Event, Finding } from './types.ts';
 import { adviceFor, reasonOf, type Reason } from './detect/labels.ts';
+import { sessionStats, type SessionStats } from './stats.ts';
 
 /** Corpus percentiles, so a session's number has something to sit against. */
 export const CORPUS = {
@@ -192,11 +193,27 @@ function adviceLines(f: Finding): string[] {
     });
 }
 
+/**
+ * A readable headline for a finding whose subject is a digest.
+ *
+ * A detector cannot read a command, so `redundant_call` names a Bash run
+ * `Bash #8e0f94` — correct as identity and useless as a headline. The renderer
+ * *may* read it, so it substitutes the command from the first cited turn while
+ * keeping the digest, which is what the finding is actually keyed on.
+ */
+export function headlineFor(f: Finding, byUuid: Map<string, Event>): string {
+  const digest = /#[0-9a-f]{4,}$/.exec(f.subject);
+  if (digest === null) return shortenPath(f.subject);
+  const first = f.evidence.map((r) => byUuid.get(r.uuid)).find((e) => e?.command !== undefined);
+  if (first?.command === undefined) return f.subject;
+  return `${shortenPath(first.command.replace(/\s+/g, ' '), 56)}  ${digest[0]}`;
+}
+
 export function renderFinding(f: Finding, byUuid: Map<string, Event> = new Map()): string[] {
   const times = f.occurrences > 1 ? ` ×${f.occurrences}` : '';
   return [
     `${INDENT}⚑ ${f.dimension}${times}   [${f.confidence}]`,
-    `${INDENT.repeat(2)}${shortenPath(f.subject)}`,
+    `${INDENT.repeat(2)}${headlineFor(f, byUuid)}`,
     ...adviceLines(f),
     ...evidenceLines(f, byUuid),
   ];
@@ -214,7 +231,7 @@ export function renderFinding(f: Finding, byUuid: Map<string, Event> = new Map()
  * is pinned near 1 by construction. Showing it would invite exactly the
  * reasoning that GRAVEYARD.md records as the fifth instance of that mistake.
  */
-export function renderCost(d: Denominators): string[] {
+export function renderCost(d: Denominators, stats?: SessionStats): string[] {
   const { output, cacheCreation } = d.tokens;
   if (output === 0 && cacheCreation === 0) return [];
 
@@ -227,7 +244,46 @@ export function renderCost(d: Denominators): string[] {
         : `corpus median ${CORPUS.reingestP50.toFixed(1)}`;
     parts.push(`ratio ${ratio.toFixed(1)} (${where})`);
   }
-  return [`${INDENT}SESSION COST`, `${INDENT.repeat(2)}${parts.join(' · ')}`];
+  const out = [`${INDENT}SESSION COST`, `${INDENT.repeat(2)}${parts.join(' · ')}`];
+
+  // The anchored half. Measured: half a session's re-ingestion comes from 6% of
+  // its turns, so naming the heaviest few is a ranking rather than a threshold.
+  const heaviest = stats?.reingest.heaviest ?? [];
+  if (heaviest.length > 1 && stats !== undefined && stats.reingest.share > 0) {
+    const turns = heaviest.map((t) => t.seq).join(', ');
+    out.push(
+      `${INDENT.repeat(2)}heaviest at turns ${turns} — ${Math.round(stats.reingest.share * 100)}% of it`,
+    );
+  }
+  return out;
+}
+
+/**
+ * The session's most-rewritten files.
+ *
+ * A ranking, so there is no threshold to defend, and no verb: this says what
+ * changed most, never that changing it was wrong.
+ *
+ * The edit-call count is shown beside each path and **excludes nothing**. It is
+ * how a reader tells a regenerated file from a worked one — but it undercounts
+ * shell-driven edits, so it informs rather than decides. See `src/stats.ts`.
+ */
+export function renderRewritten(stats: SessionStats, max = 4): string[] {
+  const shown = stats.rewritten.slice(0, max);
+  if (shown.length === 0) return [];
+  const width = Math.max(...shown.map((f) => String(f.versions).length));
+  const lines = [`${INDENT}MOST REWRITTEN`];
+  for (const f of shown) {
+    const via =
+      f.editCalls === 0 ? 'no edit-tool calls' : `${f.editCalls} edit call${f.editCalls === 1 ? '' : 's'}`;
+    lines.push(
+      `${INDENT.repeat(2)}${String(f.versions).padStart(width)} versions  ` +
+        `${shortenPath(f.path, 42).padEnd(42)} ${via}`,
+    );
+  }
+  const hidden = stats.rewritten.length - shown.length;
+  if (hidden > 0) lines.push(`${INDENT.repeat(2)}… ${hidden} more`);
+  return lines;
 }
 
 export function render(input: RenderInput): string {
@@ -255,8 +311,12 @@ export function render(input: RenderInput): string {
     for (const f of findings) lines.push(...renderFinding(f, byUuid), '');
   }
 
-  const cost = renderCost(d);
+  const stats = sessionStats(input.events);
+  const cost = renderCost(d, stats);
   if (cost.length > 0) lines.push(...cost, '');
+
+  const rewritten = renderRewritten(stats);
+  if (rewritten.length > 0) lines.push(...rewritten, '');
 
   if (d.unclassifiedTouchCount > 0) {
     // The coverage gap, surfaced rather than folded into a count. An MCP tool

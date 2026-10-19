@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { durationOf, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
+import { durationOf, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
 import { materialise } from '../src/finding.ts';
 import type { Denominators } from '../src/detect/index.ts';
 import type { Event, Finding } from '../src/types.ts';
@@ -196,6 +196,31 @@ describe('render — the cost line sits against the corpus', () => {
 
   it('prints nothing at all when there is no token data', () => {
     expect(renderCost(zeros)).toEqual([]);
+  });
+});
+
+describe('render — a digest subject gets a readable headline', () => {
+  it('substitutes the command while keeping the digest it is keyed on', () => {
+    // A detector cannot read a command, so `redundant_call` names a Bash run
+    // `Bash #8e0f94`. Correct as identity, useless as a headline — and the
+    // renderer is display tier, so it may read what a detector may not.
+    const call = ev({
+      turnType: 'tool_use', toolName: 'Bash', uuid: 'a', seq: 10,
+      command: 'npx tsc --noEmit 2>&1 | head -30',
+    });
+    const f = finding({ subject: 'Bash #8e0f94' });
+    const out = headlineFor(f, new Map([[call.uuid, call]]));
+    expect(out).toContain('npx tsc --noEmit');
+    expect(out).toContain('#8e0f94');
+  });
+
+  it('leaves a path subject alone', () => {
+    expect(headlineFor(finding(), new Map())).toBe('/repo/src/api.ts');
+  });
+
+  it('keeps the digest when no cited turn carries a command', () => {
+    // TodoWrite takes arguments we can digest but not name.
+    expect(headlineFor(finding({ subject: 'TodoWrite #475905' }), new Map())).toBe('TodoWrite #475905');
   });
 });
 

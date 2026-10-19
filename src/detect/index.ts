@@ -38,6 +38,7 @@ import type { Event, Finding, Preset } from '../types.ts';
 import type { Detector, DetectorContext, SessionFacts } from './types.ts';
 import { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../edits.ts';
 import { editRetry } from './edit-retry.ts';
+import { redundantCall } from './redundant-call.ts';
 import { reasonOf } from './labels.ts';
 
 export type { Detector, DetectorContext, SessionFacts } from './types.ts';
@@ -52,13 +53,19 @@ export { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../ed
  * over 1,139 real sessions produced 5 true positives against ~25 false
  * positives. They are gone; `GRAVEYARD.md` holds the evidence.
  *
- * The replacements land one at a time, each with its probe in
- * `scripts/measure-dimensions.ts`, in order of how clearly they can point at a
- * turn: `edit_retry`, `file_churn`, `context_reingest`, `redundant_call`. A
- * detector that disagrees with the measurement that justified it is wrong.
+ * Two live here. The other two things that were planned as detectors are not
+ * detectors at all: measured, **file churn correlates with friction at 15%
+ * against a 9% base rate**, and a context-re-ingestion ratio is session-wide
+ * with no turn to anchor to. Both are reported as session metadata by
+ * `src/stats.ts` instead — facts a reader uses, never findings. See
+ * `docs/dimensions.md`.
+ *
+ * A detector that disagrees with the measurement that justified it is wrong,
+ * which is why each one is measured by itself in
+ * `scripts/measure-dimensions.ts` rather than by a probe that resembles it.
  */
 export function allDetectors(): Detector[] {
-  return [editRetry()];
+  return [editRetry(), redundantCall()];
 }
 
 const PRESET_RANK: Record<Preset, number> = { core: 0, standard: 1, all: 2 };

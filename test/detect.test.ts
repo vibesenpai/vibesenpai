@@ -12,6 +12,8 @@ import {
 import { collect, mergeFindings, materialise, findingId, subjectIdOf } from '../src/finding.ts';
 import type { Event, Finding } from '../src/types.ts';
 import { editRetry, retriedFailures } from '../src/detect/edit-retry.ts';
+import { redundantCall } from '../src/detect/redundant-call.ts';
+import { truncatesOutput } from '../src/parsers/claude-code.ts';
 import { reasonOf, adviceFor } from '../src/detect/labels.ts';
 import { failureKindOf } from '../src/parsers/claude-code.ts';
 import type { Detector, SessionFacts } from '../src/detect/types.ts';
@@ -370,7 +372,7 @@ describe('runner — isolation and presets', () => {
     // Anything registered here must survive `StructuralEvent`, which the
     // compiler already guarantees — this pins the roster itself so a
     // reintroduction is a visible change rather than a quiet one.
-    expect(allDetectors().map((d) => d.dimension)).toEqual(['edit_retry']);
+    expect(allDetectors().map((d) => d.dimension)).toEqual(['edit_retry', 'redundant_call']);
   });
 });
 
@@ -794,5 +796,137 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
       expect(r, text).toBeDefined();
       expect(adviceFor(r!).length).toBeGreaterThan(10);
     }
+  });
+});
+
+describe('redundant_call — the same call, the same answer', () => {
+  /** A result carrying a real digest over its full output, as the parser makes. */
+  const answer = (text: string): Event =>
+    ev({
+      turnType: 'tool_result',
+      textSummary: text,
+      ...(outputDigest(text) !== undefined ? { outHash: outputDigest(text) as string } : {}),
+    });
+
+  const call = (args: string, over: Partial<Event> = {}): Event =>
+    ev({ turnType: 'tool_use', toolName: 'Bash', command: args, argHash: hash(args), ...over });
+
+  const run = async (events: Event[]): Promise<Finding[]> =>
+    (
+      await runDetectors({
+        events,
+        session: facts(),
+        detectors: [redundantCall()],
+        now: '2026-10-19T00:00:00.000Z',
+      })
+    ).findings;
+
+  it('fires on three identical calls with three identical answers', async () => {
+    const f = await run([
+      call('npx tsc --noEmit'), answer('error TS2304: Cannot find name'),
+      call('npx tsc --noEmit'), answer('error TS2304: Cannot find name'),
+      call('npx tsc --noEmit'), answer('error TS2304: Cannot find name'),
+    ]);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.occurrences).toBe(3);
+    expect(f[0]!.confidence).toBe('certain');
+  });
+
+  it('stays quiet when the last answer differs', async () => {
+    // The weaker "not all different" test fired on [FAIL, FAIL, OK] — a run
+    // whose last call plainly returned something new.
+    expect(
+      await run([
+        call('npm test'), answer('2 failed'),
+        call('npm test'), answer('2 failed'),
+        call('npm test'), answer('0 failed, all passed'),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('reads a failure count going down as progress, not as a loop', async () => {
+    // An earlier normaliser replaced every digit and collapsed these into one
+    // string — reporting steady progress as a loop, on exactly the behaviour
+    // the tool should encourage.
+    expect(
+      await run([
+        call('npm test'), answer('Tests: 3 failed, 9 passed'),
+        call('npm test'), answer('Tests: 2 failed, 10 passed'),
+        call('npm test'), answer('Tests: 1 failed, 11 passed'),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('does not compare two calls it cannot tell apart', async () => {
+    // No argHash means no arguments to compare. Assuming two such calls are the
+    // same call was the most common false positive measured.
+    const opaque = (): Event => ev({ turnType: 'tool_use', toolName: 'TodoWrite' });
+    expect(await run([opaque(), answer('ok'), opaque(), answer('ok'), opaque(), answer('ok')])).toEqual([]);
+  });
+
+  it('never treats a poll as a loop', async () => {
+    // The only finding the first version produced across 227 real sessions,
+    // and it was wrong: a poll returning `running` is identical by design.
+    const poll = (): Event =>
+      ev({ turnType: 'tool_use', toolName: 'BashOutput', argHash: hash('job-1') });
+    expect(await run([poll(), answer('running'), poll(), answer('running'), poll(), answer('running')])).toEqual([]);
+  });
+
+  it('stops the run at an edit, because something changed', async () => {
+    expect(
+      await run([
+        call('npm test'), answer('FAIL'),
+        ev({ turnType: 'tool_use', toolName: 'Edit', filePath: '/a.ts', argHash: hash('e') }),
+        call('npm test'), answer('FAIL'),
+        call('npm test'), answer('FAIL'),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('stops the run at a new instruction', async () => {
+    expect(
+      await run([
+        call('ls'), answer('a'),
+        ev({ turnType: 'user_prompt', textSummary: 'now do something else' }),
+        call('ls'), answer('a'),
+        call('ls'), answer('a'),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('will not call an unseen answer identical', async () => {
+    // outHash is absent when output was empty or uncapturable. `unknown` beats
+    // guessing, so a run we cannot compare is not a loop.
+    const blind = (): Event => ev({ turnType: 'tool_result' });
+    expect(await run([call('ls'), blind(), call('ls'), blind(), call('ls'), blind()])).toEqual([]);
+  });
+
+  it('downgrades to high when the command clipped its own output', async () => {
+    // `| head -30` throws the rest away upstream of us, so outHash digested a
+    // prefix: "the same answer" is a weaker claim and says so.
+    const piped = 'npx tsc --noEmit 2>&1 | head -30';
+    expect(truncatesOutput(piped)).toBe(true);
+    const f = await run([
+      call(piped, { truncatesOwnOutput: true }), answer('30 lines'),
+      call(piped, { truncatesOwnOutput: true }), answer('30 lines'),
+      call(piped, { truncatesOwnOutput: true }), answer('30 lines'),
+    ]);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.confidence).toBe('high');
+  });
+
+  it('claims no more than head and tail about truncation', () => {
+    // Narrower than failureKind's closed envelope set, and stated as such:
+    // these forms truncate too and are not detected.
+    expect(truncatesOutput('npm test | tail -5')).toBe(true);
+    expect(truncatesOutput("sed -n '1,30p' out.txt")).toBe(false);
+    expect(truncatesOutput('npm test | less')).toBe(false);
+    expect(truncatesOutput('npm test')).toBe(false);
+  });
+
+  it('ships in standard, not core — 0.4% of sessions is not a first impression', () => {
+    expect(redundantCall().preset).toBe('standard');
+    expect(detectorsFor('core').map((d) => d.dimension)).not.toContain('redundant_call');
+    expect(detectorsFor('standard').map((d) => d.dimension)).toContain('redundant_call');
   });
 });
