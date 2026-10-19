@@ -299,3 +299,38 @@ describe('commandKey — a cd target that contains spaces', () => {
     );
   });
 });
+
+describe('outHash — comparing full output, not a 200-char prefix', () => {
+  it('separates two results that share a long prefix', async () => {
+    // `textSummary` is capped at 200 chars and 59.9% of 3,748 real results hit
+    // that cap, so comparing summaries compared prefixes: two different
+    // failures with the same opening line looked identical.
+    const prefix = 'FAIL '.repeat(45); // > 200 chars
+    const { outputDigest } = await import('../src/normalise.ts');
+    const a = outputDigest(`${prefix}expected 2 to be 3`);
+    const b = outputDigest(`${prefix}expected 7 to be 9`);
+    expect(a).toBeDefined();
+    expect(a).not.toBe(b);
+  });
+
+  it('still collapses output differing only in volatile parts', async () => {
+    const { outputDigest } = await import('../src/normalise.ts');
+    expect(outputDigest('FAIL auth.ts:42 token undefined in 1.2s')).toBe(
+      outputDigest('FAIL auth.ts:51 token undefined in 0.9s'),
+    );
+  });
+
+  it('preserves counts, so falling failures are not one value', async () => {
+    const { outputDigest } = await import('../src/normalise.ts');
+    expect(outputDigest('Tests: 3 failed, 9 passed')).not.toBe(
+      outputDigest('Tests: 1 failed, 11 passed'),
+    );
+  });
+
+  it('returns undefined for empty output, which tells a detector nothing', async () => {
+    const { outputDigest } = await import('../src/normalise.ts');
+    expect(outputDigest('')).toBeUndefined();
+    expect(outputDigest('   ')).toBeUndefined();
+    expect(outputDigest(undefined)).toBeUndefined();
+  });
+});

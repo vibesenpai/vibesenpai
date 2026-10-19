@@ -33,12 +33,12 @@
  *      from a loop by structure alone and some projects do it legitimately.
  */
 
+import { EDIT_TOOLS } from './index.ts';
 import type { Candidate } from '../finding.ts';
 import type { Event, TurnRef } from '../types.ts';
 import type { Detector, DetectorContext } from './types.ts';
 
 /** Tool calls that change state, so a run cannot continue across them. */
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 /**
  * Tools whose whole purpose is to check current state.
@@ -177,7 +177,12 @@ export function runsOf(events: Event[]): Run[] {
       case 'tool_result':
         // The result of the call being repeated. Recorded, not a break: it is
         // how we tell a loop from a sequence that was learning something.
-        if (current !== undefined) current.results.push(e.textSummary);
+        //
+        // `outHash` rather than `textSummary`: the summary is capped at 200
+        // characters and 59.9% of real results hit that cap, so comparing
+        // summaries compared *prefixes* — two different failures sharing an
+        // opening line looked identical.
+        if (current !== undefined) current.results.push(e.outHash);
         break;
 
       case 'assistant_msg':
@@ -205,15 +210,18 @@ export function runsOf(events: Event[]): Run[] {
  * *identical output*, not merely "not all different". The weaker test fired on
  * `[FAIL, FAIL, OK]` — a run whose last call plainly returned something new.
  *
- * A missing result is **not** treated as matching. We cannot read what we did
- * not capture, and CLAUDE.md is explicit that `unknown` beats guessing: a run
- * whose output we cannot compare is not reported as a loop.
+ * Compares digests of the **full** normalised output, so volatile parts
+ * (durations, line numbers) collapse while counts survive — a failure count
+ * going 3 → 2 → 1 is progress and must not read as a loop.
+ *
+ * A missing digest is **not** treated as matching. `outHash` is absent when
+ * output was empty or uncapturable, and CLAUDE.md is explicit that `unknown`
+ * beats guessing: a run whose output we cannot compare is not a loop.
  */
 function sameOutputThroughout(results: (string | undefined)[], calls: number): boolean {
   if (results.length < calls) return false; // a result we never saw
-  const normalised = results.map(normaliseResult);
-  if (normalised.some((r) => r === '')) return false; // empty tells us nothing
-  return new Set(normalised).size === 1;
+  if (results.some((r) => r === undefined)) return false; // nothing to compare
+  return new Set(results).size === 1;
 }
 
 export type ToolLoopOptions = { minRepeats?: number };
@@ -223,6 +231,10 @@ export function toolLoop(opts: ToolLoopOptions = {}): Detector {
 
   return {
     dimension: 'tool_loop',
+    // Thread, not session: another actor's call spliced between two identical
+    // ones makes them non-consecutive, and a subagent's repeated calls are its
+    // own loop rather than the main thread's.
+    scope: 'thread',
     polarity: 'lower-is-better',
     confidence: 'certain',
     method: 'RULE+T',
@@ -237,7 +249,7 @@ export function toolLoop(opts: ToolLoopOptions = {}): Detector {
     async detect(ctx: DetectorContext): Promise<Candidate[]> {
       const out: Candidate[] = [];
 
-      for (const run of runsOf(ctx.window.events)) {
+      for (const run of runsOf(ctx.events)) {
         if (run.events.length < minRepeats) continue;
         // Identical call AND identical answer. Repeating a call that returns
         // something new is work, not a loop.

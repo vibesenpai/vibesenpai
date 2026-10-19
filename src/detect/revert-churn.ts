@@ -24,12 +24,12 @@
  * applies: no edits, no churn.
  */
 
+import { EDIT_TOOLS } from './index.ts';
 import { executablePart } from './command.ts';
 import type { Candidate } from '../finding.ts';
 import type { Event, TurnRef } from '../types.ts';
 import type { Detector, DetectorContext } from './types.ts';
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 /**
  * Destructive git operations. Each discards uncommitted or committed work
@@ -67,6 +67,9 @@ function editedFiles(events: Event[]): string[] {
 export function revertChurn(): Detector {
   return {
     dimension: 'revert_churn',
+    // Session: a subagent may edit the files that the main thread then resets.
+    // Per-thread, neither half would see the other.
+    scope: 'session',
     polarity: 'neutral',
     confidence: 'certain',
     method: 'RULE',
@@ -81,11 +84,11 @@ export function revertChurn(): Detector {
     },
 
     async detect(ctx: DetectorContext): Promise<Candidate[]> {
-      const events = [...ctx.window.events].sort((a, b) => a.seq - b.seq);
+      const events = [...ctx.events].sort((a, b) => a.seq - b.seq);
       const edited = editedFiles(events);
 
-      // No edits in this window means nothing of this session's work was at
-      // risk — the command was housekeeping, not churn.
+      // No edits anywhere in the session means nothing of this session's work
+      // was at risk — the command was housekeeping, not churn.
       if (edited.length === 0) return [];
 
       const bySubject = new Map<string, TurnRef[]>();

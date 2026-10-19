@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { runDetectors, detectorsFor, countDenominators } from '../src/detect/index.ts';
+import { outputDigest } from '../src/normalise.ts';
+import {
+  runDetectors,
+  detectorsFor,
+  countDenominators,
+  editEvidenceOf,
+  EDIT_TOOLS,
+} from '../src/detect/index.ts';
 import { staticLookup, coldLookup } from '../src/verify.ts';
 import { toolLoop, runsOf, signatureOf } from '../src/detect/tool-loop.ts';
 import { revertChurn, destructiveKind } from '../src/detect/revert-churn.ts';
@@ -53,8 +60,19 @@ const bash = (command: string, uuid?: string): Event =>
 /** A call to a tool whose arguments the parser cannot name — only digest. */
 const opaque = (tool: string, args: string): Event =>
   ev({ turnType: 'tool_use', toolName: tool, argHash: hash(args) });
+/**
+ * `outHash` mirrors what the parser computes over the FULL output. Fixtures must
+ * carry it, because `tool_loop` compares digests rather than summaries — the
+ * summary is capped at 200 chars and 59.9% of real results hit that cap.
+ */
 const result = (textSummary?: string): Event =>
-  ev({ turnType: 'tool_result', ...(textSummary !== undefined ? { textSummary } : {}) });
+  ev({
+    turnType: 'tool_result',
+    ...(textSummary !== undefined ? { textSummary } : {}),
+    ...(outputDigest(textSummary) !== undefined
+      ? { outHash: outputDigest(textSummary) as string }
+      : {}),
+  });
 const edit = (filePath: string): Event =>
   ev({ turnType: 'tool_use', toolName: 'Edit', filePath, argHash: hash(filePath) });
 
@@ -463,9 +481,9 @@ describe('inaccurate_self_report — the transcript disagreeing with itself', ()
     })).findings;
 
   const failed = (text: string): Event =>
-    ev({ turnType: 'tool_result', isError: true, textSummary: text });
+    ev({ turnType: 'tool_result', isError: true, textSummary: text, ...(outputDigest(text) !== undefined ? { outHash: outputDigest(text) as string } : {}) });
   const passed = (text: string): Event =>
-    ev({ turnType: 'tool_result', exitCode: 0, textSummary: text });
+    ev({ turnType: 'tool_result', exitCode: 0, textSummary: text, ...(outputDigest(text) !== undefined ? { outHash: outputDigest(text) as string } : {}) });
   const says = (text: string): Event => ev({ turnType: 'assistant_msg', textSummary: text });
 
   it('fires when success is claimed over a failing check', async () => {
@@ -475,7 +493,11 @@ describe('inaccurate_self_report — the transcript disagreeing with itself', ()
       says('Fixed — all tests pass now.'),
     ]);
     expect(f).toHaveLength(1);
-    expect(f[0]!.confidence).toBe('certain');
+    // `high`, not `certain`: the structural half is certain, but the claim is
+    // matched lexically over an open space with nothing behavioural confirming
+    // it. Confidence tracks the weakest link.
+    expect(f[0]!.confidence).toBe('high');
+    expect(f[0]!.method).toBe('LEX');
     expect(f[0]!.evidence).toHaveLength(2); // the failure AND the claim
   });
 
@@ -812,5 +834,182 @@ describe('tool_loop — the output has to match too', () => {
       bash('grep -rn "foo" src/'), result('src/a.ts:3: foo'),
     ]);
     expect(f).toHaveLength(1);
+  });
+});
+
+describe('scope — the window is a token budget, not an evaluation span', () => {
+  // Measured across 255 sessions: of 363 genuinely verified edits, 293 (81%)
+  // are verified by a command in a LATER window. A per-window detector calls
+  // every one of them unverified — a precision failure, not a recall one.
+  const long = (): Event[] => {
+    const out: Event[] = [];
+    // 30 filler lines, so the pair below straddles a window boundary.
+    for (let i = 0; i < 30; i++) out.push(bash(`echo step-${i}`));
+    return out;
+  };
+
+  it('a session-scoped detector sees a pair that windows would split', async () => {
+    const events = [
+      bash('npm test'),
+      ev({ turnType: 'tool_result', isError: true, textSummary: 'FAIL 2 tests' }),
+      ...long(),
+      ev({ turnType: 'assistant_msg', textSummary: 'Fixed — all tests pass now.' }),
+    ];
+    // The failure is in window 1; the claim is ~3 windows later.
+    const windows = (await runDetectors({
+      events, session: facts(), detectors: [inaccurateSelfReport()], now: 'T',
+    }));
+    expect(windows.windows).toBeGreaterThan(2);
+    expect(windows.findings).toHaveLength(1);
+  });
+
+  it('declares its scope, and core rules are not window-scoped', () => {
+    for (const d of detectorsFor('all')) {
+      expect(['window', 'thread', 'session', 'project'], d.dimension).toContain(d.scope);
+    }
+    // tool_loop is the one where locality IS the signal.
+    expect(detectorsFor('all').find((d) => d.dimension === 'tool_loop')!.scope).toBe('thread');
+    expect(detectorsFor('all').find((d) => d.dimension === 'revert_churn')!.scope).toBe('session');
+  });
+
+  it('keeps a subagent loop separate from the main thread', async () => {
+    // Thread scope: another actor's call spliced between two identical ones
+    // must not make them consecutive, and must not merge the two actors.
+    const sc = (c: string): Event =>
+      ev({ turnType: 'tool_use', toolName: 'Bash', command: c, argHash: hash(c), isSidechain: true, sidechainId: 'sc1' });
+    const scRes = (t: string): Event =>
+      ev({
+        turnType: 'tool_result', isError: true, textSummary: t,
+        isSidechain: true, sidechainId: 'sc1',
+        ...(outputDigest(t) !== undefined ? { outHash: outputDigest(t) as string } : {}),
+      });
+    const events = [
+      sc('npm test'), scRes('FAIL x'),
+      bash('ls'), result('a.ts'),
+      sc('npm test'), scRes('FAIL x'),
+      bash('ls'), result('a.ts'),
+      sc('npm test'), scRes('FAIL x'),
+    ];
+    const f = (await runDetectors({ events, session: facts(), detectors: [toolLoop()], now: 'T' })).findings;
+    // The subagent's three identical calls ARE consecutive within its thread,
+    // even though main-thread calls sit between them in the flat array.
+    expect(f).toHaveLength(1);
+    expect(f[0]!.occurrences).toBe(3);
+  });
+
+  it('refuses project scope loudly instead of evaluating the wrong span', async () => {
+    const crossSession = { ...revertChurn(), dimension: 'constraint_decay', scope: 'project' as const };
+    await expect(
+      runDetectors({ events: [bash('ls')], session: facts(), detectors: [crossSession], now: 'T' }),
+    ).rejects.toThrow(/project scope/);
+  });
+
+  it('gives a skeleton only to window-scoped detectors', async () => {
+    const seen: { hasSkeleton: boolean }[] = [];
+    const probe = (scope: 'window' | 'session') => ({
+      ...revertChurn(),
+      dimension: `probe-${scope}`,
+      scope,
+      detect: async (ctx: { skeleton?: unknown }) => {
+        seen.push({ hasSkeleton: ctx.skeleton !== undefined });
+        return [];
+      },
+    });
+    await runDetectors({ events: [bash('ls'), result('x')], session: facts(), detectors: [probe('window')], now: 'T' });
+    expect(seen.every((s) => s.hasSkeleton)).toBe(true);
+    seen.length = 0;
+    await runDetectors({ events: [bash('ls'), result('x')], session: facts(), detectors: [probe('session')], now: 'T' });
+    expect(seen.every((s) => !s.hasSkeleton)).toBe(true);
+  });
+});
+
+describe('EDIT_TOOLS is one definition', () => {
+  it('is exported once and covers the four Claude-owned writers', () => {
+    // A legitimate allowlist: the space is closed, published, and slow-moving.
+    // It previously existed as three separate copies.
+    expect([...EDIT_TOOLS].sort()).toEqual(['Edit', 'MultiEdit', 'NotebookEdit', 'Write']);
+  });
+});
+
+describe('"did a file change?" without a name allowlist', () => {
+  // The rule: a closed list is authoritative where it applies, behaviour covers
+  // the open remainder, and what neither decides is reported as undecided.
+  const snapshot = (changed: string[]): Event =>
+    ev({ turnType: 'system', systemKind: 'file-history', changedFiles: changed });
+
+  it('counts a Claude-owned writer', () => {
+    expect(editEvidenceOf(edit('src/a.ts'))).toBe('tool');
+  });
+
+  it('counts a harness-recorded change, whatever tool made it', () => {
+    // The MCP case: the harness tracks the file, not the tool.
+    expect(editEvidenceOf(snapshot(['src/a.ts']))).toBe('harness');
+  });
+
+  it('treats an unknown path-carrying tool as PROBABLE, never proven', () => {
+    // `mcp__acp__Write` writes files; `mcp__acp__Read` does not. Both carry a
+    // path, so path presence alone cannot separate them.
+    const mcpWrite = ev({ turnType: 'tool_use', toolName: 'mcp__acp__Write', filePath: '/x/a.ts', argHash: hash('w') });
+    expect(editEvidenceOf(mcpWrite)).toBe('probable');
+  });
+
+  it('does not mistake a reader for a writer', () => {
+    for (const name of ['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']) {
+      const r = ev({ turnType: 'tool_use', toolName: name, filePath: '/x/a.ts', argHash: hash(name) });
+      expect(editEvidenceOf(r), name).toBeUndefined();
+    }
+  });
+
+  it('reports unclassified touches instead of silently undercounting', () => {
+    const d = countDenominators(
+      [ev({ turnType: 'tool_use', toolName: 'mcp__acp__Write', filePath: '/x/a.ts', argHash: hash('w') })],
+      coldLookup(),
+    );
+    expect(d.editCount).toBe(0);
+    expect(d.unclassifiedTouchCount).toBe(1);
+  });
+
+  it('credits a harness-only change as an edit', () => {
+    const d = countDenominators([snapshot(['src/a.ts', 'src/b.ts'])], coldLookup());
+    expect(d.editCount).toBe(2);
+  });
+
+  it('does not double-count an edit its snapshot later confirms', () => {
+    // One Edit plus the snapshot recording it is one edit, not two.
+    const d = countDenominators([edit('src/a.ts'), snapshot(['src/a.ts'])], coldLookup());
+    expect(d.editCount).toBe(1);
+  });
+
+  it('dedupes across the ABSOLUTE tool path and the RELATIVE harness path', () => {
+    // The real shape, and the bug the identical-literal test above missed: the
+    // harness records `e2e/agents/cursor_cli.go` while the tool call carries
+    // `/Users/[USER]/Projects/devenv/cli/e2e/agents/cursor_cli.go`. Compared for
+    // equality they never match, and every edit in a harness-2.1 session
+    // doubled — 6 tool edits plus 3 snapshots read as 9.
+    const d = countDenominators(
+      [
+        edit('/Users/[USER]/Projects/devenv/cli/e2e/agents/cursor_cli.go'),
+        snapshot(['e2e/agents/cursor_cli.go']),
+      ],
+      coldLookup(),
+    );
+    expect(d.editCount).toBe(1);
+  });
+
+  it('does not dedupe a different file that merely shares a name', () => {
+    const d = countDenominators(
+      [edit('/Users/[USER]/app/src/index.ts'), snapshot(['vendor/src/index.ts'])],
+      coldLookup(),
+    );
+    expect(d.editCount).toBe(2);
+  });
+
+  it('still credits verification that follows a harness-only edit', () => {
+    const d = countDenominators(
+      [snapshot(['src/a.ts']), bash('npm test')],
+      staticLookup(['npm test']),
+    );
+    expect(d.editCount).toBe(1);
+    expect(d.verifiedEditCount).toBe(1);
   });
 });

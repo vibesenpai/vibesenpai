@@ -22,15 +22,73 @@
  */
 
 import type { Candidate } from '../finding.ts';
-import type { Window } from '../skeleton.ts';
 import type { VerificationLookup } from '../verify.ts';
-import type { Confidence, Denominator, Method, Polarity, Preset } from '../types.ts';
+import type { Confidence, Denominator, Event, Method, Polarity, Preset, Skeleton } from '../types.ts';
 
 export type DetectorContext = {
-  window: Window;
-  /** Session-level facts a window cannot see on its own. */
+  /**
+   * The events in this detector's scope, in `seq` order.
+   *
+   * Deliberately not a `Window`: the scope is the detector's own choice, and
+   * only a window-scoped detector gets a skeleton at all.
+   */
+  events: Event[];
+  /**
+   * The skeleton, for window-scoped detectors only.
+   *
+   * Present when `scope: 'window'`. Thread-scoped detectors have no single
+   * skeleton — their scope spans many windows — and must not invent one.
+   */
+  skeleton?: Skeleton;
+  /** Facts the scope cannot see on its own. */
   session: SessionFacts;
 };
+
+/**
+ * How much of the transcript a detector evaluates at once.
+ *
+ * ── Why this is a per-detector choice ───────────────────────────────────────
+ *
+ * The first version ran every detector per window, conflating "the unit a model
+ * can afford to read" with "the scope a rule evaluates". They are not the same
+ * thing, and the measurement is damning: of 363 genuinely verified edits across
+ * the corpora, **293 — 81% — are verified by a command in a *later* window**.
+ * A per-window `no_verification` would have called every one of them unverified.
+ *
+ * That is a precision failure, not a recall one, which is the worse kind.
+ */
+export type Scope =
+  /**
+   * One 6–12 line window plus its event span. For detectors where locality is
+   * the signal, and for the semantic tier, where a token budget binds.
+   */
+  | 'window'
+  /**
+   * One whole thread — the main thread, or one subagent — at full length.
+   *
+   * For rules where *locality* is the signal. Thread rather than session
+   * because a flat array interleaves subagent events among main-thread ones,
+   * which breaks consecutive-run detection and merges work belonging to
+   * different actors.
+   */
+  | 'thread'
+  /**
+   * Every thread, in one pass — "did this happen anywhere, by anyone?"
+   *
+   * The default for rules that are not about locality. The cross-actor case is
+   * real: a subagent edits a file and the main thread runs the tests. Scoped to
+   * a thread, that edit looks unverified.
+   */
+  | 'session'
+  /**
+   * Across sessions — "has this happened before?"
+   *
+   * Declared but **not implemented**: it needs stored history, which arrives
+   * with the store in M3. `constraint_decay` lives here, because a constraint
+   * stated in one session is violated in the next. Declared now so the runner
+   * refuses it explicitly rather than silently evaluating the wrong span.
+   */
+  | 'project';
 
 /**
  * Facts a detector needs that are not in its window.
@@ -59,6 +117,8 @@ export type SessionFacts = {
 
 export type Detector = {
   dimension: string;
+  /** How much of the transcript this detector needs at once. */
+  scope: Scope;
   /** Which direction is good. `neutral` carries no value judgment. */
   polarity: Polarity;
   confidence: Confidence;

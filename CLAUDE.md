@@ -89,6 +89,24 @@ was not the constant but a doc comment holding one: a later edit targeting that 
 nothing, applied silently, and left a type and its implementation disagreeing while every test passed.
 `test/source-hygiene.test.ts` makes it a build failure.
 
+## Scope is a property of the detector, not of the pipeline
+
+The window exists for a **token budget** — it is what a model can afford to read. That is a different
+question from the span a *rule* should evaluate, and conflating them was a precision bug: measured
+across 255 sessions, of 363 genuinely verified edits **293 (81%) are verified by a command in a later
+window.** A per-window `no_verification` would have called every one of them unverified.
+
+| scope | the question | who |
+|---|---|---|
+| `window` | what can a model afford to read? | semantic tier, evidence display |
+| `thread` | what did **this actor** do, in order? | `tool_loop` — locality is the signal |
+| `session` | did this happen **anywhere**, by anyone? | everything else |
+| `project` | has this happened **before**? | `constraint_decay` — declared, refused until M3 |
+
+`thread` is not `session`: a flat array interleaves subagent events among main-thread ones, which
+breaks consecutive-run detection. `session` is not `thread`: a subagent edits a file and the main
+thread runs the tests.
+
 ## Precision over recall
 
 A false flag destroys trust permanently, and a stranger who gets one never tells you why.

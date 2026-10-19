@@ -88,9 +88,19 @@ const ACKNOWLEDGES_REMAINDER =
 export function inaccurateSelfReport(): Detector {
   return {
     dimension: 'inaccurate_self_report',
+    // Session: the failing check and the claim that contradicts it need not be
+    // in the same window, and measured over 255 sessions they usually are not.
+    scope: 'session',
     polarity: 'lower-is-better',
-    confidence: 'certain',
-    method: 'RULE',
+    // `high`, not `certain`. The structural half — a failing verification
+    // immediately preceding the message — is genuinely certain. The claim
+    // detection is lexical over an open space (every way a person can phrase
+    // success), and it both nominates AND convicts with nothing behavioural to
+    // confirm it. Confidence tracks the weakest link.
+    confidence: 'high',
+    // `LEX`, not `RULE`. CLAUDE.md forbids blurring "flagged by rule" with
+    // "flagged by a lexical guess", and the lexical step is the fallible one.
+    method: 'LEX',
     requiresOutcome: false,
     // The rate is per success claim: "3 of 40 claims were contradicted" is the
     // comparable quantity, where "3 claims" alone depends on session length.
@@ -104,7 +114,7 @@ export function inaccurateSelfReport(): Detector {
     },
 
     async detect(ctx: DetectorContext): Promise<Candidate[]> {
-      const events = [...ctx.window.events].sort((a, b) => a.seq - b.seq);
+      const events = [...ctx.events].sort((a, b) => a.seq - b.seq);
       const out: Candidate[] = [];
 
       // The most recent verification result, and whether it failed. Reset by a
@@ -157,8 +167,8 @@ export function inaccurateSelfReport(): Detector {
           // The claim is the instance; the failure is why we can prove it.
           // Without this, one false claim counted as two occurrences.
           anchors: [{ uuid: e.uuid, sessionId: e.sessionId, seq: e.seq }],
-          confidence: 'certain',
-          method: 'RULE',
+          confidence: 'high',
+          method: 'LEX',
           polarity: 'lower-is-better',
           requiresOutcome: false,
           artifacts: [],

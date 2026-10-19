@@ -136,3 +136,58 @@ to 39 clean candidates, discovering `uv run pyright`, `pytest`, `vitest`, `tsc -
 every "project" there is a single-session fixture directory with no history to confirm from. Real use
 accrues confirmation across sessions in the same repo. Until it does, detectors stay silent — which is
 the `unknown` beats guessing rule, applied to the question "what counts as a test here".
+
+## D32 — detector scope is per-detector, and the window is only a token budget
+
+**Decision:** `Scope = 'window' | 'thread' | 'session' | 'project'`, declared by each detector. The
+runner groups once and dispatches. `project` is declared but refused with a clear error until the
+store exists (M3).
+
+**Why:** the first implementation ran every detector per window, conflating "the unit a model can
+afford to read" with "the span a rule evaluates". Measured across 255 sessions: of 363 genuinely
+verified edits, **293 (81%) are verified by a command in a later window** — a per-window
+`no_verification` would call all of them unverified. A precision failure, not a recall one.
+
+**A misleading measurement, recorded so it is not repeated:** counting "runs of >=3" per window versus
+per session showed *more* per window, which looked like windows were fine. Wrong metric — splitting
+one 7-call run into 4+3 raises the count while destroying the information.
+
+**Why `thread` exists separately from `session`:** a flat session array interleaves subagent events
+among main-thread ones, so anything about *consecutive* events is wrong on it. `tool_loop` is the only
+current detector where locality is the signal. Conversely `session` is needed because a subagent may
+edit the files the main thread then verifies or resets.
+
+## D33 — "did a file change?" is three layers, not a tool list
+
+**Decision:** `tool` (Claude's own writers — a closed, published, four-entry list), then `harness`
+(`file-history-snapshot` version increases — tool-agnostic), then `probable` (carries a path, is not a
+known reader) which is **counted separately and never treated as a confirmed edit**.
+
+**Why:** `EDIT_TOOLS` was a name allowlist acting as the complete answer in a world where MCP servers
+and custom agents add tools nobody publishes. `mcp__acp__Write` is in the corpus, writes files, and
+was counted as zero edits.
+
+**Evidence and proportion.** Layer 1 covers 789 of 794 file-writing calls. Layer 2 added 412
+harness-recorded changes but is version-gated — 0 of 56 sessions on harness 1.0, 1 of 87 on 2.0, 22 of
+the 34 *editing* sessions on 2.1 — so an earlier proposal to make it the single source of truth was
+overstated and was corrected. Layer 3 leaves 16 unclassified touches, which `Denominators` reports
+rather than folding in.
+
+**No change needed to `didExecute`:** `toolTarget` already ignores tool name and extracts by *field*
+(`file_path`/`path`/`notebook_path`, `command`, `pattern`/`query`) — a closed, conventional space.
+Verified: `mcp__acp__Bash` yields `command: "bunx tsc --noEmit"`, so verification discovery already
+reaches MCP tools.
+
+## D34 — `inaccurate_self_report` is `high`/`LEX`, not `certain`/`RULE`
+
+**Decision:** demoted from `certain` to `high`, and relabelled `RULE` to `LEX`.
+
+**Why:** its claim detection is lexical over an open space — every way a person can phrase success —
+and the patterns both *nominate* and *convict*, with nothing behavioural confirming them. That fails
+the allowlist rule (D31's corollary: a list over an open space may only nominate). The structural
+half — a failing verification immediately preceding the message — is genuinely certain; confidence has
+to track the weakest link. `CLAUDE.md` also forbids blurring "flagged by rule" with "flagged by a
+lexical guess".
+
+It stays in `core`, which admits `certain` or `high`. M2b's outcome signal ("did a correction
+follow?") is the behavioural decider that could raise it back.

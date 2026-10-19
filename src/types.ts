@@ -90,6 +90,18 @@ export type Event = {
   exitCode?: number;
   isError?: boolean;
 
+  /**
+   * Digest of the tool result's **full** output, volatility-normalised.
+   *
+   * `textSummary` is capped at 200 characters and, measured over 3,748 real
+   * results, **59.9% hit that cap** — so comparing summaries compared prefixes,
+   * and two different failures sharing an opening line looked identical. This is
+   * what `tool_loop` compares instead.
+   */
+  outHash?: string;
+  /** Bytes of output before truncation. A growing log is new information. */
+  outBytes?: number;
+
   /** Interrupts: SWE-chat's `queue_op_subtype` (user_prompt_discarded, …). */
   queueOpSubtype?: string;
 
@@ -103,6 +115,18 @@ export type Event = {
    * would couple a persisted format to a display string.
    */
   systemKind?: 'compaction' | 'cost-state' | 'pr-link' | 'file-history' | 'other';
+
+  /**
+   * Files the harness recorded as **changed** at this point, from
+   * `file-history-snapshot`. Tool-agnostic ground truth: it catches an MCP
+   * server's write, a custom agent's write, and anything that does not exist
+   * yet, because the harness tracks the file rather than the tool.
+   *
+   * Corroborating rather than primary — it is version-gated. Measured: 0 of 56
+   * sessions on harness 1.0 emit snapshots, 1 of 87 on 2.0, but 22 of the 34
+   * *editing* sessions on 2.1.
+   */
+  changedFiles?: string[];
 
   /**
    * On a branch the user abandoned — by rewinding, or by submitting a prompt and

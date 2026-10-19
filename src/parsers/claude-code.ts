@@ -72,6 +72,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import { createHash } from 'node:crypto';
 import { redact } from '../redact.ts';
+import { outputDigest } from '../normalise.ts';
 import type { Event, TurnType } from '../types.ts';
 
 /**
@@ -464,6 +465,8 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
   // Collected for the abandonment pass, which needs the whole file: the live
   // spine is only known once the final record has been read.
   const nodes: TreeNode[] = [];
+  /** Per-path file version, so a *rising* version marks a real change. */
+  const fileVersions = new Map<string, number>();
   /** event index → the uuid it came from, so the flag can be applied after. */
   const eventUuid: string[] = [];
 
@@ -543,10 +546,15 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
               const text = toolResultText(b.content);
               const exitCode = extractExitCode(text);
               const toolName = b.tool_use_id ? toolById.get(b.tool_use_id) : undefined;
+              // Hash the FULL output before `sum()` truncates it to 200 chars.
+              // Redacted first, so the digest cannot confirm a secret.
+              const outHash = text === undefined ? undefined : outputDigest(redact(text).text);
               push('tool_result', {
                 ...(toolName !== undefined ? { toolName } : {}),
                 ...(b.tool_use_id !== undefined ? { toolCallId: b.tool_use_id } : {}),
                 ...(exitCode !== undefined ? { exitCode } : {}),
+                ...(outHash !== undefined ? { outHash } : {}),
+                ...(text !== undefined ? { outBytes: Buffer.byteLength(text) } : {}),
                 ...(b.is_error === true || (exitCode !== undefined && exitCode !== 0)
                   ? { isError: true }
                   : {}),
@@ -625,11 +633,33 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       }
 
       case 'file-history-snapshot': {
-        const tracked = Object.keys(r.snapshot?.trackedFileBackups ?? {});
+        // The harness tracks files, not tools, so a rising `version` is
+        // tool-agnostic proof that a file changed — it catches an MCP server's
+        // write and anything else a name allowlist cannot know about.
+        const backups = (r.snapshot?.trackedFileBackups ?? {}) as Record<
+          string,
+          { version?: unknown } | undefined
+        >;
+        const changed: string[] = [];
+        for (const [path, meta] of Object.entries(backups)) {
+          const version = typeof meta?.version === 'number' ? meta.version : undefined;
+          if (version === undefined) continue;
+          const prior = fileVersions.get(path);
+          if (prior !== undefined && version <= prior) continue;
+          fileVersions.set(path, version);
+          // A first sighting at version 1 is the snapshot being established, not
+          // an edit; only an increase proves a change during this session.
+          if (prior !== undefined) {
+            const clean = cleanPath(path);
+            if (clean !== undefined) changed.push(clean);
+          }
+        }
+        const tracked = Object.keys(backups);
         push('system', {
           systemKind: 'file-history',
           textSummary: `file-history-snapshot:${tracked.length} tracked`,
           ...(cleanPath(tracked[0]) !== undefined ? { filePath: cleanPath(tracked[0]) as string } : {}),
+          ...(changed.length > 0 ? { changedFiles: changed } : {}),
         });
         break;
       }

@@ -316,6 +316,29 @@ function fitToBudget(
 }
 
 /**
+ * Split events into threads: the main thread, plus one per subagent.
+ *
+ * The key is `undefined` for the main thread and the `sidechainId` for a
+ * subagent. One definition, because both the windower and the detector runner
+ * need it and two copies would drift.
+ *
+ * Why this grouping is load-bearing: a flat session array interleaves subagent
+ * events among main-thread ones. Anything that cares about *consecutive* events
+ * — `tool_loop` above all — is wrong on the flat array, because another actor's
+ * call spliced between two identical ones makes them non-consecutive.
+ */
+export function threadsOf(events: Event[]): Map<string | undefined, Event[]> {
+  const threads = new Map<string | undefined, Event[]>();
+  for (const e of [...events].sort((a, b) => a.seq - b.seq)) {
+    const key = e.isSidechain ? (e.sidechainId ?? 'sidechain') : undefined;
+    const bucket = threads.get(key);
+    if (bucket === undefined) threads.set(key, [e]);
+    else bucket.push(e);
+  }
+  return threads;
+}
+
+/**
  * A window: the evidence a detector reads, plus the skeleton a human reads.
  *
  * `events` is the **full** event span the skeleton's lines cover, including the
@@ -353,14 +376,7 @@ export function buildWindows(
   const budget = opts.tokenBudget ?? DEFAULTS.tokenBudget;
   if (width < 1 || stride < 1) throw new RangeError('width and stride must be >= 1');
 
-  // Group by thread: the main thread plus one group per subagent.
-  const threads = new Map<string | undefined, Event[]>();
-  for (const e of events) {
-    const key = e.isSidechain ? (e.sidechainId ?? 'sidechain') : undefined;
-    const bucket = threads.get(key);
-    if (bucket === undefined) threads.set(key, [e]);
-    else bucket.push(e);
-  }
+  const threads = threadsOf(events);
 
   const out: Window[] = [];
   for (const [sidechainId, threadEvents] of threads) {
