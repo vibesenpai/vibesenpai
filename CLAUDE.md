@@ -105,6 +105,10 @@ deliberate.
 
 ## Milestones
 
-`PLAN.md` is authoritative. Current state: **M0 done** — catalog, parser factory, contracts, CLI.
-**M1 next**: redactor, then skeletonizer. First real product value is **M2a**: 8 outcome-free
-detectors, incremental persistence, the running score.
+`PLAN.md` is authoritative. Current state: **M1 done** — catalog, parser factory, contracts,
+redactor, skeletonizer, reader modes, and the `scan` / `doctor` / `config` / `skeleton` / `now` /
+`report` CLI. Validated against 231 public transcripts plus local sessions; `npm run verify:corpus`
+is the gate and fails on count drift or any leak.
+
+**M2a next**, and it is the first real product value: 8 outcome-free detectors, incremental
+persistence, the running score.

@@ -27,12 +27,9 @@
 
 import { createHash } from 'node:crypto';
 import {
-  closeSync,
   existsSync,
   mkdirSync,
-  openSync,
   readFileSync,
-  readSync,
   readdirSync,
   renameSync,
   statSync,
@@ -41,6 +38,9 @@ import {
 } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 import { SCHEMA, checkVersion, stamp, type Versioned } from './schema.ts';
+// The byte reader lives in read.ts, which owns reading and imports nothing from
+// here — one implementation, and no cycle.
+import { readRange } from './read.ts';
 import { detectVersion } from './parsers/registry.ts';
 
 export type CatalogEntry = {
@@ -58,6 +58,16 @@ export type CatalogEntry = {
   sha256: string;
   firstSeenAt: string;
   lastSeenAt: string;
+  /**
+   * Earliest and latest record timestamp inside the transcript.
+   *
+   * Distinct from `firstSeenAt`, which is when *we* first read the file. The
+   * report's depth boundary needs the period the data covers: a scan run today
+   * over a transcript from last Tuesday gives full depth for last Tuesday, and
+   * using `firstSeenAt` would claim coverage of only today.
+   */
+  firstTs?: string;
+  lastTs?: string;
   /** When the source was first observed missing — the harness deleted it. */
   gone?: string;
 };
@@ -141,25 +151,6 @@ function harnessFor(sourcePath: string): string {
   if (sourcePath.includes(join('.claude', 'projects'))) return 'claude-code';
   if (sourcePath.includes(join('.codex', 'sessions'))) return 'codex';
   return 'unknown';
-}
-
-/** Read a byte range without loading the whole file. */
-function readRange(path: string, from: number, to: number): Buffer {
-  const len = to - from;
-  if (len <= 0) return Buffer.alloc(0);
-  const buf = Buffer.allocUnsafe(len);
-  const fd = openSync(path, 'r');
-  try {
-    let got = 0;
-    while (got < len) {
-      const n = readSync(fd, buf, got, len - got, from + got);
-      if (n === 0) break;
-      got += n;
-    }
-    return got === len ? buf : buf.subarray(0, got);
-  } finally {
-    closeSync(fd);
-  }
 }
 
 export type ScanOptions = {
@@ -262,6 +253,13 @@ export function runScan(opts: ScanOptions): ScanStats {
 
     const version = detectVersion(text.split('\n')) ?? prior?.version;
 
+    // Timestamp span, by scan rather than by parse. `runScan` deliberately does
+    // not build events — it is the cheap pass — and a regex over the consumed
+    // bytes is enough to bound the period this transcript covers.
+    const span = timestampSpan(text);
+    const firstTs = minIso(prior?.firstTs, span.first);
+    const lastTs = maxIso(prior?.lastTs, span.last);
+
     catalog.entries[source] = {
       source,
       sessionId: basename(source, '.jsonl'),
@@ -273,6 +271,8 @@ export function runScan(opts: ScanOptions): ScanStats {
       sha256,
       firstSeenAt: prior?.firstSeenAt ?? ts,
       lastSeenAt: ts,
+      ...(firstTs !== undefined ? { firstTs } : {}),
+      ...(lastTs !== undefined ? { lastTs } : {}),
     };
 
     stats.bytesRead += consumed;
@@ -294,6 +294,65 @@ export function runScan(opts: ScanOptions): ScanStats {
   return stats;
 }
 
+/**
+ * Earliest and latest record timestamp in a chunk of JSONL.
+ *
+ * Reads the **top-level** `timestamp` of each record, by parsing the line.
+ *
+ * A regex over the raw text was tried first and is unsafe: `"timestamp"` occurs
+ * inside tool results that echoed a CI payload, a lockfile, or a server log, and
+ * one pasted line carrying `"timestamp": "2019-03-04..."` would set `firstTs` to
+ * 2019 — making `report` claim full depth across years holding nothing. Measured
+ * on the public corpus, 9 of 219 files already had a regex span wider than their
+ * real one; none catastrophically, which is exactly why it would have shipped.
+ *
+ * A malformed line is skipped rather than fatal: this is bookkeeping, and
+ * Principle Zero puts not-crashing above completeness.
+ */
+function timestampSpan(text: string): { first?: string; last?: string } {
+  let first: string | undefined;
+  let last: string | undefined;
+  for (const line of text.split('\n')) {
+    if (line === '') continue;
+    let ts: unknown;
+    try {
+      ts = (JSON.parse(line) as { timestamp?: unknown }).timestamp;
+    } catch {
+      continue;
+    }
+    if (typeof ts !== 'string' || !isPlausibleTimestamp(ts)) continue;
+    // Lexicographic comparison is correct for ISO-8601 in UTC, which is what the
+    // harness writes.
+    if (first === undefined || ts < first) first = ts;
+    if (last === undefined || ts > last) last = ts;
+  }
+  return { ...(first !== undefined ? { first } : {}), ...(last !== undefined ? { last } : {}) };
+}
+
+/**
+ * Second line of defence, in case a future record type puts something else in
+ * `timestamp`. A value outside a sane window cannot be a session time, and the
+ * cost of accepting one is a coverage claim spanning years.
+ */
+function isPlausibleTimestamp(v: string): boolean {
+  const t = Date.parse(v);
+  if (Number.isNaN(t)) return false;
+  const floor = Date.UTC(2023, 0, 1); // predates any Claude Code transcript
+  return t >= floor && t <= Date.now() + 86_400_000;
+}
+
+function minIso(a: string | undefined, b: string | undefined): string | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return a < b ? a : b;
+}
+
+function maxIso(a: string | undefined, b: string | undefined): string | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return a > b ? a : b;
+}
+
 export function readCatalog(dir: string): Catalog | undefined {
   try {
     const c = JSON.parse(readFileSync(join(dir, INDEX_FILE), 'utf8')) as Catalog;
@@ -309,13 +368,29 @@ export function describeCatalog(dir: string): {
   sessions: number;
   gone: number;
   bytesTracked: number;
+  /** When we first looked. */
   oldest?: string;
   newest?: string;
+  /** The period the catalogued transcripts actually cover. */
+  dataFrom?: string;
+  dataTo?: string;
+  /** One interval per session, so gaps between sessions stay visible. */
+  spans: { from: string; to: string }[];
 } {
   const c = readCatalog(dir);
-  if (!c) return { sessions: 0, gone: 0, bytesTracked: 0 };
+  if (!c) return { sessions: 0, gone: 0, bytesTracked: 0, spans: [] };
   const entries = Object.values(c.entries);
   const times = entries.map((e) => e.firstSeenAt).sort();
+  let dataFrom: string | undefined;
+  let dataTo: string | undefined;
+  const spans: { from: string; to: string }[] = [];
+  for (const e of entries) {
+    dataFrom = minIso(dataFrom, e.firstTs);
+    dataTo = maxIso(dataTo, e.lastTs);
+    if (e.firstTs !== undefined && e.lastTs !== undefined) {
+      spans.push({ from: e.firstTs, to: e.lastTs });
+    }
+  }
   return {
     sessions: entries.length,
     gone: entries.filter((e) => e.gone !== undefined).length,
@@ -323,6 +398,9 @@ export function describeCatalog(dir: string): {
     bytesTracked: entries.reduce((n, e) => n + e.offset, 0),
     ...(times[0] !== undefined ? { oldest: times[0] } : {}),
     ...(times.at(-1) !== undefined ? { newest: times.at(-1) as string } : {}),
+    ...(dataFrom !== undefined ? { dataFrom } : {}),
+    ...(dataTo !== undefined ? { dataTo } : {}),
+    spans,
   };
 }
 

@@ -2,7 +2,10 @@
 /**
  * CLI entry. The secondary surface — the harness is primary (see docs/surfaces.md).
  *
- * M0 scope: `archive`, `doctor`, `config`. Detectors arrive in M2a.
+ * M1 scope: `scan`, `doctor`, `config`, `skeleton`, `now`, `report`. The last
+ * three are shaped now and answer "no detectors yet" until M2a — the shape is
+ * settled early because retrofitting it after the detectors exist is the
+ * expensive order.
  */
 
 import { homedir } from 'node:os';
@@ -11,6 +14,9 @@ import { join } from 'node:path';
 import { resolveConfig, type Layer } from './config.ts';
 import { describeCatalog, readCatalog, runScan } from './catalog.ts';
 import { parse, registry } from './parsers/index.ts';
+import { readSession, resolveCurrentSession, findSessionSource } from './read.ts';
+import { buildSkeletons, render } from './skeleton.ts';
+import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
 
 type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
 
@@ -66,6 +72,9 @@ Usage
   agentsensei scan               read new transcript data (copies nothing)
   agentsensei doctor             harnesses, paths, parser coverage
   agentsensei config             resolved values and which layer set each
+  agentsensei skeleton <id>      print a session's windows as evidence
+  agentsensei now                the session you are in, read live
+  agentsensei report             retrospective over a date range
 
 Options
   --source <path>    transcript source (repeatable)
@@ -73,7 +82,18 @@ Options
   --models <path>    model location
   --config <path>    config file
 
-Not yet implemented (see PLAN.md): now, report, fix, explain, claude-md, eval.
+skeleton / now
+  --live             read past the catalog offset, to the end of the file
+  --session <id>     which session \`now\` should read
+  --window <n>       print only window n (1-based)
+
+report
+  --last <7d|4w|6m>  relative range (default 7d)
+  --since <date>     YYYY-MM-DD, with --until
+  --until <date>     YYYY-MM-DD
+  --project <name>   accepted, not yet applied (needs M2a findings)
+
+Not yet implemented (see PLAN.md): fix, explain, claude-md, eval, trends.
 `;
 
 function cmdScan(a: Argv): number {
@@ -154,11 +174,7 @@ function cmdDoctor(a: Argv): number {
   for (const s of config.sources) {
     let detail = 'not present';
     try {
-      if (statSync(s).isDirectory()) {
-        const { sessions } = { sessions: 0 };
-        void sessions;
-        detail = 'present';
-      }
+      if (statSync(s).isDirectory()) detail = 'present';
     } catch {
       /* not present */
     }
@@ -220,6 +236,178 @@ function cmdDoctor(a: Argv): number {
   return 0;
 }
 
+
+/**
+ * Resolve a session to a source path plus the catalog offset, if it has one.
+ *
+ * `--live` is what makes this work on the session you are currently in: that
+ * transcript is being appended to right now and no scan has reached its tail.
+ */
+function openSession(
+  a: Argv,
+  sessionId: string,
+  config: { sources: string[]; archive: string },
+): { source: string; offset: number | undefined } {
+  const live = a.flags['live'] === true;
+  const index = readCatalog(config.archive);
+  const entry = index
+    ? Object.values(index.entries).find((e) => e.sessionId === sessionId)
+    : undefined;
+
+  const source = entry?.source ?? findSessionSource(config.sources, sessionId);
+  if (source === undefined) {
+    throw new Error(
+      `no transcript found for session ${sessionId}\n` +
+        `searched: ${config.sources.join(', ')}`,
+    );
+  }
+  if (entry?.gone !== undefined) {
+    throw new Error(
+      `the transcript for ${sessionId} was deleted by the harness on ` +
+        `${entry.gone.slice(0, 10)} — evidence for it is no longer readable`,
+    );
+  }
+  return { source, offset: live ? undefined : entry?.offset };
+}
+
+function printSkeletons(
+  a: Argv,
+  sessionId: string,
+  source: string,
+  offset: number | undefined,
+  // `now` is live by definition; `skeleton` must not silently become live, or
+  // readSession's "not in the catalog" refusal is decoration that never fires.
+  allowLiveFallback = false,
+): number {
+  const explicitLive = a.flags['live'] === true;
+  if (!explicitLive && offset === undefined && !allowLiveFallback) {
+    throw new Error(
+      `${sessionId} is not in the catalog yet — run \`agentsensei scan\`, ` +
+        `or pass --live to read the source as it is on disk now`,
+    );
+  }
+  const mode = explicitLive || offset === undefined ? 'live' : 'catalogued';
+  const read = readSession({ source, sessionId, mode, ...(offset !== undefined ? { catalogOffset: offset } : {}) });
+
+  const parsed = parse(source, read.text, sessionId);
+  const skeletons = buildSkeletons(sessionId, parsed.events);
+
+  console.log(
+    `${sessionId} · ${mode} · ${fmtBytes(read.bytesRead)}` +
+      (read.ahead > 0 ? ` (${fmtBytes(read.ahead)} past the last scan)` : '') +
+      (read.partialTail ? ' · a partial trailing line was left unread' : ''),
+  );
+  console.log(
+    `${parsed.events.length} events · ${skeletons.length} window${skeletons.length === 1 ? '' : 's'}` +
+      (parsed.malformed > 0 ? ` · ${parsed.malformed} malformed line(s)` : '') +
+      (parsed.abandoned > 0 ? ` · ${parsed.abandoned} on abandoned branches` : '') +
+      ` · parser ${parsed.provenance.version ?? '(no version)'} ${parsed.provenance.match}`,
+  );
+
+  if (skeletons.length === 0) {
+    console.log('\nno windows — the session produced no analysable turns');
+    return 0;
+  }
+
+  const pick = a.flags['window'];
+  const only = typeof pick === 'string' ? Number(pick) : undefined;
+  if (only !== undefined && (!Number.isInteger(only) || only < 1 || only > skeletons.length)) {
+    throw new Error(`--window expects 1..${skeletons.length} (got "${String(pick)}")`);
+  }
+
+  const shown = only === undefined ? skeletons : [skeletons[only - 1] as (typeof skeletons)[number]];
+  for (const [i, sk] of shown.entries()) {
+    const n = only ?? i + 1;
+    const tag = sk.sidechainId !== undefined ? `  [subagent ${sk.sidechainId.slice(0, 8)}]` : '';
+    console.log(`\n── window ${n}/${skeletons.length}${tag}`);
+    console.log(render(sk));
+  }
+  return 0;
+}
+
+function cmdSkeleton(a: Argv): number {
+  const sessionId = a._[1];
+  if (sessionId === undefined) {
+    console.error('usage: agentsensei skeleton <sessionId> [--live] [--window n]');
+    return 1;
+  }
+  const { config } = configFromFlags(a);
+  const { source, offset } = openSession(a, sessionId, config);
+  return printSkeletons(a, sessionId, source, offset);
+}
+
+/**
+ * The in-session view. Reads live by definition — the point is the turns that
+ * have happened since the last scan, which is to say the ones you just made.
+ */
+function cmdNow(a: Argv): number {
+  const { config } = configFromFlags(a);
+  const flagSession = a.flags['session'];
+  const current = resolveCurrentSession(config.sources, {
+    ...(typeof flagSession === 'string' ? { sessionId: flagSession } : {}),
+  });
+
+  if (current === undefined) {
+    console.error(`no transcript found under: ${config.sources.join(', ')}`);
+    return 1;
+  }
+  if (current.via === 'latest') {
+    // Named, not assumed. A wrong guess must be visible rather than producing
+    // authoritative-looking output about somebody else's session.
+    console.log(`(guessed the most recently written transcript — override with --session)`);
+  }
+
+  a.flags['live'] = true;
+  const rc = printSkeletons(a, current.sessionId, current.source, undefined, true);
+  console.log('\nno detectors yet — findings arrive in M2a (see PLAN.md)');
+  return rc;
+}
+
+function cmdReport(a: Argv): number {
+  const { config } = configFromFlags(a);
+  const f = a.flags;
+  const range = resolveRange(
+    {
+      ...(typeof f['last'] === 'string' ? { last: f['last'] } : {}),
+      ...(typeof f['since'] === 'string' ? { since: f['since'] } : {}),
+      ...(typeof f['until'] === 'string' ? { until: f['until'] } : {}),
+    },
+    new Date(),
+  );
+  if (!range.ok) {
+    console.error(range.error);
+    return 1;
+  }
+
+  const d = describeCatalog(config.archive);
+  const segments = segmentByDepth(range.range, {
+    // One interval per session, not a single start boundary: a gap between
+    // sessions must stay visible rather than being reported as covered.
+    covered: d.spans.map((s) => ({ from: new Date(s.from), to: new Date(s.to) })),
+    scanned: d.sessions > 0,
+    // `history.jsonl` parsing is an M2 deliverable, so the shallow tier has no
+    // backing yet. Claiming it now would promise depth we cannot deliver.
+    hasPromptHistory: false,
+  });
+
+  const project = typeof f['project'] === 'string' ? f['project'] : undefined;
+  console.log(
+    `report · ${range.range.from.toISOString().slice(0, 10)} → ` +
+      `${range.range.to.toISOString().slice(0, 10)}`,
+  );
+  if (project !== undefined) {
+    // Printing `· project ~ode` in the header read as "restricted to that
+    // project" while nothing was filtered — the same implied-coverage problem as
+    // the depth labelling, one line further down.
+    console.log(`  note: --project ${project} is accepted but not yet applied`);
+  }
+  console.log('\ncoverage');
+  for (const l of describeCoverage(segments)) console.log(l);
+
+  console.log('\nno detectors yet — findings arrive in M2a (see PLAN.md)');
+  return 0;
+}
+
 export function main(argv = process.argv.slice(2)): number {
   const a = parseArgv(argv);
   const cmd = a._[0];
@@ -230,6 +418,12 @@ export function main(argv = process.argv.slice(2)): number {
       return cmdDoctor(a);
     case 'config':
       return cmdConfig(a);
+    case 'skeleton':
+      return cmdSkeleton(a);
+    case 'now':
+      return cmdNow(a);
+    case 'report':
+      return cmdReport(a);
     case undefined:
     case 'help':
       console.log(USAGE);

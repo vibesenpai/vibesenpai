@@ -475,3 +475,36 @@ describe('parser — truncation must preserve the redaction fixed point', () => 
     expect(summaryOf('q'.repeat(400))).toMatch(/…$/);
   });
 });
+
+describe('parser — sidechain attribution', () => {
+  // `isSidechain` says only THAT a record is subagent work, never whose.
+  // Measured: 712 sidechain events across 90 public transcripts, none carrying a
+  // subagent id. Without deriving one, every subagent in a file collapses into
+  // one interleaved pseudo-thread — which reproduces the `reading_spiral` false
+  // positive that separating sidechains exists to prevent.
+  it('attributes each sidechain record to its subtree root', () => {
+    const text = [
+      j({ type: 'user', uuid: 'main', parentUuid: null, message: { content: 'go' } }),
+      j({ type: 'assistant', uuid: 'spawn', parentUuid: 'main', message: { content: [{ type: 'tool_use', id: 't1', name: 'Task', input: {} }] } }),
+      // subagent A
+      j({ type: 'assistant', uuid: 'a1', parentUuid: 'spawn', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'a', name: 'Read', input: { file_path: 'x.ts' } }] } }),
+      j({ type: 'assistant', uuid: 'a2', parentUuid: 'a1', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'b', name: 'Read', input: { file_path: 'y.ts' } }] } }),
+      // subagent B, a separate subtree off the same spawn point
+      j({ type: 'assistant', uuid: 'b1', parentUuid: 'spawn', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'c', name: 'Read', input: { file_path: 'z.ts' } }] } }),
+    ].join('\n');
+
+    const byUuid = new Map(parseTranscriptText(text).events.map((e) => [e.uuid, e]));
+    // Both of A's records share one id; B's differs.
+    expect(byUuid.get('a1')?.sidechainId).toBe('a1');
+    expect(byUuid.get('a2')?.sidechainId).toBe('a1');
+    expect(byUuid.get('b1')?.sidechainId).toBe('b1');
+    expect(byUuid.get('a1')?.sidechainId).not.toBe(byUuid.get('b1')?.sidechainId);
+  });
+
+  it('leaves main-thread records unattributed', () => {
+    const text = [
+      j({ type: 'user', uuid: 'main', parentUuid: null, message: { content: 'go' } }),
+    ].join('\n');
+    expect(parseTranscriptText(text).events[0]?.sidechainId).toBeUndefined();
+  });
+});

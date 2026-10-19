@@ -76,6 +76,17 @@ export type Event = {
   queueOpSubtype?: string;
 
   /**
+   * Which kind of `system` record this was.
+   *
+   * `turnType: 'system'` is a catch-all over genuinely different things —
+   * compaction residue, cost totals, PR links, file-history bookkeeping. The
+   * skeletonizer needs to tell compaction from the rest to emit a
+   * `meta: 'compaction'` line, and sniffing `textSummary` prefixes to do it
+   * would couple a persisted format to a display string.
+   */
+  systemKind?: 'compaction' | 'cost-state' | 'pr-link' | 'file-history' | 'other';
+
+  /**
    * On a branch the user abandoned — by rewinding, or by submitting a prompt and
    * resubmitting it before any reply. **Observed**, not inferred: a `/rewind`
    * leaves the old records in the file with no marker of any kind, so this is
@@ -193,16 +204,35 @@ export type Finding = Versioned<'finding'> & {
  */
 export const SKELETON_VERSION = SCHEMA.skeleton;
 
-export type SkeletonLine =
-  | { k: 'user'; ref: TurnRef; text: string }
-  | { k: 'assist'; ref: TurnRef; text?: string }
-  | { k: 'tool'; ref: TurnRef; tool: string; target?: string; lines?: number }
-  | { k: 'result'; ref: TurnRef; ok: boolean; failures?: number; err?: string }
-  | {
-      k: 'meta';
-      ref: TurnRef;
-      kind: 'compaction' | 'interrupt' | 'commit' | 'revert';
-    };
+/**
+ * Carried by every line kind.
+ *
+ * `abandoned` is a property of the turn, not a kind of turn, so it rides along
+ * rather than becoming a sixth variant. It must be representable: CLAUDE.md
+ * requires abandoned work to be flagged rather than dropped, because silently
+ * discarding it would hide that the work happened at all. 52 events in the
+ * public corpus are on abandoned branches.
+ */
+type LineCommon = { ref: TurnRef; abandoned?: true };
+
+export type SkeletonLine = LineCommon &
+  (
+    | { k: 'user'; text: string }
+    | { k: 'assist'; text?: string }
+    | { k: 'tool'; tool: string; target?: string; lines?: number }
+    | { k: 'result'; ok: boolean; failures?: number; err?: string }
+    | {
+        k: 'meta';
+        /**
+         * `compaction` comes from the harness's own `summary` record;
+         * `interrupt` from a queue operation; `commit` and `revert` are derived
+         * from the git command that was run. All four are reachable — an
+         * unreachable variant in a persisted format is a trap for the next
+         * reader.
+         */
+        kind: 'compaction' | 'interrupt' | 'commit' | 'revert';
+      }
+  );
 
 export type Skeleton = Versioned<'skeleton'> & {
   sessionId: string;
@@ -213,6 +243,21 @@ export type Skeleton = Versioned<'skeleton'> & {
    * would produce a confident wrong verdict.
    */
   elided?: { lines: number; reason: 'token-budget' };
+
+  /**
+   * Set when this window covers a subagent rather than the main thread.
+   * Sidechains are excluded from main-thread windows — a parallel fan-out reads
+   * the same files legitimately — but they get their own windows rather than no
+   * coverage: 712 events across 99 public transcripts is not a rounding error.
+   */
+  sidechainId?: string;
+
+  /**
+   * Turn types with no line representation (`system` bookkeeping,
+   * `local_command` echoes). Counted rather than silently dropped, so a
+   * compression ratio cannot be flattered by quietly discarding input.
+   */
+  dropped?: Record<string, number>;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

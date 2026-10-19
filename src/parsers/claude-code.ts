@@ -307,6 +307,44 @@ type TreeNode = {
 };
 
 /**
+ * Which subagent each sidechain record belongs to.
+ *
+ * `isSidechain` says only *that* a record is a subagent's work, never *whose*.
+ * Measured on the public corpus: 712 sidechain events across 90 files, and the
+ * transcript carries no subagent id on any of them. Without this, every
+ * subagent in a file collapses into one interleaved pseudo-thread — and since
+ * the whole reason sidechains are separated is that a parallel fan-out reads the
+ * same files legitimately, merging two subagents' reads reproduces exactly the
+ * `reading_spiral` false positive the separation exists to prevent.
+ *
+ * A subagent's work is a contiguous subtree, so the topmost sidechain ancestor
+ * identifies the invocation that spawned it. That root uuid becomes the id.
+ */
+export function attributeSidechains(nodes: TreeNode[]): Map<string, string> {
+  const byUuid = new Map(nodes.map((n) => [n.uuid, n]));
+  const out = new Map<string, string>();
+
+  for (const n of nodes) {
+    if (!n.isSidechain) continue;
+    let top = n.uuid;
+    let cur: string | null = n.parentUuid;
+    // Cycles cannot occur in a well-formed transcript, but a corrupt file must
+    // not hang the parser — Principle Zero outranks completeness here.
+    const seen = new Set<string>([n.uuid]);
+    while (cur !== null && !seen.has(cur)) {
+      seen.add(cur);
+      const p = byUuid.get(cur);
+      if (p === undefined || !p.isSidechain) break;
+      top = p.uuid;
+      cur = p.parentUuid;
+    }
+    out.set(n.uuid, top);
+  }
+
+  return out;
+}
+
+/**
  * Which records sit on a branch the user walked away from.
  *
  * File order is topological, so **the last record in the file is on the live
@@ -536,6 +574,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
 
       case 'system': {
         push('system', {
+          systemKind: 'other',
           ...(r.subtype !== undefined ? { textSummary: `system:${r.subtype}` } : {}),
         });
         break;
@@ -554,6 +593,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       case 'file-history-snapshot': {
         const tracked = Object.keys(r.snapshot?.trackedFileBackups ?? {});
         push('system', {
+          systemKind: 'file-history',
           textSummary: `file-history-snapshot:${tracked.length} tracked`,
           ...(cleanPath(tracked[0]) !== undefined ? { filePath: cleanPath(tracked[0]) as string } : {}),
         });
@@ -572,6 +612,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
         // dropped rationale from a dropped action.
         const sm = r as { summary?: unknown; leafUuid?: unknown };
         push('system', {
+          systemKind: 'compaction',
           ...sum(sm.summary),
           ...(typeof sm.leafUuid === 'string' ? { toolCallId: sm.leafUuid } : {}),
         });
@@ -590,6 +631,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
         const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
         const cost = num(cs.totalCostUSD);
         push('system', {
+          systemKind: 'cost-state',
           textSummary:
             `cost-state: +${num(cs.totalLinesAdded) ?? 0}/-${num(cs.totalLinesRemoved) ?? 0} lines` +
             (cost !== undefined ? `, $${cost.toFixed(4)}` : ''),
@@ -602,6 +644,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
         // available. Work that reached a PR was not abandoned.
         const pr = r as { prNumber?: unknown; prRepository?: unknown };
         push('system', {
+          systemKind: 'pr-link',
           textSummary: `pr-link: ${String(pr.prRepository ?? '?')}#${String(pr.prNumber ?? '?')}`,
         });
         break;
@@ -609,6 +652,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
 
       case 'file-history-delta': {
         push('system', {
+          systemKind: 'file-history',
           textSummary: 'file-history-delta',
           ...(typeof r.trackingPath === 'string'
             ? { filePath: cleanPath(r.trackingPath) as string }
@@ -619,6 +663,15 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
 
       default:
         bump(unknown, type);
+    }
+  }
+
+  const subagent = attributeSidechains(nodes);
+  if (subagent.size > 0) {
+    for (let i = 0; i < events.length; i++) {
+      const u = eventUuid[i];
+      const root = u === undefined ? undefined : subagent.get(u);
+      if (root !== undefined) (events[i] as Event).sidechainId = root;
     }
   }
 

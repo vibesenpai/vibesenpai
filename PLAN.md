@@ -285,7 +285,22 @@ re-scan reads zero redundant bytes, this document is split with no orphaned rati
    `.env` values, private keys, absolute home paths. Tested first, against deliberately planted
    secrets — SWE-chat's use of Presidio + TruffleHog is the reference bar.
 3. **Skeletonizer** (`src/skeleton.ts`): target 5–10% of raw tokens; the shape in the design doc is
-   the output contract. Measured and asserted in tests.
+   the output contract. Measured and asserted in tests — **and the target needed its scope stated.**
+   Measured over 223 public transcripts: the aggregate ratio is 1.28%, but that number is flattering,
+   dominated by a few very large files. Per file the median is 5.2% and **69 of 223 exceed 10%** —
+   all of them tiny fixtures with nothing to strip, the worst being a 0.6 KB file holding a single
+   record at 34.9%. For sessions of **≥ 20 events** the target holds with no exceptions: median 1.6%,
+   max 6.8%, 0 over 10%. That is the form the gate asserts; the aggregate alone would have hidden the
+   shape entirely.
+
+   A *turn* is a skeleton line, not an exchange — settled by the rendered example in
+   `docs/contracts.md` (seven lines, two user prompts). Windows do **not** overlap by default:
+   `Finding` identity is subject-based so overlap would not duplicate findings, but `occurrences`
+   would double-count a turn seen twice until M2a's evidence-set merge exists.
+
+   The elision path does not execute on real data — 12 short lines never approach 2K tokens, and 0 of
+   470 corpus windows elided. It is covered by synthetic fixtures carrying an oversized prompt, since
+   an untested elision rule is how a skeleton silently drops the decisive turn.
 4. **Windowing**: 6–12 turn sliding windows along the active path, sidechains excluded from main-thread windows.
 5. **Reader modes** (`src/read.ts`): one incremental offset reader, two modes — `catalogued` (up to
    the recorded offset) and `live` (tails past it for `agentsensei now`). Same code, a parameter.
@@ -300,6 +315,23 @@ re-scan reads zero redundant bytes, this document is split with no orphaned rati
 **M1 is done when:** every catalogued session parses without error, the redactor passes its
 planted-secret suite, skeletons hit the 5–10% target, and `agentsensei now` reads the in-flight transcript
 of the session it is run from — all on local data only.
+
+**Status: done.** Verified on 231 public transcripts and 4 local sessions — 0 crashes, 0 malformed
+lines, 0 leaks, and `now` reads the live transcript of the session it is invoked from (8.8 MB, 2,154
+events, parser `2.1.241` exact). 193 tests.
+
+Two things the real output corrected, neither predicted by the spec:
+
+- **Empty assistant lines were 21.3% of a tool-heavy session** (3.8% on the public corpus). An
+  assistant record with no text renders as a bare `A  …` and carries nothing — its tool calls already
+  have their own lines. Dropping it cut 113 windows to 90 on one session.
+- **Report depth cannot be a single boundary.** The first attempt used the catalog's earliest
+  `firstSeenAt`, which is when *we* looked rather than what the data covers. Fixing that to record
+  timestamps then produced the opposite error: local data holds one session on 23 August and three
+  from 12 October, and a boundary claimed **49 days of full depth across a September containing no
+  sessions**. Coverage is now the union of per-session intervals, so gaps are reported. The `none`
+  message also stopped saying "the harness deleted these" — a gap is more often a period nobody
+  worked, and before the first scan the two are indistinguishable.
 
 The **SWE-chat adapter** (`src/parsers/swe-chat.ts`, Parquet → the same `Event[]`) moves to **M2**,
 where the eval corpus is first needed. This keeps M1 self-contained: it cannot be blocked waiting on

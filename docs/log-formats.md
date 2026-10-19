@@ -207,6 +207,20 @@ transcript can contain a leaked token — duplicating it would move that liabili
 catalog tracks offsets and the sources are read in place, with the honest cost that no history exists
 beyond the harness's own window. See [architecture.md](architecture.md) §1.
 
+### Sidechain records carry no subagent id — **observed**
+
+`isSidechain` says only *that* a record is a subagent's work, never *whose*. Measured over the public
+corpus: **712 sidechain events across 90 files, and not one carries a subagent identifier.**
+
+That matters more than it sounds. The whole reason sidechains are separated from the main thread is
+that a parallel fan-out legitimately reads the same files — so if two subagents' reads are merged into
+one interleaved pseudo-thread, the result reproduces exactly the `reading_spiral` false positive the
+separation exists to prevent.
+
+A subagent's work is a contiguous subtree, so the **topmost sidechain ancestor** identifies the
+invocation that spawned it, and that root uuid becomes `Event.sidechainId`. After deriving it: 712 of
+712 attributed, **96 distinct subagents**, 1–3 per file.
+
 ## Validating against public transcripts
 
 Testing only against one developer's sessions is unrepresentative: one machine exercises one OS, one

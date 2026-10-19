@@ -39,6 +39,8 @@
     "abandoned": 52,
     "versions": 42,
     "sidechainEvents": 712,
-    "leaks": 0
+    "leaks": 0,
+    "skeletonWindows": 463,
+    "skeletonsOverTarget": 0
   }
 }

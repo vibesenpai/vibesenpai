@@ -264,3 +264,88 @@ describe('findTranscripts', () => {
     expect(findTranscripts([join(root, 'nope')])).toEqual([]);
   });
 });
+
+describe('catalog — the period a transcript covers', () => {
+  // The report's depth labelling rests entirely on these fields, and none of the
+  // 22 tests above touched them.
+  const rec = (ts: string, extra = ''): string =>
+    `{"type":"user","uuid":"u${ts}","timestamp":"${ts}"${extra}}`;
+
+  it('records the first and last record timestamp', () => {
+    session('aaa', [rec('2026-10-12T10:00:00.000Z'), rec('2026-10-14T18:30:00.000Z')]);
+    runScan({ sources: [sources], catalog });
+    const e = Object.values(readCatalog(catalog)!.entries)[0]!;
+    expect(e.firstTs).toBe('2026-10-12T10:00:00.000Z');
+    expect(e.lastTs).toBe('2026-10-14T18:30:00.000Z');
+  });
+
+  it('distinguishes the data span from when we first looked', () => {
+    // `firstSeenAt` is when we read the file; `firstTs` is what it covers. Using
+    // the former as a depth boundary claimed coverage of only the scan day.
+    session('aaa', [rec('2026-08-23T03:48:00.000Z')]);
+    runScan({ sources: [sources], catalog, now: () => '2026-10-19T00:00:00.000Z' });
+    const e = Object.values(readCatalog(catalog)!.entries)[0]!;
+    expect(e.firstSeenAt).toBe('2026-10-19T00:00:00.000Z');
+    expect(e.firstTs).toBe('2026-08-23T03:48:00.000Z');
+  });
+
+  it('IGNORES a timestamp echoed inside a tool result', () => {
+    // The regex this replaced matched any "timestamp" anywhere in the line, so
+    // one pasted CI log would set firstTs to 2019 and make `report` claim full
+    // depth across years holding nothing.
+    const echoed =
+      '{"type":"user","uuid":"b","timestamp":"2026-10-12T10:00:05.000Z",' +
+      '"message":{"content":[{"type":"tool_result","tool_use_id":"t1",' +
+      '"content":"{\\"timestamp\\": \\"2019-03-04T00:00:00.000Z\\", \\"level\\": \\"warn\\"}"}]}}';
+    session('aaa', [rec('2026-10-12T10:00:00.000Z'), echoed]);
+    runScan({ sources: [sources], catalog });
+    const e = Object.values(readCatalog(catalog)!.entries)[0]!;
+    expect(e.firstTs).toBe('2026-10-12T10:00:00.000Z');
+    expect(e.firstTs?.startsWith('2019')).toBe(false);
+  });
+
+  it('rejects an implausible timestamp rather than trusting it', () => {
+    session('aaa', [rec('1999-01-01T00:00:00.000Z'), rec('2026-10-12T10:00:00.000Z')]);
+    runScan({ sources: [sources], catalog });
+    expect(Object.values(readCatalog(catalog)!.entries)[0]!.firstTs).toBe(
+      '2026-10-12T10:00:00.000Z',
+    );
+  });
+
+  it('widens the span incrementally, keeping the earliest across scans', () => {
+    // Only new bytes are read on a grown file, so the earliest timestamp has to
+    // come from the stored value — the case most likely to be wrong and least
+    // likely to be noticed, since a wrong firstTs still looks plausible.
+    const p = session('aaa', [rec('2026-10-12T10:00:00.000Z')]);
+    runScan({ sources: [sources], catalog });
+    appendFileSync(p, `${rec('2026-10-15T09:00:00.000Z')}\n`);
+    const s = runScan({ sources: [sources], catalog });
+
+    expect(s.grown).toBe(1);
+    const e = Object.values(readCatalog(catalog)!.entries)[0]!;
+    expect(e.firstTs).toBe('2026-10-12T10:00:00.000Z'); // from the first scan
+    expect(e.lastTs).toBe('2026-10-15T09:00:00.000Z'); // from the second
+  });
+
+  it('exposes one span per session so gaps stay visible', () => {
+    session('aug', [rec('2026-08-23T03:48:00.000Z'), rec('2026-08-23T03:49:00.000Z')]);
+    session('oct', [rec('2026-10-12T10:00:00.000Z'), rec('2026-10-19T02:00:00.000Z')]);
+    runScan({ sources: [sources], catalog });
+
+    const d = describeCatalog(catalog);
+    expect(d.spans).toHaveLength(2);
+    expect(d.dataFrom).toBe('2026-08-23T03:48:00.000Z');
+    expect(d.dataTo).toBe('2026-10-19T02:00:00.000Z');
+    // The September gap exists between the two spans, not inside either.
+    const sorted = [...d.spans].sort((a, b) => a.from.localeCompare(b.from));
+    expect(sorted[0]!.to < sorted[1]!.from).toBe(true);
+  });
+
+  it('omits the span for a transcript with no usable timestamps', () => {
+    session('aaa', ['{"type":"user","uuid":"a"}']);
+    runScan({ sources: [sources], catalog });
+    const e = Object.values(readCatalog(catalog)!.entries)[0]!;
+    expect(e.firstTs).toBeUndefined();
+    expect(describeCatalog(catalog).spans).toHaveLength(0);
+  });
+});
