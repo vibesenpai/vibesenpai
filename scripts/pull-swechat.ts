@@ -75,7 +75,13 @@ function installThrottledFetch(perSecond = 9): void {
   const minGap = 1000 / perSecond;
   let last = 0;
 
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  // Typed off the real `fetch` rather than naming `RequestInfo`: that type
+  // comes from the DOM lib, which this project does not load, and only shows up
+  // once `scripts/` is under the typechecker.
+  globalThis.fetch = async (
+    input: Parameters<typeof real>[0],
+    init?: Parameters<typeof real>[1],
+  ): Promise<Response> => {
     for (let attempt = 0; ; attempt++) {
       const wait = Math.max(0, last + minGap - Date.now());
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));

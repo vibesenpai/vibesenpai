@@ -118,13 +118,28 @@ export function retriedFailures(
     const failed = callAnsweredBy(r);
     if (failed === undefined) continue;
 
-    // A later edit to the same path — later than the *verdict*, not merely
-    // than the attempt, so a retry is something the agent did knowing the
-    // refusal. Compared exactly: both sides are tool calls carrying the
+    // A new instruction ends the attempt. Whatever the agent does to this file
+    // after the person speaks again belongs to the next request, not to the
+    // refusal — the same boundary a repeated-call rule needs for the same
+    // reason. Measured: this excludes 12 of 939 instances (1.3%).
+    const nextPrompt = sorted.find((e) => e.turnType === 'user_prompt' && e.seq > r.seq);
+    const horizon = nextPrompt?.seq ?? Number.POSITIVE_INFINITY;
+
+    // The next edit to the same path — later than the *verdict*, not merely
+    // than the attempt, so the retry is something the agent did knowing it had
+    // been refused. Compared exactly: both sides are tool calls carrying the
     // absolute path the tool was given, so the suffix-matching that
     // `countDenominators` needs (tool path vs repo-relative harness path) does
     // not arise here.
-    const retry = sorted.find((e) => e.seq > r.seq && editCallOf(e)?.path === failed.path);
+    //
+    // Deliberately **not** also capped at N turns. The gap is tight — p50 4,
+    // p75 6, p90 15, and only 11 of 939 exceed 50 turns — so a numeric cap
+    // would buy almost nothing while adding a threshold with no basis. The
+    // prompt boundary is a fact about the session; a turn count would be a
+    // guess about attention.
+    const retry = sorted.find(
+      (e) => e.seq > r.seq && e.seq < horizon && editCallOf(e)?.path === failed.path,
+    );
     if (retry === undefined) continue;
 
     out.push({ path: failed.path, failure: failed.e, retry, result: r });

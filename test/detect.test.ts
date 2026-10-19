@@ -749,6 +749,19 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
     expect(retriedFailures([a, sameBlock, verdict])).toEqual([]);
   });
 
+  it('ends the attempt at the next instruction from the person', async () => {
+    // An edit to the same file after the person speaks again belongs to the
+    // next request, not to the refusal. Measured: 12 of 939 instances.
+    const a = editCall('/repo/src/api.ts');
+    const f = await run([
+      a,
+      failure(a, HARNESS.notRead),
+      ev({ turnType: 'user_prompt', textSummary: 'now do something else' }),
+      editCall('/repo/src/api.ts'),
+    ]);
+    expect(f).toEqual([]);
+  });
+
   it('reads the envelope, never the sentence inside it', async () => {
     // `failureKind` comes from the frame the harness emits. Proof it is the
     // frame doing the work: an unrecognised message in a known envelope still

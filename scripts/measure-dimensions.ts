@@ -1,21 +1,29 @@
 /**
  * How often does each dimension actually occur?
  *
- * This exists because three detectors shipped and produced **0 findings across
- * 255 real sessions**. Rather than build a fourth from the catalogue's assumed
- * order, measure the order.
+ * Every frequency this project publishes comes from here, over the same pinned
+ * 1,139-session SWE-chat corpus, so a number in a doc can be reproduced rather
+ * than taken on trust. `npm run measure`.
  *
  * ── Rules this script holds itself to ───────────────────────────────────────
  *
  * 1. **Every number carries its denominator.** "23 corrections" means nothing;
  *    "23 of 180 prompts" does.
- * 2. **Every probe declares whether it is structural or lexical.** A lexical
- *    probe is a nominator and its count is an upper bound, never a measurement.
- *    This session produced probes wrong by 3x in both directions — 234 "ignored
- *    errors" that were mostly the agent investigating, 56 "unverified edits" of
- *    which 2 were real — and both looked authoritative until broken down.
- * 3. **Every probe states its confound**, in the table, next to the number.
- * 4. **Where SWE-chat has a label, the label wins.** `prompt_pushback` is
+ * 2. **A built dimension is measured by its own detector, not by a probe that
+ *    resembles it.** A detector that disagrees with the measurement justifying
+ *    it is wrong, and a probe looser than the detector hides exactly that: the
+ *    loose `tool_loop` probe reported 4% of sessions where the real detector
+ *    found 0.4%.
+ * 3. **A probe over a harness mechanism must first establish that the mechanism
+ *    means what its name suggests.** This rule cost most of a week. `enqueue`
+ *    is not an interrupt — 3,504 of 3,606 sit at a turn boundary and 1,858
+ *    carry `<task-notification>`. `remove` is not a withdrawal; the queue
+ *    operations balance. A non-zero exit is not an ignored error; ≥68 of 234
+ *    were the agent fixing. Every push is not a premature write. And
+ *    `cache_read` is not a hit rate: it re-counts the whole prefix per call, so
+ *    `read/(read+creation)` runs p10 0.901 to p90 0.985 whatever anyone does.
+ * 4. **Every probe states its confound**, in the table, next to the number.
+ * 5. **Where SWE-chat has a label, the label wins.** `prompt_pushback` is
  *    annotated on 201,485 prompts and validated in the paper; our regex is not
  *    evidence against it.
  */
@@ -23,15 +31,23 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from '../src/parsers/index.ts';
-import { learn, lookupFor, emptyRegistry, resultFailed, type VerificationRegistry } from '../src/verify.ts';
-import { editEvidenceOf, EDIT_TOOLS, READ_TOOLS } from '../src/edits.ts';
-import { runsOf } from '../src/detect/tool-loop.ts';
-import { destructiveKind } from '../src/detect/revert-churn.ts';
-import { isSuccessClaim } from '../src/detect/claims.ts';
-import { executablePart } from '../src/detect/command.ts';
+import { editEvidenceOf, READ_TOOLS } from '../src/edits.ts';
+import { callFailed, countDenominators } from '../src/detect/index.ts';
+import { retriedFailures } from '../src/detect/edit-retry.ts';
+import { reasonOf } from '../src/detect/labels.ts';
 import type { Event } from '../src/types.ts';
 
-type Probe = 'structural' | 'lexical' | 'labelled';
+/**
+ * How a number was arrived at, which bounds how much it is worth.
+ *
+ * `detector` is the strongest: the shipped rule itself ran, so the figure and
+ * the product cannot disagree. `structural` is a probe over harness-recorded
+ * fields for a dimension not yet built. `labelled` defers to SWE-chat's own
+ * validated annotations. `lexical` reads text and is an upper bound, never a
+ * measurement — no probe here is lexical any more, and the value is kept so
+ * that reintroducing one has to be spelled out.
+ */
+type Probe = 'detector' | 'structural' | 'labelled' | 'lexical';
 
 type Row = {
   dimension: string;
@@ -87,11 +103,9 @@ function loadSessions(dir: string, set: 'A' | 'B'): Session[] {
 type Ctx = {
   s: Session;
   ev: Event[];
-  reg: VerificationRegistry;
   prompts: Event[];
   edits: Event[];
   toolCalls: Event[];
-  bash: Event[];
 };
 
 type ProbeDef = {
@@ -104,14 +118,111 @@ type ProbeDef = {
 };
 
 const PROBES: ProbeDef[] = [
-  // ── A. Looping ────────────────────────────────────────────────────────────
+  // ── Built: measured by the shipped detector itself ────────────────────────
   {
-    dimension: 'tool_loop',
+    dimension: 'edit_retry',
+    denominator: 'per edit',
+    probe: 'detector',
+    confound:
+      'only failureKind "tool" counts, so a denied or hook-blocked edit is excluded; ' +
+      'the attempt ends at the next user prompt',
+    inCatalogue: true,
+    // The real function the detector calls, not a lookalike. A probe looser
+    // than the detector hides the only disagreement worth knowing about.
+    count: (c) => retriedFailures(c.ev).length,
+  },
+
+  // ── Measured, not yet built: the next detectors, in build order ───────────
+  {
+    dimension: 'file_churn  [next]',
+    denominator: 'per file touched',
+    probe: 'structural',
+    confound:
+      'the harness tracks a file from first touch, so a long session inflates versions; ' +
+      'needs the p90 of 5 as a threshold rather than any absolute count',
+    inCatalogue: false,
+    // `file-history-snapshot` records a version per path regardless of HOW the
+    // file changed — Edit, sed, an MCP server, a subagent. The one signal in
+    // the format that is immune to the user's stack.
+    count: (c) => {
+      const versions = new Map<string, number>();
+      for (const e of c.ev) {
+        if (e.systemKind !== 'file-history') continue;
+        for (const path of e.changedFiles ?? []) {
+          versions.set(path, (versions.get(path) ?? 0) + 1);
+        }
+      }
+      // p90 across the corpus is 5 versions; count the paths that exceed it.
+      return [...versions.values()].filter((n) => n > 5).length;
+    },
+  },
+  {
+    dimension: 'context_reingest  [next]',
     denominator: 'per session',
     probe: 'structural',
-    confound: 'needs argHash AND identical outHash; a piped command masks its own output',
+    confound:
+      'cache_creation/output is a session ratio with no turn to point at, so it is ' +
+      'metadata until anchored to the turns where creation spiked',
+    inCatalogue: false,
+    // Exact, universal, and free of text: it describes the API call, not the
+    // work, so it means the same thing for every language and every tool.
+    // Measured p50 11.4, p90 83, p99 598 — a real long tail.
+    count: (c) => {
+      const d = countDenominators(c.ev);
+      if (d.tokens.output === 0) return 0;
+      return d.tokens.cacheCreation / d.tokens.output > 83 ? 1 : 0;
+    },
+  },
+  {
+    dimension: 'redundant_call  [next]',
+    denominator: 'per tool call',
+    probe: 'structural',
+    confound:
+      'a self-truncating command (`| head -30`) discards its own output upstream of us, ' +
+      'so outHash compares a prefix; polling tools are excluded by name',
     inCatalogue: true,
-    count: (c) => runsOf(c.ev).filter((r) => r.events.length >= 3).length,
+    // Consecutive identical calls whose answers were also identical. The old
+    // `tool_loop`, kept honest: the loose version of this probe said 4% of
+    // sessions where the shipped detector found 0.4%.
+    count: (c) => {
+      const POLLING = new Set(['BashOutput', 'TaskOutput', 'Monitor', 'ListAgents']);
+      let hits = 0;
+      let runArgs: string | undefined;
+      let runLen = 0;
+      const outs: (string | undefined)[] = [];
+      const flush = (): void => {
+        if (runLen >= 3 && outs.length >= runLen && new Set(outs).size === 1 && !outs.includes(undefined)) {
+          hits++;
+        }
+        runArgs = undefined;
+        runLen = 0;
+        outs.length = 0;
+      };
+      for (const e of c.ev) {
+        if (e.turnType === 'tool_result') { outs.push(e.outHash); continue; }
+        if (e.turnType === 'user_prompt') { flush(); continue; }
+        if (e.turnType !== 'tool_use') continue;
+        const sig = e.argHash === undefined ? undefined : `${e.toolName ?? '?'}|${e.argHash}`;
+        if (sig === undefined || POLLING.has(e.toolName ?? '') || editEvidenceOf(e) === 'tool') { flush(); continue; }
+        if (sig === runArgs) { runLen++; } else { flush(); runArgs = sig; runLen = 1; }
+      }
+      flush();
+      return hits;
+    },
+  },
+
+  // ── Structural, candidates with no detector yet ───────────────────────────
+  {
+    dimension: 'permission_denied',
+    denominator: 'per tool call',
+    probe: 'structural',
+    confound:
+      'declining is the person exercising control, not friction — frequent and now ' +
+      'structurally visible via failureKind, but it is not obvious it should ever be surfaced',
+    inCatalogue: true,
+    // Structural at last. This was "needs a structural signal first" until the
+    // parser started recording WHO rejected a call.
+    count: (c) => c.ev.filter((e) => e.failureKind === 'denied' || e.failureKind === 'hook').length,
   },
   {
     dimension: 'reading_spiral',
@@ -121,239 +232,17 @@ const PROBES: ProbeDef[] = [
     inCatalogue: true,
     count: (c) => {
       const reads = new Map<string, number>();
-      let edited = false;
       let hits = 0;
       for (const e of c.ev) {
-        if (editEvidenceOf(e) === 'tool') { edited = true; reads.clear(); continue; }
+        if (editEvidenceOf(e) === 'tool') { reads.clear(); continue; }
         if (e.turnType !== 'tool_use' || !READ_TOOLS.has(e.toolName ?? '')) continue;
         if (e.filePath === undefined) continue;
         const n = (reads.get(e.filePath) ?? 0) + 1;
         reads.set(e.filePath, n);
-        if (n === 4) hits++; // 4+ reads of one file with no edit between
-      }
-      void edited;
-      return hits;
-    },
-  },
-  {
-    dimension: 'revert_churn',
-    denominator: 'per session',
-    probe: 'structural',
-    confound: 'discarding a deliberate spike is good engineering; neutral by design',
-    inCatalogue: true,
-    count: (c) =>
-      c.edits.length === 0 ? 0 : c.ev.filter((e) => destructiveKind(e.command) !== undefined).length,
-  },
-  {
-    dimension: 'fail_fix_fail',
-    denominator: 'per session',
-    probe: 'structural',
-    confound: 'needs a failing verification; 95% of results carry no exit signal',
-    inCatalogue: true,
-    count: (c) => {
-      const look = lookupFor(c.reg, c.s.project, { requireConfirmed: false });
-      let fails = 0;
-      let editsBetween = 0;
-      let hits = 0;
-      let lastCall: Event | undefined;
-      for (const e of c.ev) {
-        if (editEvidenceOf(e) === 'tool') { editsBetween++; continue; }
-        if (e.turnType === 'tool_use') { lastCall = e; continue; }
-        if (e.turnType !== 'tool_result') continue;
-        if (!look.isVerification(lastCall?.command)) continue;
-        if (resultFailed(e)) { fails++; if (fails >= 3 && editsBetween >= 2) { hits++; fails = 0; editsBetween = 0; } }
-        else { fails = 0; editsBetween = 0; }
+        if (n === 3) hits++;
       }
       return hits;
     },
-  },
-
-  // ── D. Honesty ────────────────────────────────────────────────────────────
-  {
-    dimension: 'inaccurate_self_report',
-    denominator: 'per success claim',
-    probe: 'lexical',
-    confound: 'claim detection is lexical over an open space; needs a confirmed verification failure',
-    inCatalogue: true,
-    count: (c) => {
-      const look = lookupFor(c.reg, c.s.project, { requireConfirmed: false });
-      let lastFail: Event | undefined;
-      let lastCall: Event | undefined;
-      let hits = 0;
-      for (const e of c.ev) {
-        if (e.turnType === 'user_prompt') { lastFail = undefined; continue; }
-        if (e.turnType === 'tool_use') { lastCall = e; continue; }
-        if (e.turnType === 'tool_result') {
-          lastFail = resultFailed(e) && look.isVerification(lastCall?.command) ? e : undefined;
-          continue;
-        }
-        if (e.turnType === 'assistant_msg' && e.textSummary && lastFail) {
-          if (isSuccessClaim(e.textSummary)) { hits++; lastFail = undefined; }
-        }
-      }
-      return hits;
-    },
-  },
-  {
-    dimension: 'scope_overreach',
-    denominator: 'per session',
-    probe: 'structural',
-    confound: 'wide edits may be genuinely necessary; no acceptance signal is checked',
-    inCatalogue: true,
-    count: (c) => {
-      const files = new Set(c.edits.map((e) => e.filePath).filter(Boolean));
-      // A proxy, deliberately crude: one prompt, many files touched.
-      return c.prompts.length === 1 && files.size >= 5 ? 1 : 0;
-    },
-  },
-
-  // ── E. User friction ──────────────────────────────────────────────────────
-  {
-    dimension: 'user_interrupt',
-    denominator: 'per prompt',
-    probe: 'structural',
-    confound: 'interrupting to ADD information is steering, not friction; counts enqueue only',
-    inCatalogue: true,
-    // `enqueue` is the user typing while the agent works. The matching `dequeue`
-    // is the same prompt being delivered, so counting every queue_operation
-    // triple-counted one interaction — the first version reported 19,501.
-    count: (c) => c.ev.filter((e) => e.queueOpSubtype === 'enqueue').length,
-  },
-  {
-    dimension: 'prompt_withdrawn  [NEW]',
-    denominator: 'per prompt',
-    probe: 'structural',
-    confound: 'a withdrawn prompt may be a typo rather than a change of mind',
-    inCatalogue: false,
-    // `remove`/`popAll` is a queued prompt the user took back — they typed it,
-    // then thought better of it. SWE-chat annotates the same thing as
-    // `user_prompt_discarded` (18,638 across the dataset).
-    count: (c) =>
-      c.ev.filter((e) => e.queueOpSubtype === 'remove' || e.queueOpSubtype === 'popAll').length,
-  },
-
-  // ── G. Verification ───────────────────────────────────────────────────────
-  {
-    dimension: 'no_verification',
-    denominator: 'per edit',
-    probe: 'structural',
-    confound: 'silent unless the project is warm; verification may have happened outside the session',
-    inCatalogue: true,
-    count: (c) => {
-      const look = lookupFor(c.reg, c.s.project);
-      if (look.cold) return 0;
-      let pending = 0;
-      let unverified = 0;
-      for (const e of c.ev) {
-        const evd = editEvidenceOf(e);
-        if (evd === 'tool' || evd === 'harness') pending++;
-        else if (e.turnType === 'tool_use' && look.isVerification(e.command)) pending = 0;
-      }
-      unverified = pending;
-      return unverified;
-    },
-  },
-  {
-    dimension: 'error_ignored',
-    denominator: 'per failure',
-    probe: 'structural',
-    confound:
-      'OVER-COUNTS badly: measured 234 of which >=68 were the agent fixing or re-checking, 55 more investigating',
-    inCatalogue: true,
-    count: (c) => {
-      let hits = 0;
-      for (const [i, e] of c.ev.entries()) {
-        if (e.turnType !== 'tool_result' || !resultFailed(e)) continue;
-        const next = c.ev.slice(i + 1).find((x) => x.turnType === 'tool_use');
-        if (next === undefined) continue;
-        const addressed =
-          editEvidenceOf(next) !== undefined || READ_TOOLS.has(next.toolName ?? '');
-        if (!addressed) hits++;
-      }
-      return hits;
-    },
-  },
-  {
-    dimension: 'premature_external_write',
-    denominator: 'per session',
-    probe: 'structural',
-    confound: 'pushing to a personal branch where CI verifies is normal; no branch awareness',
-    inCatalogue: true,
-    count: (c) => {
-      const look = lookupFor(c.reg, c.s.project, { requireConfirmed: false });
-      let verifiedSinceEdit = false;
-      let hits = 0;
-      for (const e of c.ev) {
-        if (editEvidenceOf(e) === 'tool') verifiedSinceEdit = false;
-        if (e.turnType === 'tool_use' && look.isVerification(e.command)) verifiedSinceEdit = true;
-        if (e.turnType !== 'tool_use' || e.command === undefined) continue;
-        if (!/\bgit\s+push\b|\bnpm\s+publish\b|\bgh\s+pr\s+create\b/.test(executablePart(e.command))) continue;
-        // Only a push with NO verification since the last edit is premature.
-        // Counting every push reported 3,634, which is just "people push".
-        if (!verifiedSinceEdit) hits++;
-      }
-      return hits;
-    },
-  },
-
-  // ── F. Healthy ────────────────────────────────────────────────────────────
-  {
-    dimension: 'tdd_fail_then_pass',
-    denominator: 'per session',
-    probe: 'structural',
-    confound: 'needs a verification verdict on both sides; masked exit status hides most',
-    inCatalogue: true,
-    count: (c) => {
-      const look = lookupFor(c.reg, c.s.project, { requireConfirmed: false });
-      let testEdited = false;
-      let sawFail = false;
-      let hits = 0;
-      let lastCall: Event | undefined;
-      for (const e of c.ev) {
-        if (editEvidenceOf(e) === 'tool' && /test|spec/i.test(e.filePath ?? '')) testEdited = true;
-        if (e.turnType === 'tool_use') { lastCall = e; continue; }
-        if (e.turnType !== 'tool_result' || !look.isVerification(lastCall?.command)) continue;
-        if (resultFailed(e)) { if (testEdited) sawFail = true; }
-        else if (sawFail) { hits++; sawFail = false; testEdited = false; }
-      }
-      return hits;
-    },
-  },
-
-  // ── Candidates the catalogue does NOT have ────────────────────────────────
-  {
-    dimension: 'edit_retry_friction  [NEW]',
-    denominator: 'per edit',
-    probe: 'structural',
-    confound: 'a user declining the edit is counted separately; retry window is 14 events',
-    inCatalogue: false,
-    count: (c) => {
-      let hits = 0;
-      for (const [i, e] of c.ev.entries()) {
-        if (e.turnType !== 'tool_use' || !EDIT_TOOLS.has(e.toolName ?? '')) continue;
-        const res = c.ev.slice(i + 1, i + 4).find((x) => x.turnType === 'tool_result');
-        if (res === undefined || !resultFailed(res)) continue;
-        if (/doesn't want to proceed|rejected/i.test(res.textSummary ?? '')) continue;
-        const retried = c.ev
-          .slice(i + 1, i + 15)
-          .some((x) => x.turnType === 'tool_use' && EDIT_TOOLS.has(x.toolName ?? '') && x.filePath === e.filePath);
-        if (retried) hits++;
-      }
-      return hits;
-    },
-  },
-  {
-    dimension: 'permission_friction  [NEW]',
-    denominator: 'per tool call',
-    probe: 'structural',
-    confound: 'declining a tool call is the user exercising control, not necessarily friction',
-    inCatalogue: false,
-    count: (c) =>
-      c.ev.filter(
-        (e) =>
-          e.turnType === 'tool_result' &&
-          /doesn't want to proceed|tool use was rejected|user rejected/i.test(e.textSummary ?? ''),
-      ).length,
   },
 ];
 
@@ -369,12 +258,20 @@ async function main(): Promise<void> {
   }
   const labels = loadLabels(join(scratch, 'labels', 'turn-labels.jsonl'));
 
-  // Learn verification across every session first, exactly as the product does.
-  let reg = emptyRegistry();
-  for (const s of sessions) reg = learn(reg, s.events, s.project, 'measure');
-
   const rows: Row[] = [];
-  const denominators = { sessions: sessions.length, prompts: 0, edits: 0, toolCalls: 0, failures: 0, claims: 0 };
+  const denominators = {
+    sessions: sessions.length,
+    prompts: 0,
+    edits: 0,
+    toolCalls: 0,
+    failures: 0,
+    outputTokens: 0,
+    cacheCreation: 0,
+  };
+  /** Which reason the harness gave, across every `edit_retry` instance. */
+  const reasons = new Map<string, number>();
+  /** cache_creation/output per session, for the percentiles that set the threshold. */
+  const reingest: number[] = [];
 
   const perDim = new Map<string, { sessions: number; instances: number }>();
   const perSet = new Map<string, { A: number; B: number }>();
@@ -383,19 +280,25 @@ async function main(): Promise<void> {
     const ctx: Ctx = {
       s,
       ev,
-      reg,
       prompts: ev.filter((e) => e.turnType === 'user_prompt'),
       edits: ev.filter((e) => editEvidenceOf(e) === 'tool'),
       toolCalls: ev.filter((e) => e.turnType === 'tool_use'),
-      bash: ev.filter((e) => e.turnType === 'tool_use' && e.command !== undefined),
     };
+    const d = countDenominators(ev);
     denominators.prompts += ctx.prompts.length;
-    denominators.edits += ctx.edits.length;
+    denominators.edits += d.editCount;
     denominators.toolCalls += ctx.toolCalls.length;
-    denominators.failures += ev.filter((e) => e.turnType === 'tool_result' && resultFailed(e)).length;
-    denominators.claims += ev.filter(
-      (e) => e.turnType === 'assistant_msg' && e.textSummary !== undefined && isSuccessClaim(e.textSummary),
-    ).length;
+    denominators.failures += ev.filter((e) => e.turnType === 'tool_result' && callFailed(e)).length;
+    denominators.outputTokens += d.tokens.output;
+    denominators.cacheCreation += d.tokens.cacheCreation;
+    if (d.tokens.output > 0) reingest.push(d.tokens.cacheCreation / d.tokens.output);
+
+    // What the harness said, per instance. The label tier is cosmetic by
+    // design, so an unrecognised reason is counted rather than hidden.
+    for (const hit of retriedFailures(ev)) {
+      const r = reasonOf(hit.result) ?? '(unrecognised)';
+      reasons.set(r, (reasons.get(r) ?? 0) + 1);
+    }
 
     for (const p of PROBES) {
       let n = 0;
@@ -430,9 +333,26 @@ async function main(): Promise<void> {
   for (const [, v] of covered) if (v.pushback) pushbackCounts.set(v.pushback, (pushbackCounts.get(v.pushback) ?? 0) + 1);
 
   console.log(`sessions measured: ${sessions.length}  (set A ${sessions.filter((s) => s.set === 'A').length}, set B ${sessions.filter((s) => s.set === 'B').length})`);
-  console.log(`denominators: ${denominators.prompts} prompts · ${denominators.edits} edits · ${denominators.toolCalls} tool calls · ${denominators.failures} failures · ${denominators.claims} claims`);
-  console.log(`verification learned: ${Object.keys(reg.entries).length} commands, ${new Set(sessions.map((s) => s.project)).size} projects`);
-  console.log(`warm sessions: ${sessions.filter((s) => !lookupFor(reg, s.project).cold).length}`);
+  console.log(`denominators: ${denominators.prompts} prompts · ${denominators.edits} edits · ${denominators.toolCalls} tool calls · ${denominators.failures} harness-declared failures`);
+  const q = (xs: number[], p: number): string => {
+    const sorted = [...xs].sort((a, b) => a - b);
+    return (sorted[Math.floor(p * (sorted.length - 1))] ?? 0).toFixed(1);
+  };
+  console.log(
+    `tokens: output ${denominators.outputTokens} · cache creation ${denominators.cacheCreation}`,
+  );
+  console.log(
+    `cache_creation/output per session: p50 ${q(reingest, 0.5)} · p90 ${q(reingest, 0.9)} · ` +
+      `p99 ${q(reingest, 0.99)}   (the ratio cache_read cannot give: see GRAVEYARD.md)`,
+  );
+
+  if (reasons.size > 0) {
+    const tot = [...reasons.values()].reduce((a, b) => a + b, 0);
+    console.log(`\nedit_retry — what the harness said, across ${tot} instances:`);
+    for (const [k, v] of [...reasons].sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${String(v).padStart(6)}  ${k}`);
+    }
+  }
 
   if (pushbackCounts.size > 0) {
     const tot = [...pushbackCounts.values()].reduce((a, b) => a + b, 0);
