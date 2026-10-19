@@ -508,3 +508,30 @@ describe('parser — sidechain attribution', () => {
     expect(parseTranscriptText(text).events[0]?.sidechainId).toBeUndefined();
   });
 });
+
+describe('parser — records that carry role instead of type', () => {
+  // Observed in 2 of 160 SWE-chat transcripts: 103 records with no `type`
+  // field, 24 of them real human prompts, all counted as `(missing)` and
+  // dropped. The shape is otherwise a normal user/assistant record.
+  it('infers the type from role', () => {
+    const text = [
+      j({ role: 'user', uuid: 'a', parentUuid: null, message: { content: 'review the branch' } }),
+      j({ role: 'assistant', uuid: 'b', parentUuid: 'a', message: { content: [{ type: 'text', text: 'on it' }] } }),
+    ].join('\n');
+    const r = parseTranscriptText(text);
+    expect(r.events.map((e) => e.turnType)).toEqual(['user_prompt', 'assistant_msg']);
+    expect(r.unknown['(missing)']).toBeUndefined();
+  });
+
+  it('still counts a record with neither type nor a usable role', () => {
+    const r = parseTranscriptText(j({ uuid: 'a', parentUuid: null, foo: 1 }));
+    expect(r.unknown['(missing)']).toBe(1);
+  });
+
+  it('prefers an explicit type over role when both are present', () => {
+    const r = parseTranscriptText(
+      j({ type: 'queue-operation', role: 'user', uuid: 'a', parentUuid: null, operation: 'remove' }),
+    );
+    expect(r.events[0]?.turnType).toBe('queue_operation');
+  });
+});

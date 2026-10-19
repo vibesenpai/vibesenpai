@@ -109,6 +109,8 @@ export type ParseResult = {
 
 type RawRecord = {
   type?: string;
+  /** Present instead of `type` in some exports. */
+  role?: string;
   uuid?: string;
   parentUuid?: string | null;
   sessionId?: string;
@@ -477,7 +479,11 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       continue;
     }
 
-    const type = r.type ?? '(missing)';
+    // Some exports omit `type` and carry only `role`. Observed in 2 of 160
+    // SWE-chat transcripts: 103 records, 24 of them real human prompts, all
+    // silently counted as `(missing)` and dropped. The shape is otherwise a
+    // normal user/assistant record, so the role supplies the type.
+    const type = r.type ?? (r.role === 'user' || r.role === 'assistant' ? r.role : '(missing)');
     if (NOISE_TYPES.has(type)) {
       bump(skipped, type);
       // Still part of the tree: a branch point's parent was an `attachment` in
