@@ -16,9 +16,12 @@
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
+import { basename, dirname } from 'node:path';
 import { parse } from '../src/parsers/index.ts';
 import { redact } from '../src/redact.ts';
 import { buildSkeletons, render } from '../src/skeleton.ts';
+import { learn, lookupFor, emptyRegistry } from '../src/verify.ts';
+import { runDetectors, detectorsFor, countDenominators } from '../src/detect/index.ts';
 import type { Event } from '../src/types.ts';
 
 const root = process.env.AGENTSENSEI_CORPUS ?? '/tmp/agentsensei-corpus';
@@ -58,6 +61,17 @@ const REAL_SESSION_EVENTS = 20;
 let skeletonWindows = 0, sidechainWindows = 0, elidedWindows = 0;
 let rawBytes = 0, skeletonBytes = 0;
 const realRatios: number[] = [];
+
+/**
+ * Detector results, kept in the gate rather than measured by hand.
+ *
+ * This was a manual step and it showed: a path-dedup fix changed `editCount`
+ * from 1,155 to 791 and `verifiedEditCount` from 238 to 112, and the only
+ * reason anyone noticed was being asked whether the corpus had been re-run.
+ * Detectors are the product now, so their behaviour belongs in the same gate
+ * that guards the parser.
+ */
+const parsedSessions: { project: string; events: Event[] }[] = [];
 
 /**
  * Fields are checked by enumeration rather than by a hand-written list, so a new
@@ -113,6 +127,44 @@ for (const f of files) {
     }
     if (r.events.length >= REAL_SESSION_EVENTS) realRatios.push(Buffer.byteLength(rendered) / raw);
   }
+
+  if (r.events.length > 0) {
+    parsedSessions.push({ project: basename(dirname(f)), events: r.events });
+  }
+}
+
+// ── Detectors ───────────────────────────────────────────────────────────────
+// Verification is learned first, over every session, exactly as the product
+// does it — a cold project must stay cold here too.
+let registry = emptyRegistry();
+for (const s of parsedSessions) registry = learn(registry, s.events, s.project, 'corpus');
+
+const detectors = detectorsFor('all');
+const byDimension: Record<string, number> = {};
+let detFindings = 0;
+let detFailures = 0;
+let editCount = 0;
+let verifiedEditCount = 0;
+let unclassifiedTouchCount = 0;
+
+for (const s of parsedSessions) {
+  const verification = lookupFor(registry, s.project);
+  const d = countDenominators(s.events, verification);
+  editCount += d.editCount;
+  verifiedEditCount += d.verifiedEditCount;
+  unclassifiedTouchCount += d.unclassifiedTouchCount;
+
+  const res = await runDetectors({
+    events: s.events,
+    session: { sessionId: 'corpus', project: s.project, verification, live: false },
+    now: 'corpus',
+    detectors,
+  });
+  detFailures += Object.values(res.failures).reduce((a, b) => a + b, 0);
+  for (const f of res.findings) {
+    detFindings++;
+    byDimension[f.dimension] = (byDimension[f.dimension] ?? 0) + 1;
+  }
 }
 
 console.log(`files: ${files.length}  parsed: ${parsedFiles}  threw: ${failures.length}  produced 0 events: ${emptyFiles}`);
@@ -152,6 +204,14 @@ if (realRatios.length > 0) {
   );
 }
 
+console.log(`\ndetectors: ${detectors.length} run over ${parsedSessions.length} sessions`);
+console.log(`  scopes: ${detectors.map((d) => `${d.dimension}=${d.scope}`).join('  ')}`);
+console.log(`  findings ${detFindings} ${JSON.stringify(byDimension)} · detector failures ${detFailures}`);
+console.log(
+  `  edits ${editCount} · verified ${verifiedEditCount} · unclassified touches ${unclassifiedTouchCount}`,
+);
+console.log(`  verification learned: ${Object.keys(registry.entries).length} commands`);
+
 // ── Baseline gate ───────────────────────────────────────────────────────────
 const actual: Record<string, number> = {
   files: files.length,
@@ -165,6 +225,11 @@ const actual: Record<string, number> = {
   leaks: leaks.length,
   skeletonWindows,
   skeletonsOverTarget: overTarget,
+  detectorFindings: detFindings,
+  detectorFailures: detFailures,
+  editCount,
+  verifiedEditCount,
+  unclassifiedTouchCount,
 };
 
 const drift = Object.entries(manifest.baseline)
@@ -174,8 +239,9 @@ const drift = Object.entries(manifest.baseline)
 if (drift.length) {
   console.log('\nBASELINE DRIFT:');
   for (const d of drift) console.log(d);
-  console.log('\nThe corpora are pinned, so this means the parser changed behaviour.');
-  console.log('If the change is intended, update the baseline in scripts/corpus.json.');
+  console.log('\nThe corpora are pinned, so the input did not change — the parser,');
+  console.log('skeletonizer, redactor or a detector did. If the change is intended,');
+  console.log('update the baseline in scripts/corpus.json and say why in the commit.');
   process.exit(1);
 }
 

@@ -12,7 +12,12 @@
     "  - Both names on npm resolve to unrelated projects by other maintainers.",
     "  - It is 26 MB of test *data* with no importable surface.",
     "",
-    "To re-pin after reviewing upstream changes: scripts/verify-corpus.sh --update"
+    "To re-pin after reviewing upstream changes: scripts/verify-corpus.sh --update",
+    "",
+    "Detector results are part of the baseline, not a manual step: a path-dedup fix",
+    "moved editCount 1155 -> 791 across all corpora and nobody noticed until asked",
+    "whether the corpus had been re-run. Note verifiedEditCount is 0 here because",
+    "every pinned project is cold \u2014 the gate does not exercise verification end to end."
   ],
   "corpora": [
     {
@@ -41,6 +46,11 @@
     "sidechainEvents": 712,
     "leaks": 0,
     "skeletonWindows": 463,
-    "skeletonsOverTarget": 0
+    "skeletonsOverTarget": 0,
+    "detectorFindings": 0,
+    "detectorFailures": 0,
+    "editCount": 393,
+    "verifiedEditCount": 0,
+    "unclassifiedTouchCount": 7
   }
 }
