@@ -17,7 +17,12 @@
     "Detector results are part of the baseline, not a manual step: a path-dedup fix",
     "moved editCount 1155 -> 791 across all corpora and nobody noticed until asked",
     "whether the corpus had been re-run. Note verifiedEditCount is 0 here because",
-    "every pinned project is cold \u2014 the gate does not exercise verification end to end."
+    "every pinned project is cold \u2014 the gate does not exercise verification end to end.",
+    "",
+    "verifiedEditCount was 0 while confirmation required the verdict to vary \u2014 which",
+    "confirmed nothing, because 111 of 127 verdict-bearing results come from pipelines",
+    "whose exit status belongs to `tail`. Behavioural confirmation (ran after an edit,",
+    "twice) made the pinned corpus warm, so the gate now exercises verification too."
   ],
   "corpora": [
     {
@@ -50,7 +55,7 @@
     "detectorFindings": 0,
     "detectorFailures": 0,
     "editCount": 393,
-    "verifiedEditCount": 0,
+    "verifiedEditCount": 119,
     "unclassifiedTouchCount": 7
   }
 }

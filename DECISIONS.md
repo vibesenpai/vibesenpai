@@ -191,3 +191,47 @@ lexical guess".
 
 It stays in `core`, which admits `certain` or `high`. M2b's outcome signal ("did a correction
 follow?") is the behavioural decider that could raise it back.
+
+## D35 — pass/fail is structural; verification is confirmed by behaviour
+
+Two separate questions got conflated under "read the output", and they split cleanly.
+
+**Did this result fail?** Structural only — `is_error`, or a non-zero `exitCode` parsed from the
+harness's own `Exit code N` prefix. `Exit code 0` is never emitted, so absence of both is success. No
+version gate is needed: harness 1.0 signals failure via `is_error` (33 of 116 Bash results), 2.0 and
+2.1 via either.
+
+**The text heuristic it replaced was actively wrong.** It read `0 errors, 0 warnings` as a failure,
+which is how `uv run pyright` sat in the registry as `0p/5f` when all five runs were clean. The audit
+settled it: in **26 of 38** cases where the harness reported a non-zero exit, a careful text pattern
+saw nothing wrong. Text was the worse judge in both directions — and it was a pattern list over an
+open space that both nominated and decided, which D31 forbids.
+
+**Is this command verification?** Behaviourally: it produced verdict-shaped output **and ran
+immediately after an edit, at least twice**.
+
+The previous rule — "the verdict varied" — is the right definition and a useless test. Measured over
+255 sessions it confirmed **0 commands in 0 projects**, because the exit status is masked: agents pipe
+test output through `tail` to manage context, and the shell reports `tail`'s status. **111 of 127**
+verdict-bearing results are pipelines. The information is not there to recover.
+
+Running after an edit survives piping completely — a pipe mangles the status, not the fact that the
+command ran. Candidate rules, measured:
+
+| rule | commands | warm projects |
+|---|---|---|
+| verdict varied | 0 | 0 |
+| ran after an edit >= 1 | 14 | 4 — admits `gh run view`, `# Kill the` |
+| **ran after an edit >= 2** | **7** | **3** |
+
+At two cycles the admitted set is `npx vitest run`, `uv run pyright`, `pytest tooling/...`,
+`npm run typecheck`, `vitest run`, `tsc`, and one ad-hoc `node` script. Six unmistakable, one
+arguable. Verdict shape still **nominates**; behaviour **decides**.
+
+**Effect:** warm projects 1 -> 3, sessions in a warm project 33 of 255, verified edits 0% -> 31%. The
+corpus gate now exercises verification end to end, which it previously could not.
+
+**Two things measured and rejected along the way.** The agent's own `TodoWrite` status transitions
+looked like a free structured verdict — but where an exit code also existed the two **disagreed 12
+times out of 14**, because the agent advances a task that is often unrelated to the failing command.
+And `editEvidenceOf` moved to `src/edits.ts` so the registry can use it without a cycle.

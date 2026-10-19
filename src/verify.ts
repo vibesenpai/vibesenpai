@@ -46,6 +46,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { SCHEMA, checkVersion, stamp, type Versioned } from './schema.ts';
 import { executablePart } from './detect/command.ts';
+import { editEvidenceOf } from './edits.ts';
 import type { Event } from './types.ts';
 
 /**
@@ -160,25 +161,97 @@ export function hasVerdictShape(text: string | undefined): boolean {
   return VERDICT_SHAPE.some((re) => re.test(text));
 }
 
+/**
+ * Did this result report a failure?
+ *
+ * ── Structural only. No text is read. ───────────────────────────────────────
+ *
+ * The harness records failure two ways and *never* records success: a non-zero
+ * exit arrives as an `Exit code N` prefix (parsed into `exitCode`), and a tool
+ * error sets `is_error`. `Exit code 0` is never emitted. So the absence of both
+ * **is** success.
+ *
+ * Measured across 1,638 Bash results and all three harness majors — and no
+ * version gate is needed, because each one signals failure somehow:
+ *
+ *   harness 1.0  116 results   0 prefix  33 is_error   28.4% failed
+ *   harness 2.0  187 results   6 prefix  15 is_error   11.2% failed
+ *   harness 2.1 1335 results  32 prefix  50 is_error    6.1% failed
+ *
+ * ── Why the text heuristic was removed ──────────────────────────────────────
+ *
+ * It read `0 errors, 0 warnings` as a failure, which is how `uv run pyright`
+ * came to sit in the registry as `0p/5f` when all five runs were clean — and
+ * that mislabelling is what kept its project permanently cold. Worse, it was a
+ * pattern list over an open space (every tool's output phrasing) that both
+ * nominated and decided, which is precisely the shape this project rejects.
+ *
+ * The audit settled it: in **26 of 38** cases where the harness reported a
+ * non-zero exit, a careful text pattern saw nothing wrong. Text is the worse
+ * judge in both directions.
+ *
+ * The accepted cost: a command that fails while exiting 0 — a script swallowing
+ * its own status — reads as passed. A rare miss, traded for removing an
+ * unbounded heuristic from a deciding path.
+ */
 export function resultFailed(e: Event): boolean {
   if (e.isError === true) return true;
-  if (e.exitCode !== undefined && e.exitCode !== 0) return true;
-  // Some harness variants record neither, so the verdict text is the fallback.
-  return /\b(?:FAIL|failed|failing|error|errors|panic:|not ok)\b/i.test(e.textSummary ?? '');
+  return e.exitCode !== undefined && e.exitCode !== 0;
 }
 
 export type VerificationEntry = {
   command: string;
+  /** Times this command produced verdict-shaped output. */
+  sightings: number;
+  /**
+   * Times it ran with an **edit before it** and no intervening command.
+   *
+   * This is what confirms a verification command, and it is the one signal that
+   * survives how agents actually work. See `CONFIRM_AFTER_EDITS`.
+   */
+  afterEdit: number;
+  /**
+   * Kept for diagnostics only — they no longer gate anything.
+   *
+   * The verdict is structural (`resultFailed`), and the exit status is masked
+   * for the overwhelming majority of real commands: of 127 verdict-bearing
+   * results, **111 came from a pipeline** whose status belongs to `tail` or
+   * `grep` rather than to the test runner.
+   */
   pass: number;
   fail: number;
   firstSeen: string;
   lastSeen: string;
-  /**
-   * `certain` once the verdict has been seen to vary, which is what proves the
-   * command responds to code changes. `high` on output shape alone.
-   */
   confidence: 'certain' | 'high';
 };
+
+/**
+ * How many edit-then-run cycles confirm a command as verification.
+ *
+ * ── Why this replaced "the verdict varied" ──────────────────────────────────
+ *
+ * Verdict variation is the *right* definition and a useless test. Measured over
+ * 255 sessions it confirmed **0 commands in 0 projects**, because the exit
+ * status is masked: agents pipe test output through `tail` to manage context, so
+ * the shell reports `tail`'s status. 111 of 127 verdict-bearing results are
+ * pipelines. No amount of careful shell parsing recovers information that is not
+ * there.
+ *
+ * Running after an edit survives piping completely — a pipe mangles the status,
+ * not the fact that the command ran. Candidate rules, measured:
+ *
+ *   verdict varied         ->  0 commands,  0 warm projects   (inert)
+ *   ran after an edit >=1  -> 14 commands,  4 warm   (admits `gh run view`, `# Kill the`)
+ *   ran after an edit >=2  ->  7 commands,  3 warm   <- this
+ *
+ * At 2 the admitted set is `npx vitest run`, `uv run pyright`,
+ * `pytest tooling/...`, `vitest run`, `tsc`, `npm run typecheck`, and one
+ * ad-hoc `node` script. Six unmistakable, one arguable.
+ *
+ * Verdict shape still **nominates**; this **decides**. No text in the deciding
+ * path, and no pass/fail determination required.
+ */
+export const CONFIRM_AFTER_EDITS = 2;
 
 export type VerificationRegistry = Versioned<'verification'> & {
   /**
@@ -248,8 +321,14 @@ export function learn(
 ): VerificationRegistry {
   const entries = { ...registry.entries };
   let lastCall: Event | undefined;
+  // Did a file change since the previous command ran? Reset on each command, so
+  // this means "edit immediately before this run" rather than "ever edited".
+  let editedSinceLastCommand = false;
 
   for (const e of [...events].sort((a, b) => a.seq - b.seq)) {
+    const evidence = editEvidenceOf(e);
+    if (evidence === 'tool' || evidence === 'harness') editedSinceLastCommand = true;
+
     if (e.turnType === 'tool_use') {
       lastCall = e;
       continue;
@@ -264,19 +343,21 @@ export function learn(
     const k = keyOf(project, command);
     const prior = entries[k];
     const failed = resultFailed(e);
-    const pass = (prior?.pass ?? 0) + (failed ? 0 : 1);
-    const fail = (prior?.fail ?? 0) + (failed ? 1 : 0);
+    const afterEdit = (prior?.afterEdit ?? 0) + (editedSinceLastCommand ? 1 : 0);
 
     entries[k] = {
       command,
-      pass,
-      fail,
+      sightings: (prior?.sightings ?? 0) + 1,
+      afterEdit,
+      pass: (prior?.pass ?? 0) + (failed ? 0 : 1),
+      fail: (prior?.fail ?? 0) + (failed ? 1 : 0),
       firstSeen: prior?.firstSeen ?? now,
       lastSeen: now,
-      // Verdict variation is the proof. Until then the claim rests on output
-      // shape, which `git log --oneline` matched once in the corpus.
-      confidence: pass > 0 && fail > 0 ? 'certain' : 'high',
+      // Behaviour decides. Verdict shape only got it into the registry.
+      confidence: afterEdit >= CONFIRM_AFTER_EDITS ? 'certain' : 'high',
     };
+
+    editedSinceLastCommand = false; // consumed by this run
   }
 
   return { ...registry, entries };

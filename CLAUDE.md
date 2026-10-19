@@ -107,6 +107,22 @@ window.** A per-window `no_verification` would have called every one of them unv
 breaks consecutive-run detection. `session` is not `thread`: a subagent edits a file and the main
 thread runs the tests.
 
+## Prefer a structural signal, then a behavioural one, then nothing
+
+Reading tool output as prose is a pattern list over an open space, and it decides as well as
+nominates — the thing D31 forbids. The ladder, strongest first:
+
+1. **Structural** — what the harness itself records: `is_error`, `Exit code N`,
+   `file-history-snapshot` versions. Closed, published, no guessing.
+2. **Behavioural** — what the agent *did*: ran a command after an edit, re-ran the same check,
+   committed. Survives the things that destroy structure, notably piping.
+3. **Text** — may **nominate** a candidate; must never decide alone.
+4. **Nothing** — say "cannot tell" and stay silent.
+
+Measured lesson: 111 of 127 verdict-bearing results come from pipelines, so the exit status belongs to
+`tail` rather than the test runner. Structure is best where it exists and simply absent where it does
+not — which is why rung 2 exists.
+
 ## Precision over recall
 
 A false flag destroys trust permanently, and a stranger who gets one never tells you why.

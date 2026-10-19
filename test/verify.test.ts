@@ -13,6 +13,7 @@ import {
   writeRegistry,
   staticLookup,
   coldLookup,
+  resultFailed,
   type VerificationRegistry,
 } from '../src/verify.ts';
 import { SCHEMA } from '../src/schema.ts';
@@ -33,6 +34,8 @@ function ev(over: Partial<Event> & Pick<Event, 'turnType'>): Event {
   } as Event;
 }
 const call = (command: string): Event => ev({ turnType: 'tool_use', toolName: 'Bash', command });
+const edit = (filePath: string): Event =>
+  ev({ turnType: 'tool_use', toolName: 'Edit', filePath });
 const out = (textSummary: string, failed = false): Event =>
   ev({ turnType: 'tool_result', textSummary, ...(failed ? { isError: true } : { exitCode: 0 }) });
 
@@ -128,7 +131,7 @@ describe('hasVerdictShape — vocabulary that spans frameworks', () => {
   }
 });
 
-describe('learn — a verification command is one whose verdict varies', () => {
+describe('learn — a verification command is one run after edits', () => {
   it('records a command on first sighting at `high`', () => {
     const r = learn(emptyRegistry(), [call('pytest -q'), out('12 passed')], 'proj', NOW);
     const e = Object.values(r.entries)[0]!;
@@ -137,14 +140,40 @@ describe('learn — a verification command is one whose verdict varies', () => {
     expect(e.pass).toBe(1);
   });
 
-  it('upgrades to `certain` once it has both passed and failed', () => {
-    // This is the framework-agnostic core: the verdict responds to the code.
-    let r = learn(emptyRegistry(), [call('pytest -q'), out('12 passed')], 'proj', NOW);
-    r = learn(r, [call('pytest -q'), out('2 failed, 10 passed', true)], 'proj', NOW);
+  it('upgrades to `certain` after two edit-then-run cycles', () => {
+    // Verdict variation is the right definition and a useless test: measured
+    // over 255 sessions it confirmed 0 commands, because 111 of 127
+    // verdict-bearing results come from pipelines whose exit status belongs to
+    // `tail`. Running after an edit survives piping.
+    let r = learn(emptyRegistry(), [edit('src/a.ts'), call('pytest -q'), out('12 passed')], 'proj', NOW);
+    expect(Object.values(r.entries)[0]!.confidence).toBe('high'); // one cycle
+    r = learn(r, [edit('src/a.ts'), call('pytest -q'), out('11 passed')], 'proj', NOW);
     const e = Object.values(r.entries)[0]!;
     expect(e.confidence).toBe('certain');
-    expect(e.pass).toBe(1);
-    expect(e.fail).toBe(1);
+    expect(e.afterEdit).toBe(2);
+    expect(e.sightings).toBe(2);
+  });
+
+  it('does NOT confirm a command that never follows an edit', () => {
+    // `git log` and `gh run view` produce verdict-shaped output but are not
+    // verification. Requiring >=1 cycle admitted them; >=2 does not.
+    let r = emptyRegistry();
+    for (let i = 0; i < 5; i++) r = learn(r, [call('git log --oneline'), out('ok 1 thing')], 'proj', NOW);
+    expect(Object.values(r.entries)[0]!.confidence).toBe('high');
+    expect(lookupFor(r, 'proj').cold).toBe(true);
+  });
+
+  it('counts an edit only for the run that immediately follows it', () => {
+    // One edit then three runs is one cycle, not three.
+    let r = learn(
+      emptyRegistry(),
+      [edit('src/a.ts'), call('pytest'), out('1 passed'), call('pytest'), out('1 passed')],
+      'proj',
+      NOW,
+    );
+    const e = Object.values(r.entries)[0]!;
+    expect(e.sightings).toBe(2);
+    expect(e.afterEdit).toBe(1);
   });
 
   it('learns nothing from output with no verdict', () => {
@@ -172,8 +201,8 @@ describe('learn — a verification command is one whose verdict varies', () => {
 
 describe('lookupFor — confirmation is required before a finding', () => {
   const twice = (): ReturnType<typeof emptyRegistry> => {
-    let r = learn(emptyRegistry(), [call('pytest'), out('3 passed')], 'proj', NOW);
-    r = learn(r, [call('pytest'), out('1 failed', true)], 'proj', NOW);
+    let r = learn(emptyRegistry(), [edit('src/a.ts'), call('pytest'), out('3 passed')], 'proj', NOW);
+    r = learn(r, [edit('src/a.ts'), call('pytest'), out('1 passed')], 'proj', NOW);
     return r;
   };
 
@@ -182,8 +211,8 @@ describe('lookupFor — confirmation is required before a finding', () => {
   });
 
   it('does NOT trust shape alone by default', () => {
-    // `git log --oneline` matched on shape once across 253 sessions. A `certain`
-    // detector cannot rest on that.
+    // `git log --oneline` matched on shape once across 253 sessions. A finding
+    // cannot rest on that.
     const r = learn(emptyRegistry(), [call('git log --oneline'), out('ok 1 thing')], 'proj', NOW);
     expect(lookupFor(r, 'proj').isVerification('git log --oneline')).toBe(false);
     expect(lookupFor(r, 'proj', { requireConfirmed: false }).isVerification('git log --oneline')).toBe(true);
@@ -332,5 +361,49 @@ describe('outHash — comparing full output, not a 200-char prefix', () => {
     expect(outputDigest('')).toBeUndefined();
     expect(outputDigest('   ')).toBeUndefined();
     expect(outputDigest(undefined)).toBeUndefined();
+  });
+});
+
+describe('resultFailed — structural only, no text', () => {
+  const r = (over: Partial<Event>): Event =>
+    ev({ turnType: 'tool_result', ...over } as Partial<Event> & Pick<Event, 'turnType'>);
+
+  it('trusts is_error', () => {
+    expect(resultFailed(r({ isError: true, textSummary: 'looks fine to me' }))).toBe(true);
+  });
+
+  it('trusts a non-zero exit code', () => {
+    expect(resultFailed(r({ exitCode: 1, textSummary: 'all good!' }))).toBe(true);
+    expect(resultFailed(r({ exitCode: 127 }))).toBe(true);
+  });
+
+  it('treats the absence of both as SUCCESS', () => {
+    // The harness never emits `Exit code 0`, so absence is the success signal.
+    // Verified across all three harness majors: each one records failure
+    // somehow (1.0 via is_error, 2.x via either), so absence is meaningful
+    // everywhere and needs no version gate.
+    expect(resultFailed(r({ textSummary: 'Tests: 48 passed, 0 failed' }))).toBe(false);
+    expect(resultFailed(r({ exitCode: 0, textSummary: 'Tests: 48 passed, 0 failed' }))).toBe(false);
+  });
+
+  it('ignores failure-looking words with no structural signal', () => {
+    // This is the whole point. The old text fallback read these as failures:
+    // `0 errors, 0 warnings` is how `uv run pyright` became 0p/5f in the
+    // registry when all five runs were clean, which kept its project cold.
+    for (const text of [
+      '0 errors, 0 warnings, 0 informations',
+      'Tests: 48 passed, 0 failed',
+      'Finding most recent failed E2E run on main...',
+      '1216 pass  0 fail  2608 expect() calls',
+      '[main f59e610] suppress false positive conflicts',
+    ]) {
+      expect(resultFailed(r({ textSummary: text })), text).toBe(false);
+    }
+  });
+
+  it('does not rescue a failure that exits 0 — the accepted cost', () => {
+    // A script that swallows its own status reads as passed. A rare miss,
+    // traded for removing an unbounded heuristic from a deciding path.
+    expect(resultFailed(r({ exitCode: 0, textSummary: 'FAIL 3 tests' }))).toBe(false);
   });
 });
