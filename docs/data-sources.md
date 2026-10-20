@@ -79,3 +79,49 @@ taking a dependency on it.
 
 *Extracted from the planning document (2026-10-12/15). Reasoning is kept with each
 conclusion deliberately — see [DECISIONS.md](../DECISIONS.md) for the index.*
+
+## Is the corpus too small? No — the remaining signal is not structural
+
+Checked 2026-10-20, because "we are missing things for lack of data" is the
+obvious explanation and it turns out to be the wrong one.
+
+**[How Coding Agents Fail Their Users](https://arxiv.org/abs/2605.29442)**
+(arXiv 2605.29442) analyses **20,574 real sessions** from 1,639 repositories —
+18× this project's corpus — and is the source of the dimension table in
+`PLAN.md`. The frequencies match exactly: S3 Developer Constraint Violation
+38.33% = our `constraint_decay` 38.3%; S7 Inaccurate Self-Reporting 22.58% =
+our `inaccurate_self_report` 22.6%; S4 Self-Initiated Overreach 10.20%.
+
+The decisive sentence is about method, not size:
+
+> Detection relied on developer correction or pushback visible in the chat
+> logs, **not on structural signals such as tool-call errors, exit codes, or
+> test failures.**
+
+They used GPT-5.4 to extract episodes bottom-up, a second LLM pass to filter
+unsupported claims, and an LLM judge for the codebook — 0.93 precision against
+two human experts, 0.83 inter-rater agreement.
+
+So the seven misalignment types are **not reachable from structure at any
+corpus size**. This project already proved that the hard way:
+`inaccurate_self_report` is their S7, was built here on rules, and died **0 true
+positives against 5 false positives** (see `GRAVEYARD.md`).
+
+Two conclusions:
+
+1. **More sessions will not produce more structural detectors.** They confirm
+   rare ones and give a second population. The honest frontier is the semantic
+   tier, which this project has always planned and has not reached.
+2. **The signal the paper actually uses is developer pushback** — 91.49% of
+   resolved episodes involve explicit user correction. That is `user_correction`,
+   which is blocked here by one parser constant: `summarise(s, max = 200)` in
+   `src/parsers/claude-code.ts` truncates **45% of user prompts**, discarding
+   5.9M characters across 400 sessions.
+
+## A second corpus, if one is wanted
+
+**SpecStory** — 14,789 of the paper's sessions, from 1,441 GitHub repositories,
+exported as timestamped Markdown under `.specstory/history/`. A different
+population from SWE-chat (IDE as well as CLI) and a different format, so it
+would need its own parser behind the existing factory. Worth it for a second
+population, not for unlocking structural detectors.
