@@ -581,20 +581,50 @@ function cmdInstall(a: Argv): number {
   }
 
   const change = describeChange(before, after);
+
+  // ── Command files count as a change, settings are not the whole install ───
+  //
+  // This compared only `settings.json`, so with the hooks already in place it
+  // reported "already installed — nothing would change" and returned *before
+  // reaching the command files*. A missing or outdated command then had no way
+  // to be repaired: re-running install, the obvious fix, confirmed there was
+  // nothing to do. It only escaped notice because `describeChange` also lists
+  // untouched keys, which kept the list non-empty by accident.
+  const wanted: [string, string, string][] = [
+    [commandFilePath(home), '/agentsensei:now', commandFileBody(repoRoot())],
+    [fixCommandFilePath(home), '/agentsensei:fix', fixCommandBody(repoRoot())],
+    [
+      generateReportCommandFilePath(home),
+      '/agentsensei:generate-report',
+      generateReportCommandBody(repoRoot()),
+    ],
+  ];
+  const commandLines: string[] = [];
+  let commandsDiffer = false;
+  for (const [p_, name, body] of wanted) {
+    let state: string;
+    if (!existsSync(p_)) {
+      state = 'command (new)    ';
+      commandsDiffer = true;
+    } else if (readFileSync(p_, 'utf8') !== body) {
+      // Content, not just presence: a body we have since reworded is stale, and
+      // "exists" would hide that.
+      state = 'command (update) ';
+      commandsDiffer = true;
+    } else {
+      state = 'command (current)';
+    }
+    commandLines.push(`  ${state} ${name.padEnd(28)} ${p_}`);
+  }
+
   console.log(`settings: ${path}\n`);
-  if (change.length === 0) {
+  if (change.length === 0 && !commandsDiffer) {
     console.log('already installed — nothing would change.');
     return 0;
   }
   console.log('this would change:');
   for (const l of change) console.log(l);
-  for (const [p_, name] of [
-    [commandFilePath(home), '/agentsensei:now'],
-    [fixCommandFilePath(home), '/agentsensei:fix'],
-    [generateReportCommandFilePath(home), '/agentsensei:generate-report'],
-  ] as const) {
-    console.log(`  ${existsSync(p_) ? 'command (exists)' : 'command (new)   '}  ${name.padEnd(17)} ${p_}`);
-  }
+  for (const l of commandLines) console.log(l);
   for (const old of legacyCommandFiles(home)) {
     if (existsSync(old)) console.log(`  command (remove)  ${'un-namespaced'.padEnd(17)} ${old}`);
   }
