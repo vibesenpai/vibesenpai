@@ -35,6 +35,7 @@ import type { Event, Finding } from './types.ts';
 import { adviceFor, reasonOf, type Reason } from './detect/labels.ts';
 import { sessionStats, type SessionStats } from './stats.ts';
 import { approx, costFor } from './cost.ts';
+import { bold, cyan, dim, green, pad, red, rule, yellow } from './style.ts';
 
 /** Corpus percentiles, so a session's number has something to sit against. */
 export const CORPUS = {
@@ -53,6 +54,14 @@ export const CORPUS = {
 } as const;
 
 const INDENT = '  ';
+
+/**
+ * Report width.
+ *
+ * 68 plus the two-space indent fits inside 72, which leaves room in an 80-column
+ * terminal for the gutter the harness adds when it echoes command output.
+ */
+const WIDTH = 68;
 
 function human(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -181,42 +190,97 @@ export function describeTurn(e: Event): string {
  * difference between this and a score.
  */
 function evidenceLines(f: Finding, byUuid: Map<string, Event>, max = 6): string[] {
-  const out: string[] = [];
   const shown = f.evidence.slice(0, max);
+
+  // Rows first, widths second, text last. Measuring the turn column from the
+  // rows actually shown is what keeps `142` and `1127` in one column; the
+  // previous version hard-coded a pad of 5 and let anything wider push the
+  // line out of alignment.
+  type Row = { turn: string; what: string; detail: string; failed: boolean; retry: boolean };
+  const rows: Row[] = [];
+  let prevFailed = false;
+
   for (const ref of shown) {
-    const seq = ref.seq === undefined ? '    ?' : String(ref.seq).padStart(5);
     const e = byUuid.get(ref.uuid);
-    const what = e === undefined ? '' : `  ${describeTurn(e)}`;
-    out.push(`${INDENT.repeat(3)}turn ${seq}${what}`);
+    const turn = ref.seq === undefined ? '?' : String(ref.seq);
+    if (e === undefined) {
+      rows.push({ turn, what: '', detail: '', failed: false, retry: false });
+      prevFailed = false;
+      continue;
+    }
+
+    const failed = e.turnType === 'tool_result' && e.isError === true;
+    // A call straight after a refusal is the retry. Worth marking, because
+    // "Edit, refused, Edit" is the whole shape of the finding and the third
+    // row is the one a reader has to infer.
+    const retry = e.turnType === 'tool_use' && prevFailed;
+    const { what, detail } = turnColumns(e, f.subject);
+    rows.push({ turn, what, detail, failed, retry });
+    prevFailed = failed;
   }
+
+  const turnW = Math.max(...rows.map((r) => r.turn.length));
+  const whatW = Math.max(...rows.map((r) => r.what.length + (r.failed ? 2 : 0)));
+
+  const out = rows.map((r) => {
+    const marker = r.failed ? `${red('✗')} ` : '';
+    const detail = r.retry
+      ? `${dim('↻')} ${r.detail === '' ? dim('retried') : r.detail}`
+      : r.detail;
+    const what = `${marker}${r.what}`;
+    const raw = `${r.failed ? '✗ ' : ''}${r.what}`;
+    return `${INDENT.repeat(2)}${pad(r.turn, turnW, bold, 'right')}  ${what}${' '.repeat(Math.max(0, whatW - raw.length))}  ${detail}`.trimEnd();
+  });
+
   const hidden = f.evidence.length - shown.length;
   if (hidden > 0) {
-    out.push(`${INDENT.repeat(3)}      … ${hidden} more turn(s) — see \`agentsensei skeleton\``);
+    out.push(`${INDENT.repeat(2)}${' '.repeat(turnW)}  ${dim(`… ${hidden} more — agentsensei skeleton`)}`);
   }
-  return out;
-}
-
-/** The reason tally as advice lines, widest reason name first for alignment. */
-function adviceLines(f: Finding): string[] {
-  const reasons = Object.entries(f.reasons ?? {});
-  if (reasons.length === 0) return [`${INDENT.repeat(2)}(reason unknown)`];
-  const width = Math.max(...reasons.map(([k]) => k.length));
-  return reasons
-    .sort((a, b) => b[1] - a[1])
-    .map(([reason, n]) => {
-      const advice = adviceFor(reason as Reason) ?? '';
-      const count = n > 1 ? ` ×${n}` : '';
-      return `${INDENT.repeat(2)}${reason.padEnd(width)}${count}  ${advice}`;
-    });
+  return [...out, ''];
 }
 
 /**
- * A readable headline for a finding whose subject is a digest.
+ * One evidence row, split into its two columns.
  *
- * A detector cannot read a command, so `redundant_call` names a Bash run
- * `Bash #8e0f94` — correct as identity and useless as a headline. The renderer
- * *may* read it, so it substitutes the command from the first cited turn while
- * keeping the digest, which is what the finding is actually keyed on.
+ * **The subject is not repeated.** A finding about one file printed that path in
+ * the header and again on every tool row — seven times in the block this was
+ * written against. The path still shows when a row touches a *different* file,
+ * which is the case where it carries information.
+ */
+function turnColumns(e: Event, subject: string): { what: string; detail: string } {
+  switch (e.turnType) {
+    case 'tool_use': {
+      const target = e.filePath ?? e.pattern ?? e.command ?? '';
+      const same = target !== '' && (subject === target || subject.endsWith(target));
+      return {
+        what: e.toolName ?? 'tool',
+        detail: same || target === '' ? '' : shortenPath(target.replace(/\s+/g, ' '), 40),
+      };
+    }
+    case 'tool_result': {
+      if (e.isError !== true) return { what: 'ok', detail: '' };
+      const reason = reasonOf(e);
+      if (reason !== undefined) return { what: 'refused', detail: reason };
+      const raw = (e.textSummary ?? '').replace(/\s+/g, ' ').replace(/^<tool_use_error>/, '');
+      return { what: 'failed', detail: raw.slice(0, 40) };
+    }
+    case 'user_prompt':
+      return { what: 'you', detail: '' };
+    case 'assistant_msg':
+      return { what: 'assistant', detail: '' };
+    default:
+      return { what: e.turnType, detail: '' };
+  }
+}
+
+/** The reason tally as advice lines, widest reason name first for alignment. */
+/**
+ * How a finding's subject is named.
+ *
+ * A path shows as a path. A digest-suffixed subject — which is what
+ * `redundant_call` produces when there is no readable target — is replaced by
+ * the command itself, read from the evidence. Allowed here and nowhere else:
+ * this is the display tier.
  */
 export function headlineFor(f: Finding, byUuid: Map<string, Event>): string {
   const digest = /#[0-9a-f]{4,}$/.exec(f.subject);
@@ -226,18 +290,42 @@ export function headlineFor(f: Finding, byUuid: Map<string, Event>): string {
   return `${shortenPath(first.command.replace(/\s+/g, ' '), 56)}  ${digest[0]}`;
 }
 
+/** The reason tally, reason column aligned so the dominant one is scannable. */
+function adviceLines(f: Finding): string[] {
+  const reasons = Object.entries(f.reasons ?? {});
+  if (reasons.length === 0) return [`${INDENT.repeat(2)}${dim('(reason unknown)')}`, ''];
+  const sorted = reasons.sort((a, b) => b[1] - a[1]);
+  const width = Math.max(...sorted.map(([k, n]) => k.length + (n > 1 ? String(n).length + 2 : 0)));
+  const out = sorted.map(([reason, n]) => {
+    const count = n > 1 ? ` ×${n}` : '';
+    const raw = `${reason}${count}`;
+    // The reason is the finding's own label; the advice beside it is guidance,
+    // so it is dimmed. Keeps the eye on which reason dominated.
+    return `${INDENT.repeat(2)}${pad(raw, width, (t) => t.replace(count, dim(count)))}  ${dim(adviceFor(reason as Reason) ?? '')}`.trimEnd();
+  });
+  return [...out, ''];
+}
+
 export function renderFinding(
   f: Finding,
   byUuid: Map<string, Event> = new Map(),
   events: Event[] = [],
 ): string[] {
   const times = f.occurrences > 1 ? ` ×${f.occurrences}` : '';
+  const head =
+    `${INDENT}${bold(f.dimension)}${times === '' ? '' : dim(times)}` +
+    `  ${green(`[${f.confidence}]`)}`;
+
   return [
-    `${INDENT}⚑ ${f.dimension}${times}   [${f.confidence}]`,
-    `${INDENT.repeat(2)}${headlineFor(f, byUuid)}`,
+    head,
+    `${INDENT}${rule(WIDTH)}`,
+    // The cost sits directly under the header because it is the "so what".
+    // Before, it was the last thing in the block — below six evidence rows —
+    // which buried the one number a reader is most likely to act on.
+    ...costLines(f, events),
+    `${INDENT}${yellow(headlineFor(f, byUuid))}`,
     ...adviceLines(f),
     ...evidenceLines(f, byUuid),
-    ...costLines(f, events),
   ];
 }
 
@@ -259,26 +347,25 @@ export function costLines(f: Finding, events: Event[]): string[] {
   const c = costFor(events, { dimension: f.dimension, subject: f.subject });
   if (c.written + c.received === 0) return [];
 
-  const head =
-    c.received > 0
-      ? `${approx(c.written)} tokens written and discarded, ${approx(c.received)} received`
-      : `${approx(c.written)} tokens written and discarded`;
-  const out = [`${INDENT.repeat(2)}cost  ${head}`];
+  // `[figure, label, note]`, so the figures share one right-aligned column and
+  // compare at a glance. Rows with nothing to report are dropped rather than
+  // printed as zero.
+  const rows: [string, string, string][] = [[approx(c.written), 'tokens written and discarded', '']];
+  if (c.received > 0) rows.push([approx(c.received), 'received back', '']);
   if (c.carriedTurns > 0) {
-    // **"cheapest tier" is not editorial, it is the thing that stops the big
-    // number being misread.** The carried figure is hundreds of times the
-    // written one, and a reader with no reason to know that cache reads bill at
-    // roughly a tenth of fresh input would take it as the headline. Measured on
-    // real sessions: 98% of context tokens are cache reads.
-    out.push(
-      // "requests", not "turns": the turn numbers above are seqs, and this
-      // counts API calls, which is a different unit. Using one word for both
-      // would invite the reader to compare them.
-      `${INDENT.repeat(2)}      re-sent on ${c.carriedTurns} later request${c.carriedTurns === 1 ? '' : 's'}:` +
-        ` ${approx(c.carried)} cache reads (0.1x input)`,
-    );
+    rows.push([
+      approx(c.carried),
+      `cache reads over ${c.carriedTurns} request${c.carriedTurns === 1 ? '' : 's'}`,
+      '0.1× input',
+    ]);
   }
-  return out;
+
+  const w = Math.max(...rows.map(([n]) => n.length));
+  const out = rows.map(
+    ([n, label, note]) =>
+      `${INDENT.repeat(2)}${pad(n, w, bold, 'right')}  ${label}${note === '' ? '' : `  ${dim(note)}`}`,
+  );
+  return [...out, ''];
 }
 
 /**
@@ -297,16 +384,22 @@ export function renderCost(d: Denominators, stats?: SessionStats): string[] {
   const { output, cacheCreation } = d.tokens;
   if (output === 0 && cacheCreation === 0) return [];
 
-  const parts = [`${human(output)} out`, `${human(cacheCreation)} re-ingested`];
+  const parts = [
+    `${bold(human(output))} ${dim('out')}`,
+    `${bold(human(cacheCreation))} ${dim('re-ingested')}`,
+  ];
   if (output > 0) {
     const ratio = cacheCreation / output;
     const where =
       ratio >= CORPUS.reingestP90
         ? `at or above the corpus 90th percentile of ${CORPUS.reingestP90.toFixed(1)}`
         : `corpus median ${CORPUS.reingestP50.toFixed(1)}`;
-    parts.push(`ratio ${ratio.toFixed(1)} (${where})`);
+    parts.push(`${dim('ratio')} ${bold(ratio.toFixed(1))} ${dim(`(${where})`)}`);
   }
-  const out = [`${INDENT}SESSION COST`, `${INDENT.repeat(2)}${parts.join(' · ')}`];
+  const out = [
+    `${INDENT}${dim('SESSION COST')}`,
+    `${INDENT.repeat(2)}${parts.join(dim(' · '))}`,
+  ];
 
   // The anchored half. Measured: half a session's re-ingestion comes from 6% of
   // its turns, so naming the heaviest few is a ranking rather than a threshold.
@@ -314,7 +407,8 @@ export function renderCost(d: Denominators, stats?: SessionStats): string[] {
   if (heaviest.length > 1 && stats !== undefined && stats.reingest.share > 0) {
     const turns = heaviest.map((t) => t.seq).join(', ');
     out.push(
-      `${INDENT.repeat(2)}heaviest at turns ${turns} — ${Math.round(stats.reingest.share * 100)}% of it`,
+      `${INDENT.repeat(2)}${dim('heaviest at turns')} ${bold(turns)} ${dim('—')} ` +
+        `${bold(`${Math.round(stats.reingest.share * 100)}%`)} ${dim('of it')}`,
     );
   }
   return out;
@@ -334,17 +428,17 @@ export function renderRewritten(stats: SessionStats, max = 4): string[] {
   const shown = stats.rewritten.slice(0, max);
   if (shown.length === 0) return [];
   const width = Math.max(...shown.map((f) => String(f.versions).length));
-  const lines = [`${INDENT}MOST REWRITTEN`];
+  const lines = [`${INDENT}${dim('MOST REWRITTEN')}`];
   for (const f of shown) {
     const via =
       f.editCalls === 0 ? 'no edit-tool calls' : `${f.editCalls} edit call${f.editCalls === 1 ? '' : 's'}`;
     lines.push(
-      `${INDENT.repeat(2)}${String(f.versions).padStart(width)} versions  ` +
-        `${shortenPath(f.path, 42).padEnd(42)} ${via}`,
+      `${INDENT.repeat(2)}${pad(String(f.versions), width, bold, 'right')} ${dim('versions')}  ` +
+        `${pad(shortenPath(f.path, 42), 42, yellow)} ${dim(via)}`,
     );
   }
   const hidden = stats.rewritten.length - shown.length;
-  if (hidden > 0) lines.push(`${INDENT.repeat(2)}… ${hidden} more`);
+  if (hidden > 0) lines.push(`${INDENT.repeat(2)}${dim(`… ${hidden} more`)}`);
   return lines;
 }
 
@@ -370,7 +464,7 @@ export function render(input: RenderInput): string {
       '',
     );
   } else {
-    for (const f of findings) lines.push(...renderFinding(f, byUuid, input.events), '');
+    for (const f of findings) lines.push(...renderFinding(f, byUuid, input.events));
   }
 
   const stats = sessionStats(input.events);

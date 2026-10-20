@@ -48,8 +48,14 @@ allowed-tools: Bash(${nodePath}:*)
 
 !\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts now\`
 
-Show the output above exactly as it is, with no summary and no commentary.
-It is evidence; paraphrasing it defeats the point.
+Reproduce the output above in a code block, preserving every line, number and
+column exactly. Add no summary and no commentary: it is evidence, and
+paraphrasing it defeats the point.
+
+You may bold the figures — token counts, turn numbers, percentages — and
+nothing else. The command cannot colour its own output on this path, because
+it is piped to you rather than written to a terminal, so this is the only
+emphasis the reader gets.
 `;
 }
 
@@ -69,7 +75,9 @@ allowed-tools: Bash(${nodePath}:*)
 
 !\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts fix\`
 
-Show the recommendation above exactly as it is.
+Reproduce the recommendation above in a code block, preserving every line and
+figure exactly. You may bold the figures and nothing else — the command cannot
+colour its own output when piped to you.
 
 Then ASK whether to adopt it for the rest of this session. Do not adopt it,
 act on it, or change how you work until the answer is yes.

@@ -36,6 +36,7 @@
 import type { Standing } from './standing.ts';
 import { reasonLabel } from './report-line.ts';
 import { approx } from './cost.ts';
+import { bold, cyan, dim, green, pad, rule, yellow } from './style.ts';
 
 export type ArtifactKind = 'GUARD' | 'PROMPT' | 'MEMORY' | 'REPORT';
 
@@ -193,54 +194,77 @@ export function recommend(s: Standing | undefined): Recommendation | undefined {
  */
 export function renderFix(r: Recommendation | undefined, preset: string, muted: string[] = []): string {
   const lines: string[] = [];
+  const W = 68;
 
   if (r === undefined) {
-    lines.push('nothing to recommend yet.');
-    lines.push('  no findings in your history, or no standing computed — run `standing --refresh`.');
+    lines.push(dim('nothing to recommend yet.'));
+    lines.push(
+      `  ${dim('no findings in your history, or no standing computed — run `standing --refresh`.')}`,
+    );
     return lines.join('\n');
   }
 
-  lines.push(`one thing to try · ${r.dimension} · ${r.kind}`, '');
-  for (const [i, l] of wrap(r.evidence, 56).entries()) {
-    lines.push(`  ${i === 0 ? 'measured  ' : '          '} ${l}`);
-  }
-  for (const [i, l] of wrap(r.because, 56).entries()) {
-    lines.push(`  ${i === 0 ? 'because   ' : '          '} ${l}`);
-  }
+  // The header names the dimension and the artifact kind. The kind is the
+  // strongest thing on the line because it says what you are being handed —
+  // a prompt to paste, a rule to keep, or a figure and no artifact at all.
+  lines.push(
+    '',
+    `  ${dim('one thing to try')}  ${yellow(r.dimension)}  ${green(`[${r.kind}]`)}`,
+    `  ${rule(W)}`,
+    '',
+  );
+
+  // `measured` / `because` / `cost` share a label column, so the three read as
+  // one block rather than three sentences. The cost is last because it is the
+  // consequence of the two above it.
+  const field = (label: string, text: string, style: (t: string) => string = (t) => t): void => {
+    for (const [i, l] of wrap(text, 54).entries()) {
+      lines.push(`  ${pad(i === 0 ? label : '', 10, dim)} ${style(l)}`);
+    }
+  };
+
+  field('measured', r.evidence);
+  field('because', r.because);
   if (r.cost !== undefined) {
-    // Scoped to this reason, not the dimension — the other reasons need a
-    // different change, so their cost is not what adopting this would recover.
-    lines.push(`  cost       ${approx(r.cost.written)} tokens written and discarded`);
+    // Bold on the figure only: the sentence around it is context, the number is
+    // the thing worth carrying away.
+    lines.push(
+      `  ${pad('cost', 10, dim)} ${bold(`${approx(r.cost.written)} tokens`)} ${dim('written and discarded')}`,
+    );
   }
   lines.push('');
 
   if (r.prompt !== undefined) {
-    lines.push('  for this session — paste or adopt:', '');
-    for (const l of wrap(r.prompt, 62)) lines.push(`      ${l}`);
+    lines.push(`  ${cyan('▸')} ${dim('for this session — paste or adopt')}`, '');
+    for (const l of wrap(r.prompt, 60)) lines.push(`      ${l}`);
     lines.push('');
   }
   if (r.memory !== undefined) {
-    lines.push('  to make it stick, add to CLAUDE.md:', '');
+    lines.push(`  ${cyan('▸')} ${dim('to make it stick, add to CLAUDE.md')}`, '');
     lines.push(`      ${r.memory}`, '');
   }
   if (r.kind === 'REPORT') {
-    lines.push('  no artifact for this one — the cost is stated, and that is all.', '');
+    lines.push(`  ${dim('no artifact for this one — the cost is stated, and that is all.')}`, '');
   }
 
   // The honesty note the design requires: adopting a brief changes the session
   // being measured, so the next report cannot call it an improvement.
   if (r.prompt !== undefined) {
-    lines.push(
-      '  note: adopting this changes the session it is measuring, so this',
-      '        dimension will read as suppressed rather than improved until',
-      '        you drop it again.',
-      '',
-    );
+    for (const l of wrap(
+      'adopting this changes the session it is measuring, so this dimension will read as suppressed rather than improved until you drop it again.',
+      62,
+    )) {
+      lines.push(`  ${dim(l)}`);
+    }
+    lines.push('');
   }
 
   // Say what it chose from. One live detector would otherwise read as "there is
   // only one thing you could improve".
-  lines.push(`  chosen from preset "${preset}"${muted.length > 0 ? ` · muted: ${muted.join(', ')}` : ''}`);
+  lines.push(
+    `  ${rule(W)}`,
+    `  ${dim(`chosen from preset "${preset}"${muted.length > 0 ? ` · muted: ${muted.join(', ')}` : ''}`)}`,
+  );
   return lines.join('\n');
 }
 

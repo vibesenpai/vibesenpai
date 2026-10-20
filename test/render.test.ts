@@ -108,8 +108,14 @@ describe('render — evidence is checkable in place', () => {
       sessionId: 'abcdef1234',
       events: [edit, refused, retry],
     });
-    expect(out).toContain('turn    10');
-    expect(out).toContain('Edit');
+    // The turn number and what happened there, in aligned columns. The `turn `
+    // prefix was dropped: it repeated on every row and bought nothing a column
+    // header does not.
+    expect(out).toContain('10  Edit');
+    expect(out).toContain('refused');
+    // The subject is in the header, so an evidence row touching that same path
+    // does not repeat it — this block would otherwise print it three times.
+    expect(out.match(/\/repo\/src\/api\.ts/g)).toHaveLength(1);
     expect(out).toContain('refused');
     expect(out).toContain('not-read-first');
   });
