@@ -86,89 +86,51 @@ contract, which is the harness being awkward to work in.
 
 That last row is the label tier working as designed: reword a message and the detection is unaffected.
 
-### `redundant_call` — the same call, the same answer
+### `redundant_call` — same call, same answer, nothing changed between
 
-`RULE+T` · conf **`certain`** (or `high`) · scope `thread` · per-tool-call · **standard**
+`RULE+T` · conf **`certain`** (or `high`) · scope `session` · per-tool-call · **standard**
 
-| measured | |
-|---|---|
-| sessions with a finding | **0.4%** — 5 across 1,139 |
-| hand-verified | **5 of 5**, zero false positives |
+Groups by `toolName | argHash | outHash` across the **whole session** — the
+layer the question belongs at, since a call is redundant with respect to a
+session rather than to one actor's slice of it. That also means two actors
+making the same call is visible, which a thread-scoped rule could not see.
 
-**Kept on precision, not frequency.** The rarest thing here and the only one
-that has never been wrong: five identical typechecks with nothing between them,
-four identical `TodoWrite`s, three identical greps, three identical
-`go generate` runs. A rare detector that never cries wolf is worth more than a
-frequent one that needs defending. It ships in `standard`, not `core`, for the
-same reason — at 0.4% it is not a first impression.
-
-Seven guards, each a measured false positive from its first life as `tool_loop`:
-`argHash` not individual fields (16 of 19 runs were different calls that looked
-identical), `outHash` not `textSummary` (59.9% of results hit the 200-char cap,
-so summaries compared prefixes), counts preserved by the normaliser
-(`3 failed → 2 → 1` once read as a loop), polling tools excluded by name, and an
-argument-less call, an edit, or a new instruction each breaking the run.
-
-**The truncation downgrade fires.** `Event.truncatesOwnOutput` is set in the
-parser when a pipeline ends in `head` or `tail`, and the one finding that hit it
-— `npx tsc --noEmit 2>&1 | head -30` ×5 — came back `high` rather than
-`certain`, because the digest compared a prefix. Honest limit: `sed -n`,
-`awk NR<`, `cut` and a bare `| less` go undetected and stay `certain`. A
-narrower claim than `failureKind`, whose envelope set is genuinely closed.
-
-## What each detector shows, and where
-
-Three levels. Nothing appears at a level it cannot justify, and **L1 opens every
-session**, so anything not worth reading every single time belongs lower down.
-
-| | **L1** session start (`systemMessage`) | **L2** `now` / `standing` |
-|---|---|---|
-| `edit_retry` | `3 edits refused then retried` + a reason line | path, per-reason advice, evidence turns |
-| `redundant_call` | `4 identical calls repeated, same answer` | command, the repeated turns |
-| context cost | `context re-ingested 7.4× output (median 12.0)` | + the heaviest turns, by seq |
-| file churn | **never** | `MOST REWRITTEN`, versions and edit calls |
+**Aggregation alone is 93% wrong.** Three guards do the work:
 
 ```
-SessionStart:startup says:
-
-agentsensei report · your last 5 sessions
-  4 edits were rejected and retried, across 3 files
-     most often rosy-seeking-feather.md
-     2  the text didn't match
-     2  the file wasn't read first
-  /agentsensei for the exact turns
+  298  raw groups of 3+ identical calls with identical output
+ -278  an EDIT between first and last   ← re-running after a change
+ -  7  a USER PROMPT between            ← new instruction
+ -  7  median gap >= 60s                ← waiting, not looping
+ ----
+    6  findings, all hand-read
 ```
 
-Rules, each one something that would otherwise go wrong:
+The **edit guard** carries the most weight by far. `npm test` → fail → edit →
+`npm test` → same failure is the agent trying a fix that did not work; that is
+`fail_fix_fail`, and calling it redundant would be wrong about the only thing
+that matters — whether the repeat was informed.
 
-- **It starts on its own line.** The harness prefixes the block with
-  `SessionStart:startup says:`, and without a leading newline the first line
-  read "says: agentsensei · …".
-- **It names the worst file.** The first person to read it asked "4 *what*
-  edits?". One name answers that; the rest stays a count, so the block is a
-  fixed height however many files are involved.
-- **A clean history prints one line, not silence:** `… · nothing to flag across
-  174 edits`. Silence reads as broken; inventing a finding is worse than either.
-- **Reason keys become clauses** — `not-read-first` → `the file wasn't read
-  first`. The key is an identifier, not language.
-- **The cost line appears only when unusual**, as a sentence. It used to print
-  `context re-ingested 7.2× output (median 12.0)` every session; the person who
-  built the metric could not read it, and below the threshold it said "you are
-  normal" forever. Its presence is now the signal.
-- **The detail line names a command that exists.** `/agentsensei` when the
-  command file is installed, the working `node …` form when it is not — checked,
-  never assumed.
-- **Every line fits in ~70 columns.** An earlier version ran to 87 and wrapped.
-- **No imperative verb, no severity word.** Advice lives at L2, where there is
-  room to show the evidence that justifies it.
-- **Capped at two dimensions**, with the rest counted. More is a wall of opening
-  text every session.
-- **Never a score, total or grade.** `test/report-line.test.ts` asserts it, along
-  with the absence of `cacheRead` and of file churn.
+The **gap guard is the one threshold in the detector**, and it exists because
+polling is usually written `sleep 60 && <command>`, which a detector may not
+read. Timestamps are structural, and the populations separate on them:
 
-**Churn is absent from L1** because it correlates with friction at 15% against a
-9% base rate. **Cost is present** because it has a published distribution, so
-`7.4× (median 12.0)` is a statement with a reference point rather than a number.
+```
+  72s  sleep 60 && echo "Poll time"        x8    ← waiting
+  66s  sleep 60 && gh api .../reviews      x9    ← waiting
+  ───────────────────────────────────────────── 60s
+  17s  go generate                         x3    ← real
+   9s  npx tsc --noEmit | head -30         x5    ← real
+   2s  Read, same file                     x3    ← real
+```
+
+**What the change cost, stated:** the previous consecutive-run version found 5;
+this finds 6, gaining repeats spread across a session (`Bash` ×10, 32s apart)
+and losing a `TodoWrite` ×3 at a 207s gap that the guard reads as waiting.
+
+**Its known hole** is unchanged: a self-truncating command (`| head -30`) throws
+its own output away upstream of us, so `outHash` compares a prefix. That
+downgrades `certain` → `high`, never suppresses.
 
 ## Reported as metadata, not as findings
 
@@ -223,7 +185,6 @@ asserts it never reaches the output.
 
 | dimension | measured | why not |
 |---|---|---|
-| `reading_spiral` | 51% of sessions, 2,182 instances | the largest number here and the least trustworthy: a parallel fan-out legitimately re-reads, sidechains are not excluded, and its setA/setB gap is the widest in the table (62% vs 37%). Needs the sidechain split before the number means anything |
 | `permission_denied` | 20%, 443 instances | structural at last, via `failureKind` — but **declining is the person exercising control.** It is not obvious this should ever be surfaced, and "frequent and detectable" is not a reason to ship |
 | `user_correction` | SWE-chat labels 4,664 corrections (39% of annotated prompts) | needs parser work first: `summarise()` caps text at 200 chars and **40% of prompts hit the cap**, so a correction at the end of a long prompt is invisible. Also an *anchor*, never surfaced alone — correcting is normal and healthy |
 | `user_interrupt` | — | the published 64% was wrong: **3,504 of 3,606 enqueues sit at a turn boundary** and 1,858 are `<task-notification>`. Needs a real mid-action signal first |

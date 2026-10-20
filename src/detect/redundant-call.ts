@@ -1,49 +1,37 @@
 /**
- * `redundant_call` — the same call, repeated, returning the same answer.
+ * `redundant_call` — the same call, the same answer, and nothing changed between.
  *
  * `RULE+T` · conf `certain` (or `high`) · lower-is-better · standard
  *
+ * ── Aggregation, not consecutive runs ──────────────────────────────────────
+ *
+ * An earlier version walked each thread looking for *consecutive* identical
+ * calls. That was sound and too narrow: it could not see a call repeated five
+ * times across a session with other work in between, and being thread-scoped it
+ * could not see two actors making the same call at all.
+ *
+ * This groups by `toolName | argHash | outHash` across the **whole session**,
+ * which is the layer the question belongs at — a call is redundant with respect
+ * to a session, not to one actor's slice of it.
+ *
+ * ── Measured: aggregation alone is 93% wrong ───────────────────────────────
+ *
+ * Over 1,139 real sessions the raw grouping finds 298 groups. Three guards cut
+ * it to 9, and each one is carrying real weight:
+ *
  * ```
- * Bash: npx tsc --noEmit  → 30 lines
- * Bash: npx tsc --noEmit  → the same 30 lines
- * Bash: npx tsc --noEmit  → the same 30 lines
+ *   298  raw groups of 3+ identical calls with identical output
+ *  -278  an EDIT happened between first and last   <- re-running after a change
+ *  -  7  a USER PROMPT happened between            <- new instruction
+ *  -  4  median gap >= 60s                         <- polling
+ *  ----
+ *     9  findings
  * ```
  *
- * ── Kept on precision, not frequency ───────────────────────────────────────
- *
- * This fires on **0.4% of sessions** — 5 findings across 1,139. It earns its
- * place because all five survived hand-inspection: five identical typechecks
- * with nothing between them, four identical `TodoWrite`s, three identical greps.
- * A detector that is rare and never wrong is worth more than a frequent one
- * that needs defending, which is the lesson of everything in `GRAVEYARD.md`.
- *
- * It ships in `standard` rather than `core` for the same reason it is worth
- * having: at 0.4% it is not what a first-time reader should be shown first.
- *
- * ── Every guard here cost a false positive ─────────────────────────────────
- *
- * This is a rebuild of `tool_loop`, and the guards are not optional — each one
- * is a measured failure from its first life:
- *
- * 1. **Key on `argHash`**, the digest of the call's *full* arguments, never on
- *    `command`/`filePath`/`pattern`. Those three fields cover Bash, Read, Edit
- *    and Grep and nothing else, so comparing them produced 19 runs of which
- *    **16 were different calls that merely looked identical** — six separate
- *    tasks and seven separate subagents, all reported at `certain`.
- * 2. **The output must match too**, via `outHash` over the full normalised
- *    output and not `textSummary`: the summary caps at 200 characters and
- *    **59.9% of real results hit that cap**, so comparing summaries compared
- *    prefixes, and two different failures sharing an opening line looked equal.
- * 3. **A missing digest is not a match.** `outHash` is absent when output was
- *    empty or uncapturable, and `unknown` beats guessing.
- * 4. **Polling tools are not loops.** `BashOutput` returning `running` three
- *    times is identical output and correct use. This was the *only* finding the
- *    first version produced across 227 sessions, and it was wrong.
- * 5. **An argument-less call cannot be compared**, so it breaks the run rather
- *    than matching — assuming two such calls are the same was the most common
- *    false positive measured.
- * 6. **An edit breaks the run.** Something changed, so the next call is informed.
- * 7. **A new instruction breaks the run.** Whatever follows belongs to it.
+ * **The edit guard is the big one.** `npm test` → fail → edit → `npm test` →
+ * same failure is the agent trying a fix that did not work. That is
+ * `fail_fix_fail`, and calling it a redundant call would be wrong about the one
+ * thing that matters: whether the repeat was informed.
  */
 
 import { EDIT_TOOLS } from '../edits.ts';
@@ -54,101 +42,147 @@ import type { Detector, DetectorContext } from './types.ts';
 export const DEFAULT_MIN_REPEATS = 3;
 
 /**
+ * A repeat slower than this is waiting, not looping.
+ *
+ * **A threshold, and the only one in the detector — so here is where it comes
+ * from.** Polling is the false positive aggregation introduces, and it is
+ * mostly written as `sleep 60 && <command>`, which a detector may not read.
+ * Timestamps are structural, and the two populations separate cleanly on them:
+ *
+ * ```
+ *   72s  sleep 60 && echo "Poll time"          x8
+ *   66s  sleep 60 && gh api .../reviews        x9
+ *   64s  sleep 60 && gh run view <id>          x4
+ *   ----------------------------------------------- 60s
+ *   17s  go generate                           x3
+ *    9s  npx tsc --noEmit | head -30           x5
+ *    4s  Grep, same file                       x3
+ *    2s  Read, same file                       x3
+ * ```
+ *
+ * The polls cluster above because `sleep 60` is the idiom; real repeats are
+ * seconds apart. Measured on the median gap, not the mean, so one long pause in
+ * an otherwise tight run does not excuse it.
+ */
+export const POLL_GAP_SECONDS = 60;
+
+/**
  * Tools whose whole purpose is to report current state.
  *
- * A closed, harness-owned list — the kind D31 permits — and distinct from the
- * output-identity guard: a poll that keeps returning `running` *is* identical
- * output, so only the tool's semantics separate it from a genuine loop.
+ * Kept even though the gap rule catches most polling: `BashOutput` on a
+ * finished job can return instantly and identically, so the name is the only
+ * thing separating it from a loop. Closed and harness-owned, which is the kind
+ * of list D31 permits.
  */
 export const POLLING_TOOLS = new Set(['BashOutput', 'TaskOutput', 'Monitor', 'ListAgents']);
 
-/** What makes two calls the same call. Undefined when they cannot be compared. */
-export function signatureOf(e: StructuralEvent): string | undefined {
-  if (e.turnType !== 'tool_use') return undefined;
-  if (e.argHash === undefined) return undefined;
-  return `${e.toolName ?? 'unknown'}|${e.argHash}`;
+/** What makes two calls the same call *and* the same answer. */
+function keyOf(call: StructuralEvent, outHash: string): string {
+  return `${call.toolName ?? 'unknown'}|${call.argHash ?? ''}|${outHash}`;
 }
 
-type Run = {
-  signature: string;
+export type RepeatGroup = {
+  key: string;
   calls: StructuralEvent[];
-  outputs: (string | undefined)[];
-  /** Any call in the run clipped its own output before we saw it. */
+  /** Median seconds between consecutive calls, or undefined when untimed. */
+  medianGap?: number;
+  /** Any call in the group clipped its own output before we saw it. */
   truncated: boolean;
 };
 
-/** Group a span's events into runs of consecutive identical calls. */
-export function runsOf(events: StructuralEvent[]): Run[] {
-  const runs: Run[] = [];
-  let current: Run | undefined;
-
-  const flush = (): void => {
-    if (current !== undefined && current.calls.length > 1) runs.push(current);
-    current = undefined;
-  };
-
-  for (const e of [...events].sort((a, b) => a.seq - b.seq)) {
-    switch (e.turnType) {
-      case 'tool_use': {
-        // An edit means state changed, so a repeat after it is informed — that
-        // is the `fail_fix_fail` shape, not a loop.
-        if (EDIT_TOOLS.has(e.toolName ?? '') || POLLING_TOOLS.has(e.toolName ?? '')) {
-          flush();
-          break;
-        }
-        const sig = signatureOf(e);
-        if (sig === undefined) {
-          flush();
-          break;
-        }
-        if (current !== undefined && current.signature === sig) {
-          current.calls.push(e);
-          if (e.truncatesOwnOutput === true) current.truncated = true;
-        } else {
-          flush();
-          current = {
-            signature: sig,
-            calls: [e],
-            outputs: [],
-            truncated: e.truncatesOwnOutput === true,
-          };
-        }
-        break;
-      }
-
-      // Recorded, not a break: the answers are how we tell a loop from a
-      // sequence that was learning something.
-      case 'tool_result':
-        if (current !== undefined) current.outputs.push(e.outHash);
-        break;
-
-      // Prose between retries is not a state change. "Let me try that again"
-      // does not make the second attempt informed.
-      case 'assistant_msg':
-        break;
-
-      case 'user_prompt':
-        flush();
-        break;
-
-      default:
-        break;
-    }
-  }
-  flush();
-  return runs;
+/** Median, which is what a single long pause must not move. */
+function median(xs: number[]): number | undefined {
+  if (xs.length === 0) return undefined;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
 }
 
 /**
- * Did every call in the run come back the same?
+ * Group a session's calls by identity *and* answer.
  *
- * Identical output, not merely "not all different" — the weaker test fired on
- * `[FAIL, FAIL, OK]`, a run whose last call plainly returned something new.
+ * Exported so `scripts/measure-dimensions.ts` drives the detector's own logic
+ * rather than a lookalike — a probe looser than its detector hides exactly the
+ * disagreement worth knowing about.
  */
-export function sameAnswerThroughout(outputs: (string | undefined)[], calls: number): boolean {
-  if (outputs.length < calls) return false; // a result we never saw
-  if (outputs.some((o) => o === undefined)) return false; // nothing to compare
-  return new Set(outputs).size === 1;
+export function repeatGroups(events: StructuralEvent[]): RepeatGroup[] {
+  const sorted = [...events].sort((a, b) => a.seq - b.seq);
+
+  // A result names the call it answered, so identity can include the answer.
+  const callById = new Map<string, StructuralEvent>();
+  for (const e of sorted) {
+    if (e.turnType === 'tool_use' && e.toolCallId !== undefined && e.argHash !== undefined) {
+      callById.set(e.toolCallId, e);
+    }
+  }
+
+  const groups = new Map<string, StructuralEvent[]>();
+  for (const e of sorted) {
+    if (e.turnType !== 'tool_result' || e.toolCallId === undefined) continue;
+    // A missing digest is not a match: `outHash` is absent when output was
+    // empty or uncapturable, and `unknown` beats guessing.
+    if (e.outHash === undefined) continue;
+    const call = callById.get(e.toolCallId);
+    if (call === undefined) continue;
+    if (POLLING_TOOLS.has(call.toolName ?? '')) continue;
+
+    const k = keyOf(call, e.outHash);
+    const list = groups.get(k);
+    if (list === undefined) groups.set(k, [call]);
+    else list.push(call);
+  }
+
+  const out: RepeatGroup[] = [];
+  for (const [key, calls] of groups) {
+    if (calls.length < 2) continue;
+    calls.sort((a, b) => a.seq - b.seq);
+    const gaps: number[] = [];
+    for (let i = 1; i < calls.length; i++) {
+      const a = Date.parse((calls[i - 1] as StructuralEvent).ts ?? '');
+      const b = Date.parse((calls[i] as StructuralEvent).ts ?? '');
+      if (Number.isFinite(a) && Number.isFinite(b)) gaps.push((b - a) / 1000);
+    }
+    const gap = median(gaps);
+    out.push({
+      key,
+      calls,
+      ...(gap !== undefined ? { medianGap: gap } : {}),
+      truncated: calls.some((c) => c.truncatesOwnOutput === true),
+    });
+  }
+  return out;
+}
+
+/**
+ * Did anything happen between the first and last call that justifies a repeat?
+ *
+ * An **edit** means state changed, so re-running is informed — that is the
+ * `fail_fix_fail` shape and it accounts for 278 of 298 raw groups. A **user
+ * prompt** is a new instruction, so whatever follows belongs to it.
+ */
+export function somethingChangedBetween(
+  events: StructuralEvent[],
+  from: number,
+  to: number,
+): boolean {
+  return events.some((e) => {
+    if (e.seq <= from || e.seq >= to) return false;
+    if (e.turnType === 'user_prompt') return true;
+    return e.turnType === 'tool_use' && EDIT_TOOLS.has(e.toolName ?? '');
+  });
+}
+
+/** Is this group a genuine repeat rather than a wait or an informed retry? */
+export function isRedundant(
+  g: RepeatGroup,
+  events: StructuralEvent[],
+  minRepeats = DEFAULT_MIN_REPEATS,
+): boolean {
+  if (g.calls.length < minRepeats) return false;
+  const first = g.calls[0] as StructuralEvent;
+  const last = g.calls[g.calls.length - 1] as StructuralEvent;
+  if (somethingChangedBetween(events, first.seq, last.seq)) return false;
+  if (g.medianGap !== undefined && g.medianGap >= POLL_GAP_SECONDS) return false;
+  return true;
 }
 
 export type RedundantCallOptions = { minRepeats?: number };
@@ -158,9 +192,10 @@ export function redundantCall(opts: RedundantCallOptions = {}): Detector {
 
   return {
     dimension: 'redundant_call',
-    // Thread, not session: another actor's call spliced between two identical
-    // ones makes them non-consecutive, and a subagent's repeats are its own.
-    scope: 'thread',
+    // Session, not thread. A call is redundant with respect to the session —
+    // and two actors making the same call is a question only this scope can
+    // ask. Aggregation needs no ordering, so interleaving costs nothing.
+    scope: 'session',
     polarity: 'lower-is-better',
     confidence: 'certain',
     method: 'RULE+T',
@@ -169,23 +204,21 @@ export function redundantCall(opts: RedundantCallOptions = {}): Detector {
     preset: 'standard',
 
     describe(subject, occurrences) {
-      return `${subject} ran ${occurrences}× with nothing changed and the same answer`;
+      return `${subject} ran ${occurrences}× with the same answer and nothing changed between`;
     },
 
     async detect(ctx: DetectorContext): Promise<Candidate[]> {
       const out: Candidate[] = [];
 
-      for (const run of runsOf(ctx.events)) {
-        if (run.calls.length < minRepeats) continue;
-        if (!sameAnswerThroughout(run.outputs, run.calls.length)) continue;
+      for (const g of repeatGroups(ctx.events)) {
+        if (!isRedundant(g, ctx.events, minRepeats)) continue;
 
         // A clipped output means the digest compared a prefix, so "the same
-        // answer" is a weaker claim. Downgraded rather than dropped: the
-        // structural facts — consecutive, identical arguments, nothing between
-        // — all still hold.
-        const confidence: Confidence = run.truncated ? 'high' : 'certain';
+        // answer" is a weaker claim. Downgraded, never dropped: the structural
+        // facts all still hold.
+        const confidence: Confidence = g.truncated ? 'high' : 'certain';
 
-        const evidence: TurnRef[] = run.calls.map((e) => ({
+        const evidence: TurnRef[] = g.calls.map((e) => ({
           uuid: e.uuid,
           sessionId: e.sessionId,
           seq: e.seq,
@@ -193,7 +226,7 @@ export function redundantCall(opts: RedundantCallOptions = {}): Detector {
 
         out.push({
           dimension: 'redundant_call',
-          subject: subjectOf(run.calls[0] as StructuralEvent),
+          subject: subjectOf(g.calls[0] as StructuralEvent),
           evidence,
           confidence,
           method: 'RULE+T',
@@ -213,8 +246,8 @@ export function redundantCall(opts: RedundantCallOptions = {}): Detector {
  *
  * The digest is identity, not language, and a detector cannot read the command
  * — so where no readable target exists the subject is the tool plus a short
- * digest. Opaque but stable, and `now` prints the turns, which is where the
- * detail belongs.
+ * digest. `src/render.ts` substitutes the command at display time, where
+ * reading it is allowed.
  */
 export function subjectOf(e: StructuralEvent): string {
   const tool = e.toolName ?? 'unknown';

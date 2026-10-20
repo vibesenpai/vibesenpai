@@ -22,12 +22,13 @@ import { render as renderFindings } from './render.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
 import {
-  addHook, commandFileBody, commandFilePath, describeChange, dropOurStatusLine, planFor, remove,
-  type Settings,
+  addHook, commandFileBody, commandFilePath, describeChange, dropOurStatusLine, fixCommandBody,
+  fixCommandFilePath, planFor, remove, type Settings,
 } from './install.ts';
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
 import { detailLine, reportBlock } from './report-line.ts';
+import { recommend, renderFix } from './fix.ts';
 import { spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
@@ -106,6 +107,7 @@ Usage
   agentsensei now                the session you are in, read live
   agentsensei report             retrospective over a date range
   agentsensei standing          what your history says (the baseline)
+  agentsensei fix               one evidence-backed change to try
   agentsensei install           add the hooks + statusline (prints first)
   agentsensei uninstall         take them back out
 
@@ -569,10 +571,12 @@ function cmdInstall(a: Argv): number {
   }
   console.log('this would change:');
   for (const l of change) console.log(l);
-  const cmdPath = commandFilePath(home);
-  console.log(
-    `  ${existsSync(cmdPath) ? 'command (exists)' : 'command (new)   '}  ${cmdPath}  → /${'agentsensei'}`,
-  );
+  for (const [p_, name] of [
+    [commandFilePath(home), '/agentsensei'],
+    [fixCommandFilePath(home), '/agentsensei-fix'],
+  ] as const) {
+    console.log(`  ${existsSync(p_) ? 'command (exists)' : 'command (new)   '}  ${name.padEnd(17)} ${p_}`);
+  }
 
   if (a.flags['apply'] !== true) {
     console.log('\nnothing written. re-run with --apply to write it,');
@@ -581,7 +585,12 @@ function cmdInstall(a: Argv): number {
     return 0;
   }
 
-  const backup = `${path}.agentsensei-backup`;
+  // **Timestamped, and never overwritten.** A fixed name meant the second
+  // install clobbered the backup with an already-installed state, so the one
+  // file meant to restore someone to pristine quietly stopped being able to.
+  // Found by diffing a round-trip against it.
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const backup = `${path}.agentsensei-backup.${stamp}`;
   try {
     copyFileSync(path, backup);
   } catch {
@@ -604,9 +613,10 @@ function cmdInstall(a: Argv): number {
   // risk is lower — but it is still their directory, and `uninstall` removes it.
   try {
     mkdirSync(join(home, '.claude', 'commands'), { recursive: true });
-    writeFileSync(cmdPath, commandFileBody(repoRoot()));
+    writeFileSync(commandFilePath(home), commandFileBody(repoRoot()));
+    writeFileSync(fixCommandFilePath(home), fixCommandBody(repoRoot()));
   } catch {
-    console.error(`could not write ${cmdPath} — /agentsensei will not be available.`);
+    console.error(`could not write the command files — the slash commands will be missing.`);
   }
 
   console.log(`\nwritten. backup at ${backup}`);
@@ -627,6 +637,23 @@ function cmdInstall(a: Argv): number {
       '  `agentsensei standing` shows the result, and the statusline will pick it\n' +
       '  up on its own at the next response boundary.',
   );
+  return 0;
+}
+
+/**
+ * One evidence-backed change to try.
+ *
+ * Reads the stored standing rather than computing, so it is instant and agrees
+ * with what the session-start report said.
+ */
+function cmdFix(a: Argv): number {
+  const { config } = configFromFlags(a);
+  const s = readStanding(config.archive);
+  if (s === undefined) {
+    console.log('no standing yet — run `standing --refresh`, or open a new session.');
+    return 0;
+  }
+  console.log(renderFix(recommend(s), config.preset, config.mute));
   return 0;
 }
 
@@ -710,17 +737,20 @@ function cmdUninstall(a: Argv): number {
 
   const change = describeChange(before, after);
   console.log(`settings: ${path}\n`);
-  if (change.length === 0 && !existsSync(commandFilePath(home))) {
+  const cmdFiles = [commandFilePath(home), fixCommandFilePath(home)].filter((f) => existsSync(f));
+  if (change.length === 0 && cmdFiles.length === 0) {
     console.log('nothing of ours is installed.');
     return 0;
   }
-  if (existsSync(commandFilePath(home))) console.log(`  remove  ${commandFilePath(home)}`);
+  for (const f of cmdFiles) console.log(`  remove  ${f}`);
   console.log('this would change:');
   for (const l of change) console.log(l);
-  const cmdPath = commandFilePath(home);
-  console.log(
-    `  ${existsSync(cmdPath) ? 'command (exists)' : 'command (new)   '}  ${cmdPath}  → /${'agentsensei'}`,
-  );
+  for (const [p_, name] of [
+    [commandFilePath(home), '/agentsensei'],
+    [fixCommandFilePath(home), '/agentsensei-fix'],
+  ] as const) {
+    console.log(`  ${existsSync(p_) ? 'command (exists)' : 'command (new)   '}  ${name.padEnd(17)} ${p_}`);
+  }
 
   if (a.flags['apply'] !== true) {
     console.log('\nnothing written. re-run with --apply.');
@@ -729,6 +759,7 @@ function cmdUninstall(a: Argv): number {
   writeFileSync(path, `${JSON.stringify(after, null, 2)}\n`);
   try {
     rmSync(commandFilePath(home), { force: true });
+    rmSync(fixCommandFilePath(home), { force: true });
   } catch {
     // Already gone, or never ours to remove.
   }
@@ -879,6 +910,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdReport(a);
     case 'standing':
       return cmdStanding(a);
+    case 'fix':
+      return cmdFix(a);
     case 'install':
       return cmdInstall(a);
     case 'uninstall':

@@ -171,6 +171,51 @@ detached analyser re-enqueued every boundary, so the rate limit never engaged an
 the decay never fired. Both guarantees were silently inert and nothing threw. A
 guarantee that lives only in data needs a test that reads the data back.
 
+## `reading_spiral` — 51% of sessions, and 99% of it was working
+
+**Never built, and that is the point.** It was the largest unbuilt dimension in
+the catalogue and would have been the obvious next detector. Three measurements
+killed it, in order:
+
+| check | result |
+|---|---|
+| the *published* confound — sidechain fan-out | **4 of 2,182 — 0%.** Documented, never measured, and wrong |
+| overlap with `redundant_call` | **1 of 2,182** — a genuinely distinct signal |
+| **were the 3+ reads the same call?** | **15 same, 2,167 different — 99% not the same call** |
+
+The probe asked "was this path read 3+ times with no edit between". The answer
+it got was yes, constantly — because **the same path is not the same question**:
+
+```
+turn    4  Read                                  ← read the file
+turn    8  Grep  pattern="RunnerEvent"           ← then ask one thing
+turn   10  Grep  pattern="tool_calls.is_empty()" ← then another
+```
+
+That is an agent studying a file before changing it. `Read` at different offsets
+is a large file read in pages; `Grep` with different patterns is exploration.
+
+**The genuine remainder does not rescue it.** All 15 same-argument repeats are
+non-consecutive, so `redundant_call` sees none — and they split in two:
+
+```
+turns 39,41,43        tight   — genuinely redundant
+turns 1419,1421,1423  tight   — genuinely redundant
+turns 35,138,151      spread  — re-reading a PLAN.md across a long session
+turns 11,57,100       spread  — re-checking lib.rs hours apart
+```
+
+The wide ones are legitimate; that is what a plan file is for. The actionable
+subset is **3–5 instances across 1,139 sessions — 0.3%**.
+
+`redundant_call`'s consecutiveness guard was deliberately **not** relaxed to
+chase them. That guard is much of why it has never been wrong, and trading it
+for three findings is the bargain this project keeps refusing.
+
+**The transferable lesson:** a probe keyed on a path will over-count any tool
+that takes other arguments. Key on what identifies the *call* — which is what
+`argHash` exists for.
+
 ## Five probes that counted a harness mechanism and called it behaviour
 
 The procedural lesson, now a rule in `CLAUDE.md` and in `scripts/measure-dimensions.ts`:

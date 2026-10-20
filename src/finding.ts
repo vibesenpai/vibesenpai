@@ -88,7 +88,19 @@ export function subjectIdOf(dimension: string, project: string, subject: string)
   return sha([dimension, project, subject]);
 }
 
-/** Deduplicate refs by uuid, preserving first-seen order. */
+/**
+ * Deduplicate refs by uuid, in transcript order.
+ *
+ * **Sorted by `seq`, not by insertion.** A thread-scoped detector runs once per
+ * actor, so merging two actors' findings appended one actor's turns after the
+ * other's: a loop shared by the main thread and a subagent cited
+ * `turns 1,5,9,3,7,11`. The finding was right and unreadable — evidence a
+ * person is meant to follow has to be in the order it happened.
+ *
+ * Refs without a `seq` keep their relative order at the end: `seq` is a derived
+ * position and may legitimately be absent, and inventing one to sort by would
+ * be worse than leaving them last.
+ */
 export function dedupeEvidence(refs: TurnRef[]): TurnRef[] {
   const seen = new Set<string>();
   const out: TurnRef[] = [];
@@ -97,7 +109,11 @@ export function dedupeEvidence(refs: TurnRef[]): TurnRef[] {
     seen.add(r.uuid);
     out.push(r);
   }
-  return out;
+  return out.sort((a, b) => {
+    if (a.seq === undefined) return b.seq === undefined ? 0 : 1;
+    if (b.seq === undefined) return -1;
+    return a.seq - b.seq;
+  });
 }
 
 export type MaterialiseInput = {

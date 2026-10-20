@@ -53,9 +53,36 @@ It is evidence; paraphrasing it defeats the point.
 `;
 }
 
-/** Where the command file lives, relative to a home directory. */
+/**
+ * The `/agentsensei-fix` command — one evidence-backed change to try.
+ *
+ * The body asks the model to **ask before adopting**. A slash command's output
+ * enters the context either way, so consent cannot be mechanical: it is an
+ * instruction not to act until the user says yes. That is the difference
+ * between handing someone a suggestion and applying one to their session.
+ */
+export function fixCommandBody(repoRoot: string, nodePath = process.execPath): string {
+  return `---
+description: One evidence-backed change to try, from your own sessions
+allowed-tools: Bash(${nodePath}:*)
+---
+
+!\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts fix\`
+
+Show the recommendation above exactly as it is.
+
+Then ASK whether to adopt it for the rest of this session. Do not adopt it,
+act on it, or change how you work until the answer is yes.
+`;
+}
+
+/** Where the command files live, relative to a home directory. */
 export function commandFilePath(home: string): string {
   return `${home}/.claude/commands/${MARKER}.md`;
+}
+
+export function fixCommandFilePath(home: string): string {
+  return `${home}/.claude/commands/${MARKER}-fix.md`;
 }
 
 /** A Claude Code hook entry, as the settings file holds them. */

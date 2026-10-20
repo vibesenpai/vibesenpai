@@ -34,7 +34,7 @@ import { parse } from '../src/parsers/index.ts';
 import { editEvidenceOf, READ_TOOLS } from '../src/edits.ts';
 import { callFailed, countDenominators } from '../src/detect/index.ts';
 import { retriedFailures } from '../src/detect/edit-retry.ts';
-import { runsOf, sameAnswerThroughout } from '../src/detect/redundant-call.ts';
+import { isRedundant, repeatGroups } from '../src/detect/redundant-call.ts';
 import { sessionStats } from '../src/stats.ts';
 import { reasonOf } from '../src/detect/labels.ts';
 import type { Event } from '../src/types.ts';
@@ -169,14 +169,12 @@ const PROBES: ProbeDef[] = [
     denominator: 'per tool call',
     probe: 'detector',
     confound:
-      'a self-truncating command (`| head`) discards its own output upstream of us, so the ' +
-      'digest compares a prefix and the finding drops to `high`; polling tools are excluded by name',
+      'aggregation alone is 93% wrong (278 of 298 raw groups had an edit between); the edit, ' +
+      'prompt and 60s-gap guards are what make it reportable, and the gap is a threshold',
     inCatalogue: true,
     // The detector's own grouping and answer test, not a lookalike. The loose
     // version of this probe said 4% of sessions where the detector finds 0.4%.
-    count: (c) =>
-      runsOf(c.ev).filter((r) => r.calls.length >= 3 && sameAnswerThroughout(r.outputs, r.calls.length))
-        .length,
+    count: (c) => repeatGroups(c.ev).filter((g) => isRedundant(g, c.ev)).length,
   },
   {
     dimension: 'permission_denied',
@@ -189,27 +187,8 @@ const PROBES: ProbeDef[] = [
     // Structural at last. This was "needs a structural signal first" until the
     // parser started recording WHO rejected a call.
     count: (c) => c.ev.filter((e) => e.failureKind === 'denied' || e.failureKind === 'hook').length,
-  },
-  {
-    dimension: 'reading_spiral',
-    denominator: 'per session',
-    probe: 'structural',
-    confound: 'a parallel fan-out legitimately re-reads; sidechains are not excluded here',
-    inCatalogue: true,
-    count: (c) => {
-      const reads = new Map<string, number>();
-      let hits = 0;
-      for (const e of c.ev) {
-        if (editEvidenceOf(e) === 'tool') { reads.clear(); continue; }
-        if (e.turnType !== 'tool_use' || !READ_TOOLS.has(e.toolName ?? '')) continue;
-        if (e.filePath === undefined) continue;
-        const n = (reads.get(e.filePath) ?? 0) + 1;
-        reads.set(e.filePath, n);
-        if (n === 3) hits++;
-      }
-      return hits;
-    },
-  },
+  }
+
 ];
 
 async function main(): Promise<void> {

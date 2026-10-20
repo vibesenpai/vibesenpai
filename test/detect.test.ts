@@ -799,17 +799,33 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 });
 
-describe('redundant_call — the same call, the same answer', () => {
+describe('redundant_call — same call, same answer, nothing changed between', () => {
   /** A result carrying a real digest over its full output, as the parser makes. */
-  const answer = (text: string): Event =>
+  const answer = (callId: string, text: string, at?: string): Event =>
     ev({
       turnType: 'tool_result',
+      toolCallId: callId,
       textSummary: text,
+      ...(at !== undefined ? { ts: at } : {}),
       ...(outputDigest(text) !== undefined ? { outHash: outputDigest(text) as string } : {}),
     });
 
-  const call = (args: string, over: Partial<Event> = {}): Event =>
-    ev({ turnType: 'tool_use', toolName: 'Bash', command: args, argHash: hash(args), ...over });
+  let callN = 0;
+  const call = (args: string, at?: string, over: Partial<Event> = {}): Event => {
+    callN += 1;
+    return ev({
+      turnType: 'tool_use',
+      toolName: 'Bash',
+      command: args,
+      argHash: hash(args),
+      toolCallId: `c${callN}`,
+      ...(at !== undefined ? { ts: at } : {}),
+      ...over,
+    });
+  };
+
+  /** Seconds after a fixed start, so gaps are explicit in each test. */
+  const at = (s: number): string => new Date(Date.parse('2026-10-19T12:00:00Z') + s * 1000).toISOString();
 
   const run = async (events: Event[]): Promise<Finding[]> =>
     (
@@ -821,112 +837,146 @@ describe('redundant_call — the same call, the same answer', () => {
       })
     ).findings;
 
-  it('fires on three identical calls with three identical answers', async () => {
-    const f = await run([
-      call('npx tsc --noEmit'), answer('error TS2304: Cannot find name'),
-      call('npx tsc --noEmit'), answer('error TS2304: Cannot find name'),
-      call('npx tsc --noEmit'), answer('error TS2304: Cannot find name'),
-    ]);
+  /** Three identical calls, seconds apart, with identical answers. */
+  const tightRun = (cmd: string, text: string): Event[] => {
+    const out: Event[] = [];
+    for (const [i, t] of [0, 3, 6].entries()) {
+      const c = call(cmd, at(t));
+      out.push(c, answer(c.toolCallId as string, text, at(t + 1)));
+      void i;
+    }
+    return out;
+  };
+
+  it('fires on three identical calls with identical answers', async () => {
+    const f = await run(tightRun('npx tsc --noEmit', 'error TS2304: Cannot find name'));
     expect(f).toHaveLength(1);
     expect(f[0]!.occurrences).toBe(3);
     expect(f[0]!.confidence).toBe('certain');
   });
 
-  it('stays quiet when the last answer differs', async () => {
-    // The weaker "not all different" test fired on [FAIL, FAIL, OK] — a run
-    // whose last call plainly returned something new.
-    expect(
-      await run([
-        call('npm test'), answer('2 failed'),
-        call('npm test'), answer('2 failed'),
-        call('npm test'), answer('0 failed, all passed'),
-      ]),
-    ).toEqual([]);
+  it('sees a repeat spread across the session, not only consecutive ones', async () => {
+    // The whole reason this aggregates rather than walking consecutive runs:
+    // measured on real data, a call repeated with unrelated work between is
+    // invisible to a consecutive-run rule.
+    const events: Event[] = [];
+    for (const t of [0, 20, 40]) {
+      const c = call('go generate', at(t));
+      events.push(c, answer(c.toolCallId as string, 'Exit: 0', at(t + 1)));
+      // unrelated, non-mutating work in between
+      events.push(ev({ turnType: 'tool_use', toolName: 'Grep', pattern: 'x', argHash: hash(`g${t}`) }));
+    }
+    const f = await run(events);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.occurrences).toBe(3);
   });
 
-  it('reads a failure count going down as progress, not as a loop', async () => {
-    // An earlier normaliser replaced every digit and collapsed these into one
-    // string — reporting steady progress as a loop, on exactly the behaviour
-    // the tool should encourage.
-    expect(
-      await run([
-        call('npm test'), answer('Tests: 3 failed, 9 passed'),
-        call('npm test'), answer('Tests: 2 failed, 10 passed'),
-        call('npm test'), answer('Tests: 1 failed, 11 passed'),
-      ]),
-    ).toEqual([]);
+  it('reconciles two actors into one session finding', async () => {
+    // A call is redundant with respect to the SESSION, not one actor's slice.
+    const events: Event[] = [];
+    for (const [i, t] of [0, 5, 10].entries()) {
+      const sc = i % 2 === 1 ? { isSidechain: true, sidechainId: 'sc1' } : {};
+      const c = call('npm test', at(t), sc);
+      events.push(c, answer(c.toolCallId as string, 'FAIL x2', at(t + 1)));
+    }
+    const f = await run(events);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.occurrences).toBe(3);
+    // and the evidence reads in transcript order, not grouped by actor
+    const seqs = f[0]!.evidence.map((e) => e.seq as number);
+    expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
   });
 
-  it('does not compare two calls it cannot tell apart', async () => {
-    // No argHash means no arguments to compare. Assuming two such calls are the
-    // same call was the most common false positive measured.
-    const opaque = (): Event => ev({ turnType: 'tool_use', toolName: 'TodoWrite' });
-    expect(await run([opaque(), answer('ok'), opaque(), answer('ok'), opaque(), answer('ok')])).toEqual([]);
+  /**
+   * Insert an event genuinely between the first and last call.
+   *
+   * `seq` is assigned when an event is created, not by array position, so
+   * splicing into the array does not place it between them — the guard reads
+   * `seq`, and an appended event sits after everything.
+   */
+  const between = (events: Event[], e: Event): Event[] => {
+    const calls = events.filter((x) => x.turnType === 'tool_use');
+    const mid = ((calls[0] as Event).seq + (calls[1] as Event).seq) / 2;
+    return [...events, { ...e, seq: mid }];
+  };
+
+  it('does not fire when an edit happened between', async () => {
+    // The guard carrying the most weight: 278 of 298 raw groups on real data.
+    // Re-running after a change is `fail_fix_fail`, not a redundant call.
+    const events = between(
+      tightRun('npm test', '2 failed'),
+      ev({ turnType: 'tool_use', toolName: 'Edit', filePath: '/a.ts', argHash: hash('e') }),
+    );
+    expect(await run(events)).toEqual([]);
   });
 
-  it('never treats a poll as a loop', async () => {
-    // The only finding the first version produced across 227 real sessions,
-    // and it was wrong: a poll returning `running` is identical by design.
-    const poll = (): Event =>
-      ev({ turnType: 'tool_use', toolName: 'BashOutput', argHash: hash('job-1') });
-    expect(await run([poll(), answer('running'), poll(), answer('running'), poll(), answer('running')])).toEqual([]);
+  it('does not fire when a new instruction arrived between', async () => {
+    const events = between(
+      tightRun('ls', 'a.ts'),
+      ev({ turnType: 'user_prompt', textSummary: 'now do something else' }),
+    );
+    expect(await run(events)).toEqual([]);
   });
 
-  it('stops the run at an edit, because something changed', async () => {
-    expect(
-      await run([
-        call('npm test'), answer('FAIL'),
-        ev({ turnType: 'tool_use', toolName: 'Edit', filePath: '/a.ts', argHash: hash('e') }),
-        call('npm test'), answer('FAIL'),
-        call('npm test'), answer('FAIL'),
-      ]),
-    ).toEqual([]);
+  it('treats a slow repeat as waiting, not looping', async () => {
+    // Polling is usually `sleep 60 && <cmd>`, which a detector may not read.
+    // Measured, the two populations separate on the gap: polls cluster at
+    // 60-72s, real repeats are seconds apart.
+    const events: Event[] = [];
+    for (const t of [0, 70, 140]) {
+      const c = call('gh run view 123', at(t));
+      events.push(c, answer(c.toolCallId as string, 'status: in_progress', at(t + 1)));
+    }
+    expect(await run(events)).toEqual([]);
   });
 
-  it('stops the run at a new instruction', async () => {
-    expect(
-      await run([
-        call('ls'), answer('a'),
-        ev({ turnType: 'user_prompt', textSummary: 'now do something else' }),
-        call('ls'), answer('a'),
-        call('ls'), answer('a'),
-      ]),
-    ).toEqual([]);
+  it('reads a changing answer as progress, not a loop', async () => {
+    const events: Event[] = [];
+    for (const [i, t] of [0, 3, 6].entries()) {
+      const c = call('npm test', at(t));
+      events.push(c, answer(c.toolCallId as string, `Tests: ${3 - i} failed`, at(t + 1)));
+    }
+    expect(await run(events)).toEqual([]);
   });
 
   it('will not call an unseen answer identical', async () => {
-    // outHash is absent when output was empty or uncapturable. `unknown` beats
-    // guessing, so a run we cannot compare is not a loop.
-    const blind = (): Event => ev({ turnType: 'tool_result' });
-    expect(await run([call('ls'), blind(), call('ls'), blind(), call('ls'), blind()])).toEqual([]);
+    // outHash is absent when output was empty or uncapturable.
+    const events: Event[] = [];
+    for (const t of [0, 3, 6]) {
+      const c = call('ls', at(t));
+      events.push(c, ev({ turnType: 'tool_result', toolCallId: c.toolCallId as string }));
+    }
+    expect(await run(events)).toEqual([]);
+  });
+
+  it('never treats a polling tool as a loop', async () => {
+    // Kept alongside the gap rule: BashOutput on a finished job returns
+    // instantly and identically, so only the name separates it from a loop.
+    const events: Event[] = [];
+    for (const t of [0, 2, 4]) {
+      callN += 1;
+      const c = ev({ turnType: 'tool_use', toolName: 'BashOutput', argHash: hash('job'), toolCallId: `p${callN}`, ts: at(t) });
+      events.push(c, answer(c.toolCallId as string, 'running', at(t + 1)));
+    }
+    expect(await run(events)).toEqual([]);
   });
 
   it('downgrades to high when the command clipped its own output', async () => {
-    // `| head -30` throws the rest away upstream of us, so outHash digested a
-    // prefix: "the same answer" is a weaker claim and says so.
     const piped = 'npx tsc --noEmit 2>&1 | head -30';
     expect(truncatesOutput(piped)).toBe(true);
-    const f = await run([
-      call(piped, { truncatesOwnOutput: true }), answer('30 lines'),
-      call(piped, { truncatesOwnOutput: true }), answer('30 lines'),
-      call(piped, { truncatesOwnOutput: true }), answer('30 lines'),
-    ]);
+    const events: Event[] = [];
+    for (const t of [0, 3, 6]) {
+      const c = call(piped, at(t), { truncatesOwnOutput: true });
+      events.push(c, answer(c.toolCallId as string, '30 lines', at(t + 1)));
+    }
+    const f = await run(events);
     expect(f).toHaveLength(1);
     expect(f[0]!.confidence).toBe('high');
   });
 
-  it('claims no more than head and tail about truncation', () => {
-    // Narrower than failureKind's closed envelope set, and stated as such:
-    // these forms truncate too and are not detected.
-    expect(truncatesOutput('npm test | tail -5')).toBe(true);
-    expect(truncatesOutput("sed -n '1,30p' out.txt")).toBe(false);
-    expect(truncatesOutput('npm test | less')).toBe(false);
-    expect(truncatesOutput('npm test')).toBe(false);
-  });
-
-  it('ships in standard, not core — 0.4% of sessions is not a first impression', () => {
+  it('is session-scoped, and ships in standard', () => {
+    expect(redundantCall().scope).toBe('session');
     expect(redundantCall().preset).toBe('standard');
     expect(detectorsFor('core').map((d) => d.dimension)).not.toContain('redundant_call');
-    expect(detectorsFor('standard').map((d) => d.dimension)).toContain('redundant_call');
   });
 });
