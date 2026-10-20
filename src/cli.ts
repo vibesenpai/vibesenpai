@@ -1008,8 +1008,12 @@ function writeHtmlReport(data: ReportData, archive: string, f: Argv['flags']): n
     const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
     try {
       execFileSync(opener, [path], { stdio: 'ignore' });
+      console.log(`  opened with ${opener}`);
     } catch {
-      console.log(`  (could not launch ${opener} — open it yourself)`);
+      // The fallback has to carry the command, not just the bad news: the
+      // caller asked to open it and would otherwise be left with neither a
+      // window nor anything to copy.
+      console.log(`  could not launch ${opener} — run:  ${opener} ${path}`);
     }
   } else {
     console.log(`  open it:  ${process.platform === 'darwin' ? 'open' : 'xdg-open'} ${path}`);

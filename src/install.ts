@@ -105,7 +105,13 @@ act on it, or change how you work until the answer is yes.
  * body differs from the other two. There is nothing to reproduce: the evidence
  * is in the file. Restating the findings in chat would be exactly the
  * paraphrase-instead-of-evidence that `now.md` and `fix.md` are worded to
- * prevent, and it would do it while the real evidence sat one `open` away.
+ * prevent, and it would do it while the reader had the real thing open.
+ *
+ * **`--open` here, opt-in at the CLI.** Someone typing this command is asking
+ * to look at a report, so making them copy a path afterwards is a step with no
+ * purpose. `report --html` on its own still does not open anything: it can be
+ * run from a script or a pipe, and spawning a browser there would be the kind
+ * of surprise this project is built to avoid.
  */
 export function generateReportCommandBody(repoRoot: string, nodePath = process.execPath): string {
   return `---
@@ -113,13 +119,13 @@ description: Write a self-contained HTML report of your sessions
 allowed-tools: Bash(${nodePath}:*)
 ---
 
-!\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts report --html\`
+!\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts report --html --open\`
 
-Give the user the file path from the output above, on its own line, and the
-command to open it. Nothing else.
+The report has already opened in their browser. Give them the file path from
+the output above, on its own line, and say it is open. Nothing else.
 
 Do NOT summarise the findings, list the sessions, or describe what is in the
-report. It is a file; they will read it. Repeating its contents here would
+report. It is a file; they are looking at it. Repeating its contents here would
 replace the evidence with a paraphrase of the evidence.
 `;
 }

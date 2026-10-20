@@ -433,10 +433,17 @@ describe('command files — install and uninstall cannot disagree', () => {
 
   it('tells the model not to restate the report it just wrote', () => {
     // The other two bodies ask for verbatim reproduction because the output IS
-    // the evidence. Here the evidence is a file, so restating it would hand
-    // over a paraphrase while the real thing sat one `open` away.
+    // the evidence. Here the evidence is a file, so restating it would hand a
+    // paraphrase to someone already looking at the real thing.
     const body = generateReportCommandBody('/repo');
     expect(body).toMatch(/do not summarise/i);
     expect(body).toContain('--html');
+  });
+
+  it('opens the report, because that is what the command is for', () => {
+    // Opt-in at the CLI, passed here: someone typing the command is asking to
+    // look at a report, so handing them a path to copy is a step with no
+    // purpose. `report --html` alone still opens nothing — it can be piped.
+    expect(generateReportCommandBody('/repo')).toContain('--html --open');
   });
 });
