@@ -249,3 +249,69 @@ catalogue detects. The dominant themes are stale diagnostics, tabs-versus-spaces
 local-passes-CI-fails, and the problem simply being hard.
 
 It lives on in `docs/prior-art.md` as what it is: a literature survey, not a backlog.
+
+## Ten detector candidates measured and rejected, 2026-10-20
+
+Measured against the 1,139-session SWE-chat corpus after `edit_retry` and
+`redundant_call` were working. Recorded because the negatives cost real time to
+establish and would otherwise be re-proposed.
+
+First, a population check, because the project had been assuming otherwise: the
+corpus is **not** mostly autonomous one-shot runs. Median 6 user prompts, 54
+minutes, and only 13% are single-prompt. It is a valid population for "what
+happens out there", and a single developer's own sessions are not.
+
+### `stale_read` — 27.7% of sessions, and every one of them explained
+
+The shape: read a file, the harness's file-history records it changing, edit it
+without re-reading. 2,078 instances, 1,965 of which the edit *succeeded* — so
+`edit_retry` was not already catching them.
+
+**100% follow one of the agent's own prior edits to that file.** Not 90%: all
+2,078. The file-history snapshot lags the edit call by a variable number of
+turns — 28% within 10, 78% within 50 — which is why a 3-turn window showed only
+0.1% and made the signal look clean. Widen the window and the whole thing
+dissolves. It was detecting "agent edited, harness snapshotted, agent edited
+again", which is sequential editing.
+
+### `permission_denied` — 18.1%, and it is the person working normally
+
+The harness marks these `failureKind: 'denied'`. On real interactive data the
+denials are `ExitPlanMode` and `AskUserQuestion` — a person rejecting a plan or
+answering a question, which is plan mode functioning. Reporting it as waste
+would be telling someone their own decisions cost them tokens.
+
+### `interrupted` and `userModified` — present 1,314 and 186 times, never true
+
+`toolUseResult` carries both fields, and they looked like exactly the harness
+ground truth that made `edit_retry` work: the harness saying a call was killed,
+or that the *human* edited the file. Across 1,127 corpus sessions neither is
+ever `true`. The sixth instance of *signal availability is not frequency*.
+
+### `self_truncated` — 82%, and truncating is usually correct
+
+`cmd | head -30` clips its own output. Clipping once and moving on is the right
+thing to do; only re-running it wider is waste, and telling those apart needs to
+read and compare command text. See the note on truncation in
+`src/detect/redundant-call.ts` for where this stops.
+
+### The rest
+
+- **`exitCode != 0`** — 55.6%, but failing commands are the point of running
+  them. Already buried above as `error_ignored`, where 234 matches were ≥68 the
+  agent fixing and 55 investigating.
+- **`file_churn`** — 48% of sessions edit some file 5+ times, 23% do 10+. That
+  churn is waste is not established, and `MOST REWRITTEN` already reports the
+  same fact without claiming it.
+- **`cascade_failure`** — 3.3%, exact, and genuinely wasteful, but 113 incidents
+  across 1,139 sessions and **one** killed call each. Buildable; not worth a
+  dimension yet.
+- **Bash, Grep and Read refusals** — Bash has 147 but only 3 carry a harness
+  reason and **none** are retried. Grep has 4 retried, Read 27.
+
+### What this says about the structural tier
+
+The harness's labelled-failure well is **exhausted by `edit_retry`**: Edit and
+Write are 998 of roughly 1,400 tool refusals and both are covered. There is no
+second `edit_retry` waiting in the failure data. Further structural detectors
+will be small; the next real gain is the semantic tier.

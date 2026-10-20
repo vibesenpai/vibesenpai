@@ -102,6 +102,34 @@ export const POLL_GAP_SECONDS = 60;
 export const EXCLUDED_TOOLS = EDIT_TOOLS;
 
 /**
+ * ── Where the truncation problem stops, and why ────────────────────────────
+ *
+ * `npx tsc --noEmit 2>&1 | head -30` throws its own output away upstream of
+ * us, so two runs can return byte-identical text while the real output
+ * differed — 50 errors became 45 and the first 30 lines did not move. "The
+ * same answer" is then a weaker claim than it looks.
+ *
+ * What happens today: the **parser** sets `truncatesOwnOutput` (harness
+ * coupling belongs there), the detector reads only that boolean, the finding
+ * downgrades `certain` → `high`, and the reader is told *"close match —
+ * compared output was clipped"*. Measured: 5 of 66 findings, 8%.
+ *
+ * **And that is where it stops.** The parser recognises `| head` and `| tail`
+ * and nothing else. It misses `sed -n '1,30p'`, `awk 'NR<=30'`, `cut`,
+ * PowerShell's `Select-Object -First`, and every other way to clip a stream —
+ * and chasing them would build exactly the per-shell command taxonomy this
+ * project refuses, which could not tell you what it was missing.
+ *
+ * The cost of missing one is proportionate: the finding still stands on
+ * identical arguments, identical returned output, no edit in between, and a
+ * median gap under a minute. What is lost is the confidence downgrade — we
+ * say `certain` where `high` was right. Over-claiming confidence on 8% of
+ * findings is a smaller error than a shell-specific list that silently rots.
+ *
+ * The claim is also literally true either way: *this call returned the same
+ * thing it returned before*. Truncation weakens the inference drawn from
+ * that, not the observation itself.
+ *
  * Tools whose whole purpose is to report current state.
  *
  * Kept even though the gap rule catches most polling: `BashOutput` on a
