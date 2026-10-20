@@ -125,3 +125,55 @@ exported as timestamped Markdown under `.specstory/history/`. A different
 population from SWE-chat (IDE as well as CLI) and a different format, so it
 would need its own parser behind the existing factory. Worth it for a second
 population, not for unlocking structural detectors.
+
+## The paper's pipeline, and where ours differs
+
+Read 2026-10-20 from the replication package
+([ND-SaNDwichLAB/coding-agent-misalignment](https://github.com/ND-SaNDwichLAB/coding-agent-misalignment)),
+after our judge scored **10–14% recall** against their labels.
+
+### Their three stages against our one
+
+| | theirs | ours |
+|---|---|---|
+| stage 1 | **extract** a free-form narrative episode | classify into 4 dimensions |
+| stage 2 | **validate**, filtering unsupported records | — |
+| stage 3 | **annotate** with S1–S8, on an already-validated episode | — |
+| anchor | a **direct quotation** | a turn number |
+| trigger | "only when it surfaces through subsequent developer **correction or pushback**" | abstract per-dimension definitions |
+| input | the full formatted session | 9–25% of it |
+| model | GPT-5.4 | Haiku |
+
+**The taxonomy is applied last, not first.** Their extractor never sees S1–S8; it
+is asked only to find episodes where "the collaboration broke down" and write
+them up. Classification happens in stage 3, against a record already confirmed
+to be real. We ask one model to recognise *and* categorise in a single pass,
+which is the harder task by some distance.
+
+**Correction is the definition, not a hint.** Their prompt scopes misalignment
+to what "surfaces through subsequent developer correction or pushback visible
+in the conversation", and explicitly excludes work the agent chose to do on its
+own. Our rubric describes each dimension in the abstract, which is a far weaker
+thing to search for.
+
+**Quotes anchor, turn numbers do not.** Every record must carry a verbatim
+quote. A quote is self-validating — it is either in the transcript or it is
+not. A turn number is a second numbering the model has to track, and every
+"hallucination" we saw turned out to be a citation error rather than an
+invented claim.
+
+### What else the package gives us
+
+`data/core/session_mapping.json` covers all 20,574 sessions their pipeline
+processed, so a session with no episode is a **labelled negative** rather than
+one nobody looked at. Against our corpus:
+
+```
+  processed by their pipeline   565 of our 1,140
+    with >=1 labelled episode   246   (492 episodes)
+    with none found             319   <- labelled negatives
+```
+
+Those 319 are what we could not previously get: a judge finding there is a
+genuine false-positive candidate. Until now "unmatched" could always have been
+an episode the paper missed.
