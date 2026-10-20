@@ -212,6 +212,15 @@ function cleanPath(p: string | undefined): string | undefined {
   return p === undefined ? undefined : redact(p).text;
 }
 
+/**
+ * How much of a user prompt survives.
+ *
+ * Six times the default, because the prompt is the one field a judge reads for
+ * meaning rather than identity. Still a cap: an enormous pasted log should not
+ * become the whole packet.
+ */
+export const PROMPT_SUMMARY_MAX = 1200;
+
 function summarise(s: unknown, max = 200): string | undefined {
   if (typeof s !== 'string') return undefined;
   const flat = s.replace(/\s+/g, ' ').trim();
@@ -629,7 +638,21 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
         }
         if (typeof content === 'string') {
           // A slash-command echo is not a human speaking.
-          push(META_CONTENT.test(content) ? 'local_command' : 'user_prompt', { ...sum(content) });
+          // ── The prompt is the signal, so it gets a bigger cap ───────────
+          //
+          // 200 characters truncated **45% of user prompts**, discarding 5.9M
+          // characters across 400 corpus sessions — and the research this
+          // project's dimension table comes from detects misalignment from
+          // developer pushback, which is to say from exactly this text. A
+          // half-sentence cannot be judged.
+          //
+          // Raised only here. Tool output, commands and results keep the 200
+          // cap: they are compared by digest, not read, and widening them
+          // would grow every skeleton for nothing.
+          const isPrompt = !META_CONTENT.test(content);
+          push(isPrompt ? 'user_prompt' : 'local_command', {
+            ...(isPrompt ? sum(content, PROMPT_SUMMARY_MAX) : sum(content)),
+          });
         } else if (Array.isArray(content)) {
           // A user record holding tool_result blocks is the harness replying to
           // the agent, not the human speaking.

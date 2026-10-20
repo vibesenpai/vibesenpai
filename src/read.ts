@@ -211,7 +211,33 @@ export function lookupSession(sources: string[], id: string): SessionLookup {
  * its own copy shelling out to `find`; this removes that subprocess.
  */
 export function discoverTranscripts(sources: string[]): string[] {
-  return walk(sources);
+  return walk(sources).filter((p) => !isOurOwnJudgeSession(p));
+}
+
+/**
+ * The directory the judge runs its headless child in.
+ *
+ * Encoded into the harness's project-directory name, so a transcript written by
+ * our own judge lands somewhere recognisable.
+ */
+export const JUDGE_CWD_MARKER = 'agentsensei-judge';
+
+/**
+ * Is this transcript one our own judge produced?
+ *
+ * **Measured, not theorised.** A headless `claude -p` child writes its own
+ * transcript into `~/.claude/projects`, and without this the judge analyses —
+ * and judges — its own output. Three probe calls took this machine from 9
+ * discovered sessions to 12 before anyone noticed, and a judge run took it 14
+ * to 15.
+ *
+ * `--bare` would have prevented the child entirely, but it demands
+ * `ANTHROPIC_API_KEY`: on a subscription it returns `is_error: true` and
+ * *"Not logged in"* without calling anything. So the child is a real session
+ * and the only reliable fix is to recognise where it ran.
+ */
+export function isOurOwnJudgeSession(path: string): boolean {
+  return path.includes(JUDGE_CWD_MARKER);
 }
 
 export type LatestSession = { source: string; sessionId: string; mtimeMs: number };
