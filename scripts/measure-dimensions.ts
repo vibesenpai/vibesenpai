@@ -161,7 +161,9 @@ const PROBES: ProbeDef[] = [
     count: (c) => {
       const d = countDenominators(c.ev);
       if (d.tokens.output === 0) return 0;
-      return d.tokens.cacheCreation / d.tokens.output > 93.4 ? 1 : 0;
+      // The re-measured p90. Was 93.4, computed while a split response's
+      // `usage` was summed once per record — see `oncePerResponse`.
+      return d.tokens.cacheCreation / d.tokens.output > 159.5 ? 1 : 0;
     },
   },
   {

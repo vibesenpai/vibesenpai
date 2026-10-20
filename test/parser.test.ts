@@ -535,3 +535,61 @@ describe('parser — records that carry role instead of type', () => {
     expect(r.events[0]?.turnType).toBe('queue_operation');
   });
 });
+
+describe('compaction, argBytes, and the repeated usage', () => {
+  it('detects a compact_boundary record and keeps its token counts', () => {
+    const r = parseTranscriptText(
+      j({
+        type: 'system',
+        subtype: 'compact_boundary',
+        uuid: 'a',
+        parentUuid: null,
+        compactMetadata: { trigger: 'auto', preTokens: 1000, postTokens: 30 },
+      }),
+    );
+    const c = r.events.find((e) => e.systemKind === 'compaction');
+    expect(c).toBeDefined();
+    // The harness's own accounting, not ours.
+    expect(c?.compaction).toEqual({ preTokens: 1000, postTokens: 30 });
+  });
+
+  it('does not read a compaction summary as a user prompt', () => {
+    const r = parseTranscriptText(
+      j({
+        type: 'user',
+        uuid: 'b',
+        parentUuid: null,
+        isCompactSummary: true,
+        message: { content: 'This session is being continued from a previous conversation.' },
+      }),
+    );
+    // It carries replacement context, not an instruction — and `edit_retry`
+    // ends a span at the next prompt, so misreading it truncates spans.
+    expect(r.events.filter((e) => e.turnType === 'user_prompt')).toHaveLength(0);
+    expect(r.events.filter((e) => e.systemKind === 'compaction')).toHaveLength(1);
+  });
+
+  it('records argBytes, and one responseId across a response\'s blocks', () => {
+    const input = { file_path: '/a.ts', old_string: 'x', new_string: 'y' };
+    const r = parseTranscriptText(
+      j({
+        type: 'assistant',
+        uuid: 'c',
+        parentUuid: null,
+        message: {
+          id: 'msg_1',
+          usage: { output_tokens: 500 },
+          content: [
+            { type: 'text', text: 'doing it' },
+            { type: 'tool_use', id: 'tc1', name: 'Edit', input },
+          ],
+        },
+      }),
+    );
+    const call = r.events.find((e) => e.turnType === 'tool_use');
+    expect(call?.argBytes).toBe(Buffer.byteLength(JSON.stringify(input)));
+    // Both blocks belong to one response, which is what lets its `usage` be
+    // counted once rather than once per block.
+    expect(new Set(r.events.map((e) => e.responseId))).toEqual(new Set(['msg_1']));
+  });
+});

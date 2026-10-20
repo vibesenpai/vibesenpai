@@ -35,6 +35,7 @@
 
 import type { Standing } from './standing.ts';
 import { reasonLabel } from './report-line.ts';
+import { approx } from './cost.ts';
 
 export type ArtifactKind = 'GUARD' | 'PROMPT' | 'MEMORY' | 'REPORT';
 
@@ -58,6 +59,18 @@ export type Recommendation = {
    * is advice, which is out of scope.
    */
   because: string;
+  /**
+   * What this reason has already cost, in tokens.
+   *
+   * **Past cost, not a forecast.** "You will save N" is a prediction the data
+   * cannot support — adopting a brief changes the session being measured, which
+   * the note at the bottom of the render already admits. "This cost N" is the
+   * claim the evidence actually makes.
+   *
+   * Absent when the standing predates the measurement or the reason has no
+   * priced instances.
+   */
+  cost?: { written: number; received: number };
 };
 
 /**
@@ -151,6 +164,9 @@ export function recommend(s: Standing | undefined): Recommendation | undefined {
 
   const [reason, n] = top;
   const artifact = ARTIFACTS[reason] as { prompt: string; memory: string };
+  // `?.` although the type says it is there: `readStanding` casts rather than
+  // validates, so a file written by an older version reads as undefined.
+  const cost = s.wastedTokens?.[reason];
   const where =
     target.top !== undefined && target.files > 1
       ? `, most often in ${target.top.subject.split('/').pop() ?? target.top.subject}`
@@ -165,6 +181,7 @@ export function recommend(s: Standing | undefined): Recommendation | undefined {
     prompt: artifact.prompt,
     memory: artifact.memory,
     because: `${reasonLabel(reason)} is the most common reason, at ${n} of ${target.occurrences}.`,
+    ...(cost !== undefined && cost.written + cost.received > 0 ? { cost } : {}),
   };
 }
 
@@ -189,6 +206,11 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
   }
   for (const [i, l] of wrap(r.because, 56).entries()) {
     lines.push(`  ${i === 0 ? 'because   ' : '          '} ${l}`);
+  }
+  if (r.cost !== undefined) {
+    // Scoped to this reason, not the dimension — the other reasons need a
+    // different change, so their cost is not what adopting this would recover.
+    lines.push(`  cost       ${approx(r.cost.written)} tokens written and discarded`);
   }
   lines.push('');
 

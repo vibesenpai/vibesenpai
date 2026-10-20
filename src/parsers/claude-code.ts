@@ -117,6 +117,13 @@ type RawRecord = {
   sessionId?: string;
   timestamp?: string;
   isSidechain?: boolean;
+  /**
+   * Set on the post-compaction summary the harness writes as a `user` record.
+   *
+   * It carries the replacement context, not a human instruction, so it must not
+   * be read as a prompt — see the `user` case.
+   */
+  isCompactSummary?: boolean;
   cwd?: string;
   /**
    * An Anthropic API message. `assistant` records carry a response-shaped
@@ -603,6 +610,23 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
     switch (type) {
       case 'user': {
         const content = r.message?.content;
+        // ── A compaction summary is not a human speaking ──────────────────
+        //
+        // The same principle as the slash-command echo below, and it was
+        // costing something: the harness writes the post-compaction summary as
+        // a `type: 'user'` record, so it parsed as a real prompt. `edit_retry`
+        // ends a span at the next user prompt, which means every compaction
+        // silently truncated a span that should have continued.
+        //
+        // Marked `compaction` rather than skipped, and deliberately alongside
+        // the `compact_boundary` record: the public corpus carries only one of
+        // the two shapes, so recognising both is what keeps a compaction from
+        // going undetected. Consumers take the *first* one after a point, so a
+        // pair costs nothing.
+        if (r.isCompactSummary === true) {
+          push('system', { systemKind: 'compaction', textSummary: 'compaction:summary' });
+          break;
+        }
         if (typeof content === 'string') {
           // A slash-command echo is not a human speaking.
           push(META_CONTENT.test(content) ? 'local_command' : 'user_prompt', { ...sum(content) });
@@ -639,6 +663,14 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       case 'assistant': {
         const content = r.message?.content;
         const tokens = tokensOf(r.message?.usage);
+        // The API response this record belongs to.
+        //
+        // **One response is written as several records**, each repeating the
+        // same `message.id` *and* the same `usage`. Measured on a real session:
+        // 934 of 1,531 responses span more than one record, up to seven. Summing
+        // usage per record therefore counts it once per block — a 2.49x
+        // overcount of every token figure.
+        const responseId = typeof r.message?.id === 'string' ? r.message.id : undefined;
         if (!Array.isArray(content)) break;
         for (const b of content as AnyBlock[]) {
           switch (b?.type) {
@@ -653,10 +685,18 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
                 ...(argDigest(b.input) !== undefined
                   ? { argHash: argDigest(b.input) as string }
                   : {}),
+                // The size of what the agent wrote to make this call. Measured:
+                // for a refused edit the discarded `old_string`/`new_string` is
+                // ~50x the error text, so this is the dominant cost and the one
+                // thing only a hash was kept of.
+                ...(b.input !== undefined
+                  ? { argBytes: Buffer.byteLength(JSON.stringify(b.input)) }
+                  : {}),
                 // Recorded here so a detector never has to read the command to
                 // know its own output was clipped before we saw it.
                 ...(truncatesOutput(target.command) ? { truncatesOwnOutput: true } : {}),
                 ...(tokens !== undefined ? { tokens } : {}),
+          ...(responseId !== undefined ? { responseId } : {}),
               });
               break;
             }
@@ -675,6 +715,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
               push('assistant_msg', {
                 ...(t !== undefined ? { textSummary: t } : {}),
                 ...(tokens !== undefined ? { tokens } : {}),
+          ...(responseId !== undefined ? { responseId } : {}),
               });
               break;
             }
@@ -687,6 +728,34 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       }
 
       case 'system': {
+        // ── Compaction, as current transcripts actually record it ───────────
+        //
+        // The `type: 'summary'` branch below handles what the public corpus
+        // emits. **Real local transcripts use this instead**, and the parser
+        // missed it entirely: a real session reported zero compactions, so
+        // `systemKind: 'compaction'` was silently never set on current data —
+        // despite that session having compacted three times, each time from
+        // about a million tokens down to thirty thousand.
+        //
+        // `compactMetadata` carries exact token counts — `preTokens`,
+        // `postTokens`, `cumulativeDroppedTokens` — which beats any estimate we
+        // could make, and is the harness's own accounting rather than ours.
+        if (r.subtype === 'compact_boundary') {
+          const meta = (r as { compactMetadata?: Record<string, unknown> }).compactMetadata ?? {};
+          const n = (k: string): number | undefined =>
+            typeof meta[k] === 'number' ? (meta[k] as number) : undefined;
+          const pre = n('preTokens');
+          const post = n('postTokens');
+          push('system', {
+            systemKind: 'compaction',
+            textSummary: `compaction:${String(meta['trigger'] ?? 'unknown')}`,
+            ...(pre !== undefined && post !== undefined
+              ? { compaction: { preTokens: pre, postTokens: post } }
+              : {}),
+          });
+          break;
+        }
+
         push('system', {
           systemKind: 'other',
           ...(r.subtype !== undefined ? { textSummary: `system:${r.subtype}` } : {}),

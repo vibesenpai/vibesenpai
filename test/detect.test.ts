@@ -980,3 +980,49 @@ describe('redundant_call — same call, same answer, nothing changed between', (
     expect(detectorsFor('core').map((d) => d.dimension)).not.toContain('redundant_call');
   });
 });
+
+describe('countDenominators — usage is counted once per response', () => {
+  it('does not sum the same usage once per block', () => {
+    // A response is written as several records, each repeating the SAME usage.
+    // Measured on a real session: 934 of 1,531 responses span more than one
+    // record, which inflated every token figure by 2.49x.
+    const tokens = { input: 0, output: 500, cacheRead: 0, cacheCreation: 100 };
+    const events = [1, 2, 3].map((n) => ({
+      uuid: `u${n}`,
+      sessionId: 's1',
+      seq: n,
+      turnType: 'assistant_msg' as const,
+      responseId: 'msg_1',
+      tokens,
+    }));
+
+    const d = countDenominators(events as never);
+    expect(d.tokens.output).toBe(500);
+    expect(d.tokens.cacheCreation).toBe(100);
+  });
+
+  it('is not fooled by two token-bearing events sharing a uuid', () => {
+    // Measured: 16 pinned-corpus sessions carry token-bearing events with a
+    // duplicated uuid, so an earlier fix that keyed the dedup set on uuid
+    // matched both siblings and reintroduced the double count it replaced.
+    const tokens = { input: 0, output: 500, cacheRead: 0, cacheCreation: 0 };
+    const events = [
+      { uuid: 'same', sessionId: 's1', seq: 1, turnType: 'assistant_msg' as const, responseId: 'a', tokens },
+      { uuid: 'same', sessionId: 's1', seq: 2, turnType: 'assistant_msg' as const, responseId: 'b', tokens },
+    ];
+    // Two genuinely distinct responses that happen to share a uuid: 1000.
+    expect(countDenominators(events as never).tokens.output).toBe(1000);
+  });
+
+  it('still counts records that genuinely stand alone', () => {
+    const events = [1, 2].map((n) => ({
+      uuid: `u${n}`,
+      sessionId: 's1',
+      seq: n,
+      turnType: 'assistant_msg' as const,
+      tokens: { input: 0, output: 10, cacheRead: 0, cacheCreation: 0 },
+    }));
+    // No responseId, so each falls back to its own uuid rather than collapsing.
+    expect(countDenominators(events as never).tokens.output).toBe(20);
+  });
+});

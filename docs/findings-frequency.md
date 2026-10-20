@@ -26,8 +26,13 @@ is a uniform random sample. The ranking is stable across both except `reading_sp
 gap is the widest in the table and the reason it is not built.
 
 Denominators: 15,911 prompts, 35,574 edits, 156,654 tool calls, 5,354 harness-declared failures.
-Tokens: 97.1M output, 694.7M cache creation. `cache_creation/output` per session: **p50 12.0, p90
-93.4, p99 857.6**.
+Tokens: 69.8M output, 591.9M cache creation. `cache_creation/output` per session: **p50 17.9, p90
+159.5, p99 1815.9** (n=1,132).
+
+Re-measured 2026-10-20, after fixing a per-record token overcount: a response is written as several
+JSONL records which each repeat the same `usage`, and summing per record inflated output by 3.7x and
+cache creation by 2.8x. The previously published figures were 97.1M / 694.7M and p50 12.0, p90 93.4,
+p99 857.6.
 
 `edit_retry`'s row says `probe: detector` — the shipped rule itself ran, so the figure and the product
 cannot disagree. That is now a rule: **a built dimension is measured by its own detector, never by a

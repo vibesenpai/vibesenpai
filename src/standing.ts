@@ -38,11 +38,17 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countDenominators, runDetectors, type Detector } from './detect/index.ts';
+import { reasonOf } from './detect/labels.ts';
+import { costFor } from './cost.ts';
 import type { Event } from './types.ts';
 
 const FILE = 'standing.json';
 const MARKER = 'standing.running';
-const VERSION = 1;
+// 2: added `wastedTokens`. Bumped rather than made optional so a v1 file on
+// disk is discarded and recomputed — `readStanding` casts rather than
+// validates, so an absent field would otherwise read as `undefined` behind a
+// type that promises it is there. Consumers still use `?.` for that reason.
+const VERSION = 2;
 
 /**
  * How long a run marker is believed.
@@ -88,6 +94,19 @@ export type Standing = {
   }[];
   /** The harness's own reasons, summed across every finding. */
   reasons: Record<string, number>;
+  /**
+   * Tokens wasted, **keyed by reason** rather than by dimension.
+   *
+   * Per reason because that is the grain `fix` recommends at: "read before
+   * editing" addresses `not-read-first` and leaves `string-not-found`
+   * untouched, so quoting the dimension's whole total beside it would overstate
+   * the saving — on this machine by about 2x.
+   *
+   * `written` and `received` only. `carried` is deliberately absent: it depends
+   * on how long each session ran after the waste, so summing it across sessions
+   * produces a number that grows with session length rather than with waste.
+   */
+  wastedTokens: Record<string, { written: number; received: number }>;
   /**
    * Sessions found but unreadable.
    *
@@ -155,12 +174,15 @@ export async function computeStanding(
     { occurrences: number; sessions: Set<string>; subjects: Map<string, number> }
   >();
   const reasons: Record<string, number> = {};
+  const wastedTokens: Record<string, { written: number; received: number }> = {};
 
   for (const s of sessions) {
     const d = countDenominators(s.events);
     edits += d.editCount;
     output += d.tokens.output;
     cacheCreation += d.tokens.cacheCreation;
+
+    const pairs = new Set<string>();
 
     const res = await runDetectors({
       events: s.events,
@@ -182,7 +204,23 @@ export async function computeStanding(
       perDimension.set(f.dimension, slot);
       for (const [reason, n] of Object.entries(f.reasons ?? {})) {
         reasons[reason] = (reasons[reason] ?? 0) + n;
+        // Which (dimension, reason) pairs to price for this session. Collected
+        // rather than priced here: `costFor` scans the whole session, so
+        // calling it per finding would multiply the cost by the number of
+        // findings that share a reason.
+        pairs.add(`${f.dimension}\u0001${reason}`);
       }
+    }
+
+    // Once per (dimension, reason), after the findings are known.
+    for (const pair of pairs) {
+      const [dimension, reason] = pair.split('\u0001') as [string, string];
+      const c = costFor(s.events as Event[], { dimension, reason }, reasonOf);
+      const slot = wastedTokens[reason] ?? { written: 0, received: 0 };
+      wastedTokens[reason] = {
+        written: slot.written + c.written,
+        received: slot.received + c.received,
+      };
     }
   }
 
@@ -206,6 +244,7 @@ export async function computeStanding(
       })
       .sort((a, b) => b.occurrences - a.occurrences),
     reasons,
+    wastedTokens,
     unreadable: opts.unreadable ?? 0,
   };
 }

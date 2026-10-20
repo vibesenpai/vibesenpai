@@ -26,6 +26,7 @@ const base = (over: Partial<Standing> = {}): Standing => ({
       top: { subject: '~/.claude/plans/rosy-seeking-feather.md', occurrences: 2 },
     },
   ],
+  wastedTokens: {},
   reasons: { 'not-read-first': 2, 'string-not-found': 2 },
   unreadable: 0,
   ...over,

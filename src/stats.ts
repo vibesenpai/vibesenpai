@@ -38,6 +38,7 @@
  */
 
 import { EDIT_TOOLS } from './edits.ts';
+import { oncePerResponse } from './normalise.ts';
 import type { Event } from './types.ts';
 
 /** How many of the heaviest re-ingestion turns to name. A ranking, not a cut-off. */
@@ -85,6 +86,10 @@ export function sessionStats(events: Event[]): SessionStats {
   const versions = new Map<string, number>();
   const editsByPath = new Map<string, number>();
   const reingest: ReingestTurn[] = [];
+  // Among cache-creation-bearing events only, for the reason `index.ts` gives.
+  const countOnce = new Set(
+    oncePerResponse(events.filter((e) => (e.tokens?.cacheCreation ?? 0) > 0)),
+  );
 
   for (const e of events) {
     // `changedFiles` already holds only paths whose version *increased*, so a
@@ -98,7 +103,11 @@ export function sessionStats(events: Event[]): SessionStats {
       editsByPath.set(e.filePath, (editsByPath.get(e.filePath) ?? 0) + 1);
     }
 
-    const created = e.tokens?.cacheCreation ?? 0;
+    // Once per response. A response spans several records carrying the same
+    // `usage`, so counting per record ranked one response as three consecutive
+    // "heaviest turns" — which is exactly how the bug showed itself: three
+    // adjacent seqs whose share did not budge when the totals were halved.
+    const created = countOnce.has(e) ? (e.tokens?.cacheCreation ?? 0) : 0;
     if (created > 0) reingest.push({ seq: e.seq, uuid: e.uuid, tokens: created });
   }
 

@@ -158,6 +158,28 @@ export function detailLine(repoRoot: string, home: string): string {
     : `node --experimental-strip-types ${repoRoot}/src/cli.ts now`;
 }
 
+export function fixCommandPath(home: string): string {
+  return join(home, '.claude', 'commands', 'agentsensei', 'fix.md');
+}
+
+/**
+ * The next step after `now` — one thing to try about what it just showed.
+ *
+ * `now` reports this session; `fix` draws on the whole history, and the line
+ * says so. Offering it as though it were about the session just shown would be
+ * a small lie about what the next command prints.
+ *
+ * Checked the same way `detailLine` is, and for the same reason: the first
+ * version of that line named a command that did not exist on the machine it was
+ * written on.
+ */
+export function fixLine(repoRoot: string, home: string, thisSession: boolean): string {
+  const where = thisSession ? '' : ' — from your history';
+  return existsSync(fixCommandPath(home))
+    ? `/agentsensei:fix for one thing to try${where}`
+    : `node --experimental-strip-types ${repoRoot}/src/cli.ts fix`;
+}
+
 /**
  * The whole block.
  *

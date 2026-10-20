@@ -85,3 +85,47 @@ export function isPlausibleTimestamp(v: unknown): v is string {
   const floor = Date.UTC(2023, 0, 1); // predates any Claude Code transcript
   return t >= floor && t <= Date.now() + 86_400_000;
 }
+
+/**
+ * The events whose `tokens` should be counted — one per API response.
+ *
+ * **One definition, because the alternative was measured.** A response is
+ * written to the transcript as several records (one per content block), each
+ * repeating the same `message.id` *and* the same `usage`. Measured on a real
+ * session: 954 of 1,531 responses span more than one record, up to seven.
+ *
+ * Summing per record therefore counts the same usage once per block —
+ * inflating output tokens 2.49x locally and 3.7x on the pinned corpus — and it
+ * also made `stats.ts` rank one response as three separate "heaviest turns".
+ * Both readers now come through here.
+ *
+ * Siblings always carry identical usage (checked: 0 of 954 disagree), so
+ * keeping the first is not a choice between different numbers.
+ *
+ * Events with no `responseId` fall back to their own uuid, which keeps records
+ * that genuinely stand alone counted exactly once.
+ *
+ * **Hold the returned events by identity, never by uuid.** A uuid is not unique
+ * across a transcript: 16 pinned-corpus sessions carry token-bearing events
+ * that share one, so `new Set(...map((e) => e.uuid))` matched both siblings and
+ * reintroduced the double count. `new Set(oncePerResponse(xs))` does not.
+ *
+ * **Filter before calling this, not after.** Callers pass only the events that
+ * carry the figure they are summing: handed every event, this returns the first
+ * record of each response, and if that record happens to carry no `usage` the
+ * figure is lost from the sibling that does — trading an overcount for a silent
+ * undercount.
+ */
+export function oncePerResponse<T extends { uuid: string; responseId?: string }>(
+  events: readonly T[],
+): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const e of events) {
+    const key = e.responseId ?? e.uuid;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
+}

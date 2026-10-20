@@ -34,16 +34,22 @@ import type { Denominators } from './detect/index.ts';
 import type { Event, Finding } from './types.ts';
 import { adviceFor, reasonOf, type Reason } from './detect/labels.ts';
 import { sessionStats, type SessionStats } from './stats.ts';
+import { approx, costFor } from './cost.ts';
 
 /** Corpus percentiles, so a session's number has something to sit against. */
 export const CORPUS = {
   /**
-   * `cacheCreation / output` per session, measured over 1,139 SWE-chat
+   * `cacheCreation / output` per session, measured over 1,132 SWE-chat
    * sessions. Quoted rather than used as a threshold: this module states where
    * a session sits, it does not judge it.
+   *
+   * **Re-measured after the per-response token fix.** These were 12.0 and 93.4,
+   * computed while a split response's `usage` was summed once per record. Both
+   * halves of the ratio were inflated, but not equally — output by 3.7x against
+   * cache creation's 2.8x — so the ratio itself was wrong by about a third.
    */
-  reingestP50: 12.0,
-  reingestP90: 93.4,
+  reingestP50: 17.9,
+  reingestP90: 159.5,
 } as const;
 
 const INDENT = '  ';
@@ -89,6 +95,17 @@ export type RenderInput = {
   denominators: Denominators;
   /** Shown so a reader can tell an empty result from an unanalysed one. */
   sessionId: string;
+  /**
+   * The pointer to `fix`, printed last.
+   *
+   * Passed in rather than built here because deciding it needs the filesystem —
+   * whether the command is installed — and this module is pure. The CLI owns
+   * that check, through `fixLine`.
+   *
+   * Omitted when there is nothing to act on: no findings here and none in
+   * history means nothing to fix, so nothing to offer.
+   */
+  nextStep?: string;
   /**
    * The session's events, so each cited turn can say what happened there.
    *
@@ -209,14 +226,59 @@ export function headlineFor(f: Finding, byUuid: Map<string, Event>): string {
   return `${shortenPath(first.command.replace(/\s+/g, ' '), 56)}  ${digest[0]}`;
 }
 
-export function renderFinding(f: Finding, byUuid: Map<string, Event> = new Map()): string[] {
+export function renderFinding(
+  f: Finding,
+  byUuid: Map<string, Event> = new Map(),
+  events: Event[] = [],
+): string[] {
   const times = f.occurrences > 1 ? ` ×${f.occurrences}` : '';
   return [
     `${INDENT}⚑ ${f.dimension}${times}   [${f.confidence}]`,
     `${INDENT.repeat(2)}${headlineFor(f, byUuid)}`,
     ...adviceLines(f),
     ...evidenceLines(f, byUuid),
+    ...costLines(f, events),
   ];
+}
+
+/**
+ * What this finding cost, in tokens.
+ *
+ * **Two numbers, never one total.** `written` is output the agent generated and
+ * discarded — expensive per token and the honest headline. `carried` is what
+ * keeping that text in context cost afterwards, which is cache reads at roughly
+ * a tenth the price of input. Measured on real sessions, 98% of context tokens
+ * are cache reads, so adding the two would be meaningless arithmetic.
+ *
+ * Absent entirely when nothing could be priced — a session parsed before
+ * `argBytes` existed, or a finding whose calls carry no sizes. `0 tokens` would
+ * claim a measurement that was not made.
+ */
+export function costLines(f: Finding, events: Event[]): string[] {
+  if (events.length === 0) return [];
+  const c = costFor(events, { dimension: f.dimension, subject: f.subject });
+  if (c.written + c.received === 0) return [];
+
+  const head =
+    c.received > 0
+      ? `${approx(c.written)} tokens written and discarded, ${approx(c.received)} received`
+      : `${approx(c.written)} tokens written and discarded`;
+  const out = [`${INDENT.repeat(2)}cost  ${head}`];
+  if (c.carriedTurns > 0) {
+    // **"cheapest tier" is not editorial, it is the thing that stops the big
+    // number being misread.** The carried figure is hundreds of times the
+    // written one, and a reader with no reason to know that cache reads bill at
+    // roughly a tenth of fresh input would take it as the headline. Measured on
+    // real sessions: 98% of context tokens are cache reads.
+    out.push(
+      // "requests", not "turns": the turn numbers above are seqs, and this
+      // counts API calls, which is a different unit. Using one word for both
+      // would invite the reader to compare them.
+      `${INDENT.repeat(2)}      re-sent on ${c.carriedTurns} later request${c.carriedTurns === 1 ? '' : 's'}:` +
+        ` ${approx(c.carried)} cache reads (0.1x input)`,
+    );
+  }
+  return out;
 }
 
 /**
@@ -308,7 +370,7 @@ export function render(input: RenderInput): string {
       '',
     );
   } else {
-    for (const f of findings) lines.push(...renderFinding(f, byUuid), '');
+    for (const f of findings) lines.push(...renderFinding(f, byUuid, input.events), '');
   }
 
   const stats = sessionStats(input.events);
@@ -325,6 +387,10 @@ export function render(input: RenderInput): string {
       `${INDENT}${d.unclassifiedTouchCount} file-touching call(s) could not be classified as read or write`,
       '',
     );
+  }
+
+  if (input.nextStep !== undefined && input.nextStep !== '') {
+    lines.push(`${INDENT}${input.nextStep}`, '');
   }
 
   if (input.muted !== undefined && input.muted.length > 0) {

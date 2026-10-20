@@ -98,6 +98,33 @@ export type Event = {
    */
   argHash?: string;
 
+  /**
+   * Byte length of the call's arguments, as the harness serialised them.
+   *
+   * The cost input. Measured across 1,139 sessions: when an edit is refused,
+   * the discarded `old_string`/`new_string` averages 330 tokens against 75 for
+   * the error text — so what the agent *wrote and threw away* dominates, and
+   * `argHash` alone could not see it.
+   *
+   * A JSON length, so it runs slightly high on multi-line edits: every newline
+   * is stored as the two characters `\n`.
+   */
+  argBytes?: number;
+
+  /**
+   * The API response this event came from.
+   *
+   * A single response is written to the transcript as **several records** — one
+   * per content block — each repeating the same id and the same `usage`. So
+   * this is what makes two things possible: summing tokens once per response
+   * rather than once per block, and counting *requests* rather than records
+   * when asking how many times context was re-sent.
+   *
+   * Measured: 934 of 1,531 responses in one session span more than one record,
+   * up to seven. Summing per record overcounts tokens by 2.49x.
+   */
+  responseId?: string;
+
   exitCode?: number;
   isError?: boolean;
 
@@ -126,6 +153,15 @@ export type Event = {
    * would couple a persisted format to a display string.
    */
   systemKind?: 'compaction' | 'cost-state' | 'pr-link' | 'file-history' | 'other';
+
+  /**
+   * The harness's own accounting for a compaction, when it recorded one.
+   *
+   * Exact rather than estimated — `compactMetadata` reports what the context
+   * held before and after. Present only on `systemKind: 'compaction'` events
+   * from `compact_boundary` records; the older `summary` shape carries none.
+   */
+  compaction?: { preTokens: number; postTokens: number };
 
   /**
    * Files the harness recorded as **changed** at this point, from

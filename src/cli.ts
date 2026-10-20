@@ -27,7 +27,7 @@ import {
 } from './install.ts';
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
-import { detailLine, reportBlock } from './report-line.ts';
+import { detailLine, reportBlock, fixLine } from './report-line.ts';
 import { recommend, renderFix } from './fix.ts';
 import { spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -463,12 +463,22 @@ async function cmdNow(a: Argv): Promise<number> {
     detectors,
   });
 
+  // The pointer to `fix`, offered only when there is something to act on:
+  // findings here, or a standing that has some. Nothing to fix means no line.
+  const standing = readStanding(config.archive);
+  const haveHistory = standing !== undefined && standing.dimensions.length > 0;
+  const nextStep =
+    res.findings.length > 0 || haveHistory
+      ? fixLine(repoRoot(), homedir(), res.findings.length > 0)
+      : '';
+
   process.stdout.write(
     renderFindings({
       findings: res.findings,
       denominators: res.denominators,
       sessionId: current.sessionId,
       events: parsed.events,
+      ...(nextStep !== '' ? { nextStep } : {}),
       ...(config.mute.length > 0 ? { muted: config.mute } : {}),
     }),
   );

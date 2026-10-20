@@ -157,7 +157,12 @@ edit calls` can tell those apart, and a filter guessing for them could not.
 
 ### `context_reingest` — exact, universal, unanchorable as a ratio
 
-`cache_creation / output_tokens` per session: **p50 12.0, p90 93.4, p99 857.6**.
+`cache_creation / output_tokens` per session: **p50 17.9, p90 159.5, p99 1815.9** (n=1,132).
+
+> Re-measured 2026-10-20. These read p50 12.0, p90 93.4, p99 857.6 while a split
+> response's `usage` was being summed once per record — see
+> `src/parsers/claude-code.ts`. Both halves of the ratio were inflated, output
+> by 3.7x against cache creation's 2.8x, so the ratio was wrong by about a third.
 Exact, text-free, identical in meaning for every language and tool. But a
 session-wide ratio has no turn to point at, and CLAUDE.md is explicit that
 nothing is reported as a number without evidence behind it.
@@ -168,7 +173,7 @@ a ranking, needing no threshold.
 
 ```
   SESSION COST
-    3.8M out · 27.1M re-ingested · ratio 7.1 (corpus median 12.0)
+    1.9M out · 13.2M re-ingested · ratio 6.8 (corpus median 17.9)
     heaviest at turns 3586, 3587, 3588 — 11% of it
 
   MOST REWRITTEN

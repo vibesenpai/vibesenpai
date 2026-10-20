@@ -37,6 +37,7 @@ import { buildWindows, threadsOf, type SkeletonOptions, type Window } from '../s
 import type { Event, Finding, Preset } from '../types.ts';
 import type { Detector, DetectorContext, SessionFacts } from './types.ts';
 import { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../edits.ts';
+import { oncePerResponse } from '../normalise.ts';
 import { editRetry } from './edit-retry.ts';
 import { redundantCall } from './redundant-call.ts';
 import { reasonOf } from './labels.ts';
@@ -152,6 +153,18 @@ export function countDenominators(events: Event[]): Denominators {
     tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
   };
 
+  // Tokens are summed once per API response, never once per record — see
+  // `oncePerResponse`. Deduped among the events that actually carry `usage`:
+  // picking the first record of a response outright would drop the figures
+  // whenever that record happens to carry none, which is a silent undercount
+  // rather than the overcount this replaced.
+  // Holds the **events themselves**, not their uuids. A uuid is not unique
+  // either: 16 corpus sessions carry token-bearing events that share one, so a
+  // uuid-keyed set matched both siblings and double-counted exactly what this
+  // exists to prevent. Same trap as the non-unique tool-call ids in
+  // `src/detect/edit-retry.ts`.
+  const countOnce = new Set(oncePerResponse(sorted.filter((e) => e.tokens !== undefined)));
+
   // Files an edit tool already claimed, so a snapshot confirming the same edit
   // does not count it twice.
   //
@@ -167,7 +180,7 @@ export function countDenominators(events: Event[]): Denominators {
   for (const e of sorted) {
     if (e.turnType === 'user_prompt') d.turnCount++;
 
-    if (e.tokens !== undefined) {
+    if (e.tokens !== undefined && countOnce.has(e)) {
       d.tokens.input += e.tokens.input ?? 0;
       d.tokens.output += e.tokens.output ?? 0;
       d.tokens.cacheRead += e.tokens.cacheRead ?? 0;
