@@ -16,8 +16,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closed, isTripped, readBreaker, recordFailure, recordSuccess, TRIP_AFTER } from '../src/breaker.ts';
 import {
-  addHook, commandFilePath, describeChange, dropOurStatusLine, fixCommandFilePath,
-  legacyCommandFiles, planFor, remove, type Settings,
+  addHook, commandDir, commandFilePath, describeChange, dropOurStatusLine, fixCommandFilePath,
+  generateReportCommandBody, generateReportCommandFilePath, legacyCommandFiles, ourCommandFiles,
+  planFor, remove, type Settings,
 } from '../src/install.ts';
 import { materialise } from '../src/finding.ts';
 import {
@@ -405,5 +406,37 @@ describe('install — SessionStart triggers the standing pass', () => {
 
   it('the SessionStart command exits 0 whatever happens', () => {
     expect(plan.sessionStartCommand.endsWith('|| true')).toBe(true);
+  });
+});
+
+describe('command files — install and uninstall cannot disagree', () => {
+  it('lists all three, so rmdirSync is never left a non-empty directory', () => {
+    // The failure is silent: uninstall removes what it knows about, then calls
+    // `rmdirSync`, which refuses a non-empty directory and throws into an empty
+    // catch. A file we created and forgot to list would quietly cost the
+    // byte-identical uninstall the CLI verifies with a diff.
+    expect(ourCommandFiles('/home/x')).toEqual([
+      commandFilePath('/home/x'),
+      fixCommandFilePath('/home/x'),
+      generateReportCommandFilePath('/home/x'),
+    ]);
+  });
+
+  it('namespaces all three under the one subdirectory', () => {
+    // `.claude/commands/agentsensei/fix.md` is `/agentsensei:fix`; the same
+    // file flat would be `/agentsensei-fix`.
+    for (const f of ourCommandFiles('/home/x')) {
+      expect(f.startsWith(`${commandDir('/home/x')}/`)).toBe(true);
+      expect(f.endsWith('.md')).toBe(true);
+    }
+  });
+
+  it('tells the model not to restate the report it just wrote', () => {
+    // The other two bodies ask for verbatim reproduction because the output IS
+    // the evidence. Here the evidence is a file, so restating it would hand
+    // over a paraphrase while the real thing sat one `open` away.
+    const body = generateReportCommandBody('/repo');
+    expect(body).toMatch(/do not summarise/i);
+    expect(body).toContain('--html');
   });
 });

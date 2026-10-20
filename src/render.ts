@@ -189,18 +189,30 @@ export function describeTurn(e: Event): string {
  * someone can open the transcript and see for themselves, which is the whole
  * difference between this and a score.
  */
-function evidenceLines(f: Finding, byUuid: Map<string, Event>, max = 6): string[] {
-  const shown = f.evidence.slice(0, max);
+/**
+ * One evidence row, as data rather than text.
+ *
+ * Shared with `src/html.ts`, which is why this is a structure and not a
+ * formatted string: the HTML report builds the same table from the same rows,
+ * and — importantly — it means the gather step can keep these and **discard the
+ * events**. Retaining every session's events to look up six cited turns each
+ * would hold the whole history in memory at once.
+ */
+export type EvidenceRow = {
+  turn: string;
+  what: string;
+  detail: string;
+  /** The tool refused. Rendered `✗` in the terminal, a class in HTML. */
+  failed: boolean;
+  /** The call straight after a refusal — the retry a reader would infer. */
+  retry: boolean;
+};
 
-  // Rows first, widths second, text last. Measuring the turn column from the
-  // rows actually shown is what keeps `142` and `1127` in one column; the
-  // previous version hard-coded a pad of 5 and let anything wider push the
-  // line out of alignment.
-  type Row = { turn: string; what: string; detail: string; failed: boolean; retry: boolean };
-  const rows: Row[] = [];
+export function evidenceRows(f: Finding, byUuid: Map<string, Event>, max = 6): EvidenceRow[] {
+  const rows: EvidenceRow[] = [];
   let prevFailed = false;
 
-  for (const ref of shown) {
+  for (const ref of f.evidence.slice(0, max)) {
     const e = byUuid.get(ref.uuid);
     const turn = ref.seq === undefined ? '?' : String(ref.seq);
     if (e === undefined) {
@@ -208,17 +220,23 @@ function evidenceLines(f: Finding, byUuid: Map<string, Event>, max = 6): string[
       prevFailed = false;
       continue;
     }
-
     const failed = e.turnType === 'tool_result' && e.isError === true;
-    // A call straight after a refusal is the retry. Worth marking, because
-    // "Edit, refused, Edit" is the whole shape of the finding and the third
-    // row is the one a reader has to infer.
+    // "Edit, refused, Edit" is the whole shape of the finding, and the third
+    // row is the one a reader has to infer. Marked so they do not have to.
     const retry = e.turnType === 'tool_use' && prevFailed;
     const { what, detail } = turnColumns(e, f.subject);
     rows.push({ turn, what, detail, failed, retry });
     prevFailed = failed;
   }
+  return rows;
+}
 
+function evidenceLines(f: Finding, byUuid: Map<string, Event>, max = 6): string[] {
+  const shown = f.evidence.slice(0, max);
+  const rows = evidenceRows(f, byUuid, max);
+
+  // Widths measured from the rows actually shown: the previous version
+  // hard-coded a pad of 5, so a four-digit turn pushed its line out of column.
   const turnW = Math.max(...rows.map((r) => r.turn.length));
   const whatW = Math.max(...rows.map((r) => r.what.length + (r.failed ? 2 : 0)));
 

@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import {
   readSession,
   findSessionSource,
+  lookupSession,
   findLatestSession,
   resolveCurrentSession,
 } from '../src/read.ts';
@@ -117,6 +118,56 @@ describe('finding a session', () => {
   it('returns undefined for an unknown id rather than guessing', () => {
     session('aaa', ['{"a":1}']);
     expect(findSessionSource(SOURCES(), 'nope')).toBeUndefined();
+  });
+
+  describe('the id you can see is the id you can use', () => {
+    it('accepts the eight-character form every surface prints', () => {
+      // Reports print `session e3a3f0d4 · …`, and exact-equality matching meant
+      // the only id a reader ever saw was the one `--session` rejected.
+      const p = session('e3a3f0d4-a1b3-4305-8f15-5aefe476a409', ['{"a":1}']);
+      const r = lookupSession(SOURCES(), 'e3a3f0d4');
+      expect(r.ok).toBe(true);
+      expect(r.ok && r.source).toBe(p);
+      expect(r.ok && r.via).toBe('prefix');
+      // The full id comes back, so callers report the whole thing.
+      expect(r.ok && r.sessionId).toBe('e3a3f0d4-a1b3-4305-8f15-5aefe476a409');
+    });
+
+    it('prefers an exact match, so a full id can never read as ambiguous', () => {
+      // `abcd` is also a prefix of `abcdef`. Exact must win.
+      const exact = session('abcd', ['{"a":1}']);
+      session('abcdef', ['{"a":1}']);
+      const r = lookupSession(SOURCES(), 'abcd');
+      expect(r.ok && r.source).toBe(exact);
+      expect(r.ok && r.via).toBe('exact');
+    });
+
+    it('refuses a prefix too short to be meant', () => {
+      session('aaaa1111', ['{"a":1}']);
+      const r = lookupSession(SOURCES(), 'aa');
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.reason).toBe('too-short');
+    });
+
+    it('errors with the candidates instead of picking one', () => {
+      // The one that matters: guessing here would analyse somebody else's
+      // session under a header that looks authoritative.
+      session('dupe1111-aaaa', ['{"a":1}']);
+      session('dupe2222-bbbb', ['{"a":1}']);
+      const r = lookupSession(SOURCES(), 'dupe');
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.reason).toBe('ambiguous');
+      expect(!r.ok && r.reason === 'ambiguous' && r.candidates).toEqual([
+        'dupe1111-aaaa',
+        'dupe2222-bbbb',
+      ]);
+    });
+
+    it('reports not-found for a long prefix that matches nothing', () => {
+      session('aaaa1111', ['{"a":1}']);
+      const r = lookupSession(SOURCES(), 'zzzz9999');
+      expect(!r.ok && r.reason).toBe('not-found');
+    });
   });
 
   it('picks the most recently written transcript', () => {

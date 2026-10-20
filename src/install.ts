@@ -98,6 +98,32 @@ act on it, or change how you work until the answer is yes.
  * and `commit-commands:commit` are plugin commands, but a nested user command
  * reaches the same shape.
  */
+/**
+ * The `/agentsensei:generate-report` command.
+ *
+ * **It does not ask for the output to be reproduced**, which is the one way its
+ * body differs from the other two. There is nothing to reproduce: the evidence
+ * is in the file. Restating the findings in chat would be exactly the
+ * paraphrase-instead-of-evidence that `now.md` and `fix.md` are worded to
+ * prevent, and it would do it while the real evidence sat one `open` away.
+ */
+export function generateReportCommandBody(repoRoot: string, nodePath = process.execPath): string {
+  return `---
+description: Write a self-contained HTML report of your sessions
+allowed-tools: Bash(${nodePath}:*)
+---
+
+!\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts report --html\`
+
+Give the user the file path from the output above, on its own line, and the
+command to open it. Nothing else.
+
+Do NOT summarise the findings, list the sessions, or describe what is in the
+report. It is a file; they will read it. Repeating its contents here would
+replace the evidence with a paraphrase of the evidence.
+`;
+}
+
 export function commandDir(home: string): string {
   return `${home}/.claude/commands/${MARKER}`;
 }
@@ -108,6 +134,24 @@ export function commandFilePath(home: string): string {
 
 export function fixCommandFilePath(home: string): string {
   return `${commandDir(home)}/fix.md`;
+}
+
+export function generateReportCommandFilePath(home: string): string {
+  return `${commandDir(home)}/generate-report.md`;
+}
+
+/**
+ * Every command file we install, so install and uninstall cannot disagree.
+ *
+ * **One list, because the failure is silent.** `uninstall` removes the files it
+ * knows about and then calls `rmdirSync`, which refuses a non-empty directory —
+ * deliberately, so somebody else's command in there survives. A file we created
+ * and forgot to list would leave the directory non-empty, make `rmdirSync`
+ * throw into an empty catch, and quietly cost the byte-identical uninstall the
+ * CLI verifies with a diff.
+ */
+export function ourCommandFiles(home: string): string[] {
+  return [commandFilePath(home), fixCommandFilePath(home), generateReportCommandFilePath(home)];
 }
 
 /**

@@ -10,11 +10,17 @@
 
 import { homedir } from 'node:os';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import { resolveConfig, type Layer } from './config.ts';
 import { describeCatalog, readCatalog, runScan } from './catalog.ts';
 import { parse, registry } from './parsers/index.ts';
-import { readSession, resolveCurrentSession, findSessionSource } from './read.ts';
+import {
+  findSessionSource, lookupSession, readSession, resolveCurrentSession,
+  MIN_ID_PREFIX, type SessionLookup,
+} from './read.ts';
+import { gatherReport, type ReportData } from './gather.ts';
+import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
 import { countDenominators, detectorsFor, runDetectors, unknownDimensions } from './detect/index.ts';
@@ -23,14 +29,15 @@ import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
 import {
   addHook, commandDir, commandFileBody, commandFilePath, describeChange, dropOurStatusLine,
-  fixCommandBody, fixCommandFilePath, legacyCommandFiles, planFor, remove, type Settings,
+  fixCommandBody, fixCommandFilePath, generateReportCommandBody, generateReportCommandFilePath,
+  legacyCommandFiles, ourCommandFiles, planFor, remove, type Settings,
 } from './install.ts';
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
 import { detailLine, reportBlock, fixLine } from './report-line.ts';
 import { recommend, renderFix } from './fix.ts';
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 
 type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
 
@@ -584,6 +591,7 @@ function cmdInstall(a: Argv): number {
   for (const [p_, name] of [
     [commandFilePath(home), '/agentsensei:now'],
     [fixCommandFilePath(home), '/agentsensei:fix'],
+    [generateReportCommandFilePath(home), '/agentsensei:generate-report'],
   ] as const) {
     console.log(`  ${existsSync(p_) ? 'command (exists)' : 'command (new)   '}  ${name.padEnd(17)} ${p_}`);
   }
@@ -628,6 +636,7 @@ function cmdInstall(a: Argv): number {
     mkdirSync(commandDir(home), { recursive: true });
     writeFileSync(commandFilePath(home), commandFileBody(repoRoot()));
     writeFileSync(fixCommandFilePath(home), fixCommandBody(repoRoot()));
+    writeFileSync(generateReportCommandFilePath(home), generateReportCommandBody(repoRoot()));
     // The flat files an earlier version wrote, which would otherwise linger as
     // a second, un-namespaced `/agentsensei`.
     for (const old of legacyCommandFiles(home)) rmSync(old, { force: true });
@@ -684,7 +693,6 @@ async function cmdStanding(a: Argv): Promise<number> {
   const { config } = configFromFlags(a);
 
   if (a.flags['refresh'] === true) {
-    const { execFileSync } = await import('node:child_process');
     try {
       execFileSync(
         process.execPath,
@@ -753,7 +761,7 @@ function cmdUninstall(a: Argv): number {
 
   const change = describeChange(before, after);
   console.log(`settings: ${path}\n`);
-  const cmdFiles = [commandFilePath(home), fixCommandFilePath(home), ...legacyCommandFiles(home)].filter(
+  const cmdFiles = [...ourCommandFiles(home), ...legacyCommandFiles(home)].filter(
     (f) => existsSync(f),
   );
   if (change.length === 0 && cmdFiles.length === 0) {
@@ -766,6 +774,7 @@ function cmdUninstall(a: Argv): number {
   for (const [p_, name] of [
     [commandFilePath(home), '/agentsensei:now'],
     [fixCommandFilePath(home), '/agentsensei:fix'],
+    [generateReportCommandFilePath(home), '/agentsensei:generate-report'],
   ] as const) {
     console.log(`  ${existsSync(p_) ? 'command (exists)' : 'command (new)   '}  ${name.padEnd(17)} ${p_}`);
   }
@@ -779,8 +788,7 @@ function cmdUninstall(a: Argv): number {
   }
   writeFileSync(path, `${JSON.stringify(after, null, 2)}\n`);
   try {
-    rmSync(commandFilePath(home), { force: true });
-    rmSync(fixCommandFilePath(home), { force: true });
+    for (const f of ourCommandFiles(home)) rmSync(f, { force: true });
     for (const old of legacyCommandFiles(home)) rmSync(old, { force: true });
     // `rmdirSync`, not `rmSync`: it refuses a non-empty directory, which is
     // exactly the guard wanted. If someone put their own command in there, the
@@ -793,6 +801,13 @@ function cmdUninstall(a: Argv): number {
   return 0;
 }
 
+/**
+ * `report` — a range, what it covers, and what was found in it.
+ *
+ * Text by default, HTML with `--html`. Both render the **same** `ReportData`
+ * from one session enumeration, so the two cannot disagree about which sessions
+ * exist. See `src/gather.ts` for why that mattered.
+ */
 async function cmdReport(a: Argv): Promise<number> {
   const { config } = configFromFlags(a);
   const f = a.flags;
@@ -809,112 +824,166 @@ async function cmdReport(a: Argv): Promise<number> {
     return 1;
   }
 
-  const d = describeCatalog(config.archive);
-  const segments = segmentByDepth(range.range, {
-    // One interval per session, not a single start boundary: a gap between
-    // sessions must stay visible rather than being reported as covered.
-    covered: d.spans.map((s) => ({ from: new Date(s.from), to: new Date(s.to) })),
-    scanned: d.sessions > 0,
-    // `history.jsonl` parsing is an M2 deliverable, so the shallow tier has no
-    // backing yet. Claiming it now would promise depth we cannot deliver.
-    hasPromptHistory: false,
-  });
-
-  const project = typeof f['project'] === 'string' ? f['project'] : undefined;
-  console.log(
-    `report · ${range.range.from.toISOString().slice(0, 10)} → ` +
-      `${range.range.to.toISOString().slice(0, 10)}`,
-  );
-  if (project !== undefined) {
-    // Printing `· project ~ode` in the header read as "restricted to that
-    // project" while nothing was filtered — the same implied-coverage problem as
-    // the depth labelling, one line further down.
-    console.log(`  note: --project ${project} is accepted but not yet applied`);
-  }
-  console.log('\ncoverage');
-  for (const l of describeCoverage(segments)) console.log(l);
-
-  // Findings are recomputed rather than read from a store. Measured on real
-  // transcripts: parse is 95% of the cost (423ms for 19.9MB) and detection 5%,
-  // so ~2s across the design target of 40 sessions. Persistence buys trends,
-  // surfaced-dedup and dismissals — none of which this surface needs yet, and
-  // a store that can disagree with the transcript is worse than a short wait.
   const detectors = detectorsFromConfig(config);
   if (detectors.length === 0) {
-    console.error(`\nwarning: preset "${config.preset}" selected no detectors`);
+    console.error(`warning: preset "${config.preset}" selected no detectors`);
     return 0;
   }
 
-  // Entries, not `describeCatalog`'s spans: the entry carries the session id and
-  // the source path, so there is nothing to look up and nothing to mismatch.
-  const catalog = readCatalog(config.archive);
-  const inRange = Object.values(catalog?.entries ?? {}).filter((e) => {
-    if (e.gone !== undefined) return false; // the harness TTL took it
-    const t = Date.parse(e.firstTs ?? e.firstSeenAt);
-    return (
-      Number.isFinite(t) && t >= range.range.from.getTime() && t <= range.range.to.getTime()
-    );
+  // `--session` accepts the short form every surface prints. An ambiguous
+  // prefix is refused with its candidates rather than guessed at.
+  let only: string | undefined;
+  const wanted = f['session'];
+  if (typeof wanted === 'string') {
+    const hit = lookupSession(config.sources, wanted);
+    if (!hit.ok) {
+      console.error(sessionLookupError(wanted, hit));
+      return 1;
+    }
+    only = hit.sessionId;
+  }
+
+  // ── When no range was asked for, do not impose one ───────────────────────
+  //
+  // The user chose "all sessions found" as the default for the HTML report, and
+  // naming a session must never come back empty: `--session <id>` for a session
+  // older than the implicit window answered "no sessions found in this range",
+  // which is the worst possible reply to an explicit request.
+  //
+  // Plain-text `report` with no flags keeps its 7-day default — it is a
+  // coverage report and that window is the point — but an explicit `--session`
+  // overrides it there too.
+  const asked = ['last', 'since', 'until'].some((k) => typeof f[k] === 'string');
+  const wantsAll = !asked && (f['html'] === true || typeof f['out'] === 'string' || only !== undefined);
+
+  const data = await gatherReport({
+    sources: config.sources,
+    detectors,
+    ...(wantsAll ? {} : { range: range.range }),
+    preset: config.preset,
+    muted: config.mute,
+    ...(only !== undefined ? { onlySessionId: only } : {}),
   });
 
-  if (inRange.length === 0) {
-    console.log('\nno catalogued sessions in this range');
+  if (f['html'] === true || typeof f['out'] === 'string') {
+    return writeHtmlReport(data, config.archive, f);
+  }
+
+  if (typeof f['project'] === 'string') {
+    console.log(`  note: --project ${f['project']} is accepted but not yet applied`);
+  }
+
+  console.log(
+    `report · ${data.range.from.toISOString().slice(0, 10)} → ` +
+      `${data.range.to.toISOString().slice(0, 10)}`,
+  );
+
+  // Coverage from the sessions' own timestamps, not a catalog record of when we
+  // first saw them — the mismatch that had `report` claiming a window was
+  // uncovered while listing a session that spanned it.
+  const covered = data.sessions
+    .filter((s) => s.firstTs !== undefined && s.lastTs !== undefined)
+    .map((s) => ({ from: new Date(s.firstTs as string), to: new Date(s.lastTs as string) }));
+  console.log('\ncoverage');
+  for (const l of describeCoverage(
+    segmentByDepth(data.range, {
+      covered,
+      scanned: data.sessions.length > 0,
+      hasPromptHistory: false,
+    }),
+  )) {
+    console.log(l);
+  }
+
+  if (data.sessions.length === 0) {
+    console.log('\nno sessions found in this range');
     return 0;
   }
 
-  console.log(`\nfindings · ${inRange.length} session(s) re-analysed`);
-  let total = 0;
-  let unreadable = 0;
-  const byDimension = new Map<string, number>();
-
-  for (const entry of inRange.sort((x, y) => (x.firstTs ?? '').localeCompare(y.firstTs ?? ''))) {
-    let parsed;
-    try {
-      const read = readSession({ source: entry.source, sessionId: entry.sessionId, mode: 'live' });
-      parsed = parse(entry.source, read.text, entry.sessionId);
-    } catch {
-      // Catalogued but no longer readable. Counted, not silently skipped: a
-      // report that quietly analysed fewer sessions than it claimed is the
-      // implied-coverage problem the depth labelling exists to prevent.
-      unreadable++;
-      continue;
-    }
-    const res = await runDetectors({
-      events: parsed.events,
-      session: {
-        sessionId: entry.sessionId,
-        project: projectOf(entry.source),
-        live: false,
-      },
-      detectors,
-    });
-    for (const fi of res.findings) {
-      total++;
-      byDimension.set(fi.dimension, (byDimension.get(fi.dimension) ?? 0) + fi.occurrences);
-    }
-    if (res.findings.length > 0) {
-      process.stdout.write(
-        renderFindings({
-          findings: res.findings,
-          denominators: res.denominators,
-          sessionId: entry.sessionId,
-          events: parsed.events,
-        }),
-      );
-    }
-  }
-
-  if (unreadable > 0) {
-    console.log(`  ${unreadable} catalogued session(s) could no longer be read`);
+  const total = data.sessions.reduce((n, s) => n + s.findings.length, 0);
+  console.log(`\nfindings · ${data.sessions.length} session(s) analysed`);
+  if (data.unreadable > 0) {
+    console.log(`  ${data.unreadable} discovered session(s) could not be read`);
   }
   if (total === 0) {
     console.log('  none');
   } else {
     console.log('  by dimension');
-    for (const [dim, n] of [...byDimension].sort((x, y) => y[1] - x[1])) {
-      console.log(`    ${dim.padEnd(20)} ${n} occurrence(s)`);
+    for (const dim of data.standing.dimensions) {
+      console.log(`    ${dim.dimension.padEnd(20)} ${dim.occurrences} occurrence(s)`);
     }
   }
   if (config.mute.length > 0) console.log(`  muted: ${config.mute.join(', ')}`);
+  return 0;
+}
+
+/** A session id that did not resolve, said in a way that can be acted on. */
+function sessionLookupError(wanted: string, hit: SessionLookup & { ok: false }): string {
+  switch (hit.reason) {
+    case 'too-short':
+      return `--session "${wanted}" is too short — give at least ${MIN_ID_PREFIX} characters`;
+    case 'ambiguous':
+      // Never pick one: analysing somebody else's session under an
+      // authoritative-looking header is the failure worth being noisy about.
+      return [
+        `--session "${wanted}" matches ${hit.candidates.length} sessions:`,
+        ...hit.candidates.map((c) => `    ${c}`),
+      ].join('\n');
+    default:
+      return `no session matching "${wanted}"`;
+  }
+}
+
+/**
+ * Write the HTML report, 0600, temp-then-rename.
+ *
+ * Into the archive by default rather than the working directory: the page
+ * carries file paths, turn numbers and refusal reasons across every session in
+ * range, and the working directory is usually a git repo where one `git add -A`
+ * would publish it. `--out` is the deliberate way to put it somewhere shared.
+ */
+function writeHtmlReport(data: ReportData, archive: string, f: Argv['flags']): number {
+  // `2026-10-20-1234.html` — sortable, and in **local** time. `toISOString` is
+  // UTC, so a report written at 12:34 was being named `…-1934.html`, which
+  // reads as a different report from the one you just asked for.
+  const d = new Date();
+  const p2 = (n: number): string => String(n).padStart(2, '0');
+  const stamp =
+    `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}` +
+    `-${p2(d.getHours())}${p2(d.getMinutes())}`;
+  const dir = join(archive, 'reports');
+  const path = typeof f['out'] === 'string' ? f['out'] : join(dir, `${stamp}.html`);
+
+  const html = renderHtml(data);
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, html, { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch (err) {
+    console.error(`could not write ${path}: ${String(err)}`);
+    return 1;
+  }
+
+  const total = data.sessions.reduce((n, s) => n + s.findings.length, 0);
+  console.log(
+    `wrote ${path}\n` +
+      `  ${data.sessions.length} session(s) · ${total} finding(s) · ` +
+      `${(Buffer.byteLength(html) / 1024).toFixed(0)} KB · mode 0600`,
+  );
+
+  if (f['open'] === true) {
+    // `execFile`, never a shell string: the path is interpolated and `--out`
+    // takes it from the command line.
+    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+    try {
+      execFileSync(opener, [path], { stdio: 'ignore' });
+    } catch {
+      console.log(`  (could not launch ${opener} — open it yourself)`);
+    }
+  } else {
+    console.log(`  open it:  ${process.platform === 'darwin' ? 'open' : 'xdg-open'} ${path}`);
+  }
   return 0;
 }
 

@@ -40,7 +40,7 @@ import { join } from 'node:path';
 import { countDenominators, runDetectors, type Detector } from './detect/index.ts';
 import { reasonOf } from './detect/labels.ts';
 import { costFor } from './cost.ts';
-import type { Event } from './types.ts';
+import type { Event, Finding } from './types.ts';
 
 const FILE = 'standing.json';
 const MARKER = 'standing.running';
@@ -161,76 +161,102 @@ export type SessionInput = { sessionId: string; project: string; events: Event[]
  * owns reading and parsing, which is also what keeps the expensive part on the
  * detached side of the boundary.
  */
-export async function computeStanding(
-  sessions: SessionInput[],
-  detectors: Detector[],
-  opts: { unreadable?: number; now?: string } = {},
-): Promise<Standing> {
-  let edits = 0;
-  let output = 0;
-  let cacheCreation = 0;
-  const perDimension = new Map<
+/**
+ * The running totals, so a caller that already has a session's findings can
+ * fold them in without the events being re-read.
+ *
+ * **Split out so the math has one home.** `src/gather.ts` runs the detectors
+ * itself to build the report, and before this it handed every session's events
+ * back for `computeStanding` to run them *again* — holding the whole history in
+ * memory for a second pass that produced the same findings. Copying the
+ * accumulation into `gather.ts` instead would leave two versions of the
+ * standing arithmetic to drift apart.
+ */
+export type StandingAccumulator = {
+  sessions: number;
+  edits: number;
+  output: number;
+  cacheCreation: number;
+  perDimension: Map<
     string,
     { occurrences: number; sessions: Set<string>; subjects: Map<string, number> }
-  >();
-  const reasons: Record<string, number> = {};
-  const wastedTokens: Record<string, { written: number; received: number }> = {};
+  >;
+  reasons: Record<string, number>;
+  wastedTokens: Record<string, { written: number; received: number }>;
+};
 
-  for (const s of sessions) {
-    const d = countDenominators(s.events);
-    edits += d.editCount;
-    output += d.tokens.output;
-    cacheCreation += d.tokens.cacheCreation;
+export function newStandingAccumulator(): StandingAccumulator {
+  return {
+    sessions: 0,
+    edits: 0,
+    output: 0,
+    cacheCreation: 0,
+    perDimension: new Map(),
+    reasons: {},
+    wastedTokens: {},
+  };
+}
 
-    const pairs = new Set<string>();
+/** Fold one session in, while its events are still to hand. */
+export function accumulateSession(
+  acc: StandingAccumulator,
+  s: { sessionId: string; events: Event[]; findings: Finding[] },
+): void {
+  acc.sessions += 1;
+  const d = countDenominators(s.events);
+  acc.edits += d.editCount;
+  acc.output += d.tokens.output;
+  acc.cacheCreation += d.tokens.cacheCreation;
 
-    const res = await runDetectors({
-      events: s.events,
-      session: { sessionId: s.sessionId, project: s.project, live: false },
-      detectors,
-    });
+  const pairs = new Set<string>();
 
-    for (const f of res.findings) {
-      const slot = perDimension.get(f.dimension) ?? {
-        occurrences: 0,
-        sessions: new Set<string>(),
-        subjects: new Map<string, number>(),
-      };
-      slot.occurrences += f.occurrences;
-      slot.sessions.add(s.sessionId);
-      // Summed across sessions: the same file hit in two sessions is one
-      // subject with two occurrences, not two subjects.
-      slot.subjects.set(f.subject, (slot.subjects.get(f.subject) ?? 0) + f.occurrences);
-      perDimension.set(f.dimension, slot);
-      for (const [reason, n] of Object.entries(f.reasons ?? {})) {
-        reasons[reason] = (reasons[reason] ?? 0) + n;
-        // Which (dimension, reason) pairs to price for this session. Collected
-        // rather than priced here: `costFor` scans the whole session, so
-        // calling it per finding would multiply the cost by the number of
-        // findings that share a reason.
-        pairs.add(`${f.dimension}\u0001${reason}`);
-      }
-    }
+  for (const f of s.findings) {
+    const slot = acc.perDimension.get(f.dimension) ?? {
+      occurrences: 0,
+      sessions: new Set<string>(),
+      subjects: new Map<string, number>(),
+    };
+    slot.occurrences += f.occurrences;
+    slot.sessions.add(s.sessionId);
+    // Summed across sessions: the same file hit in two sessions is one subject
+    // with two occurrences, not two subjects.
+    slot.subjects.set(f.subject, (slot.subjects.get(f.subject) ?? 0) + f.occurrences);
+    acc.perDimension.set(f.dimension, slot);
 
-    // Once per (dimension, reason), after the findings are known.
-    for (const pair of pairs) {
-      const [dimension, reason] = pair.split('\u0001') as [string, string];
-      const c = costFor(s.events as Event[], { dimension, reason }, reasonOf);
-      const slot = wastedTokens[reason] ?? { written: 0, received: 0 };
-      wastedTokens[reason] = {
-        written: slot.written + c.written,
-        received: slot.received + c.received,
-      };
+    for (const [reason, n] of Object.entries<number>(f.reasons ?? {})) {
+      acc.reasons[reason] = (acc.reasons[reason] ?? 0) + n;
+      // Which (dimension, reason) pairs to price for this session. Collected
+      // rather than priced here: `costFor` scans the whole session, so calling
+      // it per finding would multiply the cost by the number of findings that
+      // share a reason.
+      pairs.add(`${f.dimension}\u0001${reason}`);
     }
   }
 
+  // Once per (dimension, reason), after the findings are known.
+  for (const pair of pairs) {
+    const [dimension, reason] = pair.split('\u0001') as [string, string];
+    const c = costFor(s.events, { dimension, reason }, reasonOf);
+    const slot = acc.wastedTokens[reason] ?? { written: 0, received: 0 };
+    acc.wastedTokens[reason] = {
+      written: slot.written + c.written,
+      received: slot.received + c.received,
+    };
+  }
+}
+
+/** Close the accumulator into the stored shape. */
+export function finishStanding(
+  acc: StandingAccumulator,
+  opts: { unreadable?: number; now?: string } = {},
+): Standing {
   return {
     v: VERSION,
     computedAt: opts.now ?? new Date().toISOString(),
-    sessions: sessions.length,
-    edits,
-    tokens: { output, cacheCreation },
-    dimensions: [...perDimension]
+    sessions: acc.sessions,
+    edits: acc.edits,
+    tokens: { output: acc.output, cacheCreation: acc.cacheCreation },
+    dimensions: [...acc.perDimension]
       .map(([dimension, v]) => {
         const ranked = [...v.subjects].sort((a, b) => b[1] - a[1]);
         const first = ranked[0];
@@ -243,10 +269,27 @@ export async function computeStanding(
         };
       })
       .sort((a, b) => b.occurrences - a.occurrences),
-    reasons,
-    wastedTokens,
+    reasons: acc.reasons,
+    wastedTokens: acc.wastedTokens,
     unreadable: opts.unreadable ?? 0,
   };
+}
+
+export async function computeStanding(
+  sessions: SessionInput[],
+  detectors: Detector[],
+  opts: { unreadable?: number; now?: string } = {},
+): Promise<Standing> {
+  const acc = newStandingAccumulator();
+  for (const s of sessions) {
+    const res = await runDetectors({
+      events: s.events,
+      session: { sessionId: s.sessionId, project: s.project, live: false },
+      detectors,
+    });
+    accumulateSession(acc, { sessionId: s.sessionId, events: s.events, findings: res.findings });
+  }
+  return finishStanding(acc, opts);
 }
 
 /**

@@ -145,7 +145,73 @@ function walk(sources: string[]): string[] {
  * currently in.
  */
 export function findSessionSource(sources: string[], sessionId: string): string | undefined {
-  return walk(sources).find((p) => basename(p, '.jsonl') === sessionId);
+  const r = lookupSession(sources, sessionId);
+  return r.ok ? r.source : undefined;
+}
+
+/** Minimum prefix length. Four hex characters is 65,536 — enough to be meant. */
+export const MIN_ID_PREFIX = 4;
+
+export type SessionLookup =
+  | { ok: true; sessionId: string; source: string; via: 'exact' | 'prefix' }
+  | { ok: false; reason: 'not-found' }
+  | { ok: false; reason: 'too-short' }
+  | { ok: false; reason: 'ambiguous'; candidates: string[] };
+
+/**
+ * Resolve a session id, accepting the short form every surface prints.
+ *
+ * ── The id you can see must be the id you can use ──────────────────────────
+ *
+ * Reports print eight characters — `session e3a3f0d4 · 5803 events` — and this
+ * matched on exact equality, so the only id a reader ever saw was the one
+ * `--session` rejected:
+ *
+ * ```
+ *   now --session e3a3f0d4  ->  no transcript found under: …
+ * ```
+ *
+ * Exact first, so a full id can never be read as an ambiguous prefix. Then a
+ * unique prefix.
+ *
+ * **An ambiguous prefix is an error, never a guess.** Picking one would analyse
+ * somebody else's session under a header that looks authoritative — the same
+ * failure `resolveCurrentSession` avoids by printing that it guessed.
+ */
+export function lookupSession(sources: string[], id: string): SessionLookup {
+  const files = walk(sources);
+
+  const exact = files.find((p) => basename(p, '.jsonl') === id);
+  if (exact !== undefined) return { ok: true, sessionId: id, source: exact, via: 'exact' };
+
+  if (id.length < MIN_ID_PREFIX) return { ok: false, reason: 'too-short' };
+
+  const hits = files.filter((p) => basename(p, '.jsonl').startsWith(id));
+  if (hits.length === 0) return { ok: false, reason: 'not-found' };
+  if (hits.length > 1) {
+    return {
+      ok: false,
+      reason: 'ambiguous',
+      candidates: hits.map((p) => basename(p, '.jsonl')).sort(),
+    };
+  }
+  const only = hits[0] as string;
+  return { ok: true, sessionId: basename(only, '.jsonl'), source: only, via: 'prefix' };
+}
+
+/**
+ * Every transcript under the configured sources.
+ *
+ * The one enumeration the multi-session surfaces share, so a page cannot
+ * disagree with itself about which sessions exist. `report` used to drive off
+ * the catalog and saw 4 of 8 — printing "no transcripts cover this period" for
+ * a window a listed session spanned.
+ *
+ * Built on `walk`, which is plain `readdirSync`. The detached standing pass had
+ * its own copy shelling out to `find`; this removes that subprocess.
+ */
+export function discoverTranscripts(sources: string[]): string[] {
+  return walk(sources);
 }
 
 export type LatestSession = { source: string; sessionId: string; mtimeMs: number };

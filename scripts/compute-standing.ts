@@ -11,7 +11,6 @@
  * circuit breaker so `doctor` can say so.
  */
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { parse } from '../src/parsers/index.ts';
@@ -21,26 +20,8 @@ import {
   clearStarted, computeStanding, isFresh, readStanding, writeStanding, type SessionInput,
 } from '../src/standing.ts';
 import { recordFailure, recordSuccess } from '../src/breaker.ts';
-
-/** Transcripts under the configured sources. `find` so a missing dir is not fatal. */
-function transcripts(sources: string[]): string[] {
-  const out: string[] = [];
-  for (const dir of sources) {
-    try {
-      // stderr discarded: a configured source that does not exist is normal
-      // (the codex directory on a Claude-only machine), and `find` complaining
-      // about it would surface as noise from a detached pass.
-      const found = execFileSync('find', [dir, '-name', '*.jsonl', '-size', '+0'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      out.push(...found.trim().split('\n').filter(Boolean));
-    } catch {
-      // A source that does not exist contributes nothing. Normal, not an error.
-    }
-  }
-  return out;
-}
+// One enumeration, shared with `report`. This file used to shell out to `find`.
+import { discoverTranscripts } from '../src/read.ts';
 
 async function main(): Promise<void> {
   const { config } = resolveConfig();
@@ -56,7 +37,7 @@ async function main(): Promise<void> {
   try {
     const sessions: SessionInput[] = [];
     let unreadable = 0;
-    for (const f of transcripts(config.sources)) {
+    for (const f of discoverTranscripts(config.sources)) {
       try {
         const id = basename(f, '.jsonl');
         const parsed = parse(f, readFileSync(f, 'utf8'), id);
