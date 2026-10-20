@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { caveatFor, durationOf, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
+import { caveatFor, durationOf, renderCompaction, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
 import { materialise } from '../src/finding.ts';
 import type { Denominators } from '../src/detect/index.ts';
 import type { Event, Finding } from '../src/types.ts';
@@ -270,5 +270,42 @@ describe('render — the confidence badge is gone, the caveat is not', () => {
       events: [],
     });
     expect(out).not.toContain('certain');
+  });
+});
+
+describe('render — CONTEXT states compaction without judging it', () => {
+  const statsWith = (count: number, measured: { seq: number; preTokens: number; postTokens: number }[]) => ({
+    rewritten: [],
+    reingest: { total: 0, heaviest: [], share: 0 },
+    compactions: {
+      count,
+      dropped: measured.reduce((n, m) => n + (m.preTokens - m.postTokens), 0),
+      measured,
+    },
+  });
+
+  it('says nothing at all when the session never compacted', () => {
+    expect(renderCompaction(statsWith(0, []) as never)).toEqual([]);
+  });
+
+  it('reports the harness figures, with no verb and no threshold', () => {
+    const out = renderCompaction(
+      statsWith(1, [{ seq: 1745, preTokens: 1_000_333, postTokens: 31_492 }]) as never,
+    ).join('\n');
+    expect(out).toContain('CONTEXT');
+    expect(out).toContain('compacted once');
+    expect(out).toContain('1745');
+    // Stated, not judged: no imperative, no severity word.
+    expect(out).not.toMatch(/should|too |avoid|warning|reduce/i);
+  });
+
+  it('counts a compaction that carries no figures rather than hiding it', () => {
+    // The older `summary` record shape reports no token counts. Two
+    // compactions shown as one would be worse than one without its numbers.
+    const out = renderCompaction(
+      statsWith(3, [{ seq: 10, preTokens: 900, postTokens: 100 }]) as never,
+    ).join('\n');
+    expect(out).toContain('compacted 3×');
+    expect(out).toContain('2 without reported sizes');
   });
 });

@@ -505,6 +505,41 @@ export function renderRewritten(stats: SessionStats, max = 4): string[] {
   return lines;
 }
 
+/**
+ * Where the context filled up and was summarised away.
+ *
+ * **Stated, not judged**, and absent entirely when it did not happen. There is
+ * no threshold and no verb: compacting is the harness working, not a mistake,
+ * and the only honest response — run shorter sessions — is advice this project
+ * does not give. What it adds is the scale, which is otherwise invisible: one
+ * real session dropped 2.8M tokens without ever saying so.
+ */
+export function renderCompaction(stats: SessionStats): string[] {
+  const c = stats.compactions;
+  if (c.count === 0) return [];
+
+  const times = c.count === 1 ? 'once' : `${c.count}×`;
+  const head =
+    c.dropped > 0
+      ? `compacted ${times} ${dim('— dropped')} ${bold(human(c.dropped))} ${dim('tokens of context')}`
+      : `compacted ${times}`;
+  const out = [`${INDENT}${dim('CONTEXT')}`, `${INDENT.repeat(2)}${head}`];
+
+  const w = Math.max(...c.measured.map((m) => String(m.seq).length), 1);
+  for (const m of c.measured) {
+    out.push(
+      `${INDENT.repeat(2)}  ${dim('turn')} ${pad(String(m.seq), w, bold, 'right')}   ` +
+        `${bold(human(m.preTokens))} ${dim('→')} ${human(m.postTokens)}`,
+    );
+  }
+  // Said rather than hidden: the older record shape carries no figures, so a
+  // count without numbers is a real state and not a bug.
+  if (c.measured.length < c.count) {
+    out.push(`${INDENT.repeat(2)}  ${dim(`${c.count - c.measured.length} without reported sizes`)}`);
+  }
+  return out;
+}
+
 export function render(input: RenderInput): string {
   const { findings, denominators: d } = input;
   const lines: string[] = [];
@@ -533,6 +568,9 @@ export function render(input: RenderInput): string {
   const stats = sessionStats(input.events);
   const cost = renderCost(d, stats);
   if (cost.length > 0) lines.push(...cost, '');
+
+  const compaction = renderCompaction(stats);
+  if (compaction.length > 0) lines.push(...compaction, '');
 
   const rewritten = renderRewritten(stats);
   if (rewritten.length > 0) lines.push(...rewritten, '');

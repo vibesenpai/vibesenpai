@@ -231,12 +231,36 @@ function sessionBlock(s: SessionView): string {
       : ` · ratio ${esc(ratio.toFixed(1))} (corpus median ${esc(CORPUS.reingestP50.toFixed(1))})`
   } · ${esc(String(s.denominators.editCount))} edits</p>`);
 
+  // Metadata, like the cost line above it — stated, never judged, and absent
+  // when the session never filled its context.
+  const comp = s.stats.compactions;
+  const context =
+    comp.count === 0
+      ? ''
+      : raw(
+          `<p class="note">compacted ${esc(comp.count === 1 ? 'once' : `${comp.count}×`)}` +
+            (comp.dropped > 0
+              ? ` — dropped <span class="fig">${esc(human(comp.dropped))}</span> tokens of context`
+              : '') +
+            (comp.measured.length > 0
+              ? `: ${comp.measured
+                  .map(
+                    (m) =>
+                      `turn ${esc(String(m.seq))} ${esc(human(m.preTokens))}→${esc(
+                        human(m.postTokens),
+                      )}`,
+                  )
+                  .join(', ')}`
+              : '') +
+            `</p>`,
+        );
+
   const body =
     n === 0
       ? `<p class="note">no findings across ${esc(String(s.denominators.editCount))} edits</p>`
       : s.findings.map(findingBlock).join('');
 
-  return raw(`<details><summary>${head}</summary><div>${cost}${body}</div></details>`);
+  return raw(`<details><summary>${head}</summary><div>${cost}${context}${body}</div></details>`);
 }
 
 export function renderHtml(d: ReportData): string {

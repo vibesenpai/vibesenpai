@@ -29,7 +29,11 @@ function session(over: Partial<SessionView> = {}): SessionView {
       unclassifiedTouchCount: 0,
       tokens: { input: 0, output: 1000, cacheRead: 0, cacheCreation: 5000 },
     },
-    stats: { rewritten: [], reingest: { heaviest: [], share: 0 } },
+    stats: {
+      rewritten: [],
+      reingest: { total: 0, heaviest: [], share: 0 },
+      compactions: { count: 0, dropped: 0, measured: [] },
+    },
     cost: ZERO_COST,
     ...over,
   } as SessionView;

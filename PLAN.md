@@ -385,7 +385,7 @@ A finding needs a turn to point at. That, not how often something occurs, sets t
 | 1 | **`edit_retry`** | **done** | 380/1,139 sessions (33.4%), 927 instances, 0 false positives in 28 hand-read findings |
 | 2 | `file_churn` | next | 11% of sessions, 401 instances |
 | 3 | `context_reingest` | next | p50 17.9, p90 159.5 — session **metadata**, not a finding |
-| 4 | `redundant_call` | next | 0.4% of sessions; kept on precision, out of `core` |
+| 4 | **`redundant_call`** | **done** | 54/1,139 sessions (4.7%), 66 instances, every one a distinct turn |
 
 Then: incremental persistence and the running-score rate engine with its four honesty guards.
 

@@ -75,6 +75,27 @@ export type SessionStats = {
     /** What share of the session's re-ingestion those turns account for, 0–1. */
     share: number;
   };
+  /**
+   * Where the session hit the context limit and was summarised.
+   *
+   * **Metadata, not a finding**, and the distinction is the point. A finding
+   * says something could have gone better and carries something applicable; a
+   * compaction is a fact about how long the session ran, and the honest
+   * response to it — start a fresh session — is advice, which CLAUDE.md puts
+   * out of scope. So this sits beside SESSION COST and states what happened.
+   *
+   * Reported because the figures are the harness's own and are large: one real
+   * session dropped 2,843,171 tokens across three compactions. Nothing here is
+   * inferred.
+   */
+  compactions: {
+    /** Every compaction, including the older record shape that carries no counts. */
+    count: number;
+    /** Summed `preTokens - postTokens`, over those that reported both. */
+    dropped: number;
+    /** Those that reported counts. Fewer than `count` on older transcripts. */
+    measured: { seq: number; preTokens: number; postTokens: number }[];
+  };
 };
 
 /** Does `a` and `b` name the same file, allowing for one being repo-relative? */
@@ -86,6 +107,8 @@ export function sessionStats(events: Event[]): SessionStats {
   const versions = new Map<string, number>();
   const editsByPath = new Map<string, number>();
   const reingest: ReingestTurn[] = [];
+  const compactions: { seq: number; preTokens: number; postTokens: number }[] = [];
+  let compactionCount = 0;
   // Among cache-creation-bearing events only, for the reason `index.ts` gives.
   const countOnce = new Set(
     oncePerResponse(events.filter((e) => (e.tokens?.cacheCreation ?? 0) > 0)),
@@ -101,6 +124,14 @@ export function sessionStats(events: Event[]): SessionStats {
 
     if (e.turnType === 'tool_use' && EDIT_TOOLS.has(e.toolName ?? '') && e.filePath !== undefined) {
       editsByPath.set(e.filePath, (editsByPath.get(e.filePath) ?? 0) + 1);
+    }
+
+    if (e.systemKind === 'compaction') {
+      // Counted whether or not it carries figures: the older `summary` record
+      // shape has none, and reporting two compactions as one would be worse
+      // than reporting one without its numbers.
+      compactionCount++;
+      if (e.compaction !== undefined) compactions.push({ seq: e.seq, ...e.compaction });
     }
 
     // Once per response. A response spans several records carrying the same
@@ -125,5 +156,16 @@ export function sessionStats(events: Event[]): SessionStats {
   const heaviest = reingest.slice(0, HEAVIEST_TURNS);
   const share = total === 0 ? 0 : heaviest.reduce((n, t) => n + t.tokens, 0) / total;
 
-  return { rewritten, reingest: { total, heaviest, share } };
+  return {
+    rewritten,
+    reingest: { total, heaviest, share },
+    compactions: {
+      count: compactionCount,
+      // Each compaction's own before/after. A compaction is bounded by the one
+      // before it, so these do not double-count: `preTokens` is the context at
+      // that moment, not a running total.
+      dropped: compactions.reduce((n, c) => n + Math.max(0, c.preTokens - c.postTokens), 0),
+      measured: compactions,
+    },
+  };
 }

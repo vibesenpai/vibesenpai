@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isRedundant, repeatGroups } from '../src/detect/redundant-call.ts';
 import { createHash } from 'node:crypto';
 import { outputDigest } from '../src/normalise.ts';
 import {
@@ -1024,5 +1025,66 @@ describe('countDenominators — usage is counted once per response', () => {
     }));
     // No responseId, so each falls back to its own uuid rather than collapsing.
     expect(countDenominators(events as never).tokens.output).toBe(20);
+  });
+});
+
+describe('redundant_call — two is a repeat, but never for an edit', () => {
+  let n = 0;
+  const ev = (o: Record<string, unknown>) => {
+    n += 1;
+    return { uuid: `u${n}`, sessionId: 's1', seq: n, ts: new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString(), ...o };
+  };
+  const pair = (tool: string) => {
+    n = 0;
+    const out: unknown[] = [ev({ turnType: 'user_prompt' })];
+    for (const id of ['a', 'b']) {
+      out.push(
+        ev({ turnType: 'tool_use', toolName: tool, toolCallId: id, filePath: '/f.ts', argHash: 'same' }),
+        ev({ turnType: 'tool_result', toolCallId: id, isError: false, outHash: 'same', outBytes: 10 }),
+        ev({ turnType: 'assistant_msg', responseId: `m${id}` }),
+      );
+    }
+    return out as never[];
+  };
+
+  it('flags the same call twice with the same answer', () => {
+    // Three was the old floor and found 6 findings in 1,139 sessions.
+    const groups = repeatGroups(pair('Read')).filter((g) => isRedundant(g, pair('Read')));
+    expect(groups.length).toBe(1);
+  });
+
+  it('never flags a repeated edit, whatever the count', () => {
+    // Measured: 92 of 97 such pairs made a REAL change — the output is the
+    // file's new contents, so "same answer" does not mean "nothing happened".
+    for (const tool of ['Edit', 'Write']) {
+      const events = pair(tool);
+      expect(repeatGroups(events).filter((g) => isRedundant(g, events)).length).toBe(0);
+    }
+  });
+
+  it('never pairs a call with itself when an id is reused', () => {
+    // Measured: one pinned fixture reuses 90 tool-call ids, and a last-wins
+    // lookup made two results resolve to the SAME call — which read as that
+    // call repeating itself. All 45 findings on the pinned corpus were this,
+    // and none were genuine. Threshold 3 hid it; a fake pair needs only one
+    // collision.
+    n = 0;
+    const call = ev({ turnType: 'tool_use', toolName: 'Read', toolCallId: 'dup', filePath: '/f.ts', argHash: 'same' });
+    const events = [
+      call,
+      ev({ turnType: 'tool_result', toolCallId: 'dup', isError: false, outHash: 'same', outBytes: 10 }),
+      ev({ turnType: 'tool_result', toolCallId: 'dup', isError: false, outHash: 'same', outBytes: 10 }),
+    ] as never[];
+    expect(repeatGroups(events).filter((g) => isRedundant(g, events))).toHaveLength(0);
+  });
+
+  it('keeps every guard that made it precise', () => {
+    // An edit between the calls still disqualifies a non-edit repeat: the
+    // threshold moved, nothing was loosened.
+    const events = pair('Read');
+    events.splice(4, 0, {
+      uuid: 'mid', sessionId: 's1', seq: 3.5, turnType: 'tool_use', toolName: 'Edit', filePath: '/x.ts',
+    } as never);
+    expect(repeatGroups(events).filter((g) => isRedundant(g, events)).length).toBe(0);
   });
 });

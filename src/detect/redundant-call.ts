@@ -39,7 +39,20 @@ import type { Candidate } from '../finding.ts';
 import type { Confidence, StructuralEvent, TurnRef } from '../types.ts';
 import type { Detector, DetectorContext } from './types.ts';
 
-export const DEFAULT_MIN_REPEATS = 3;
+/**
+ * Two is a repeat.
+ *
+ * **Three was the wrong floor, and measuring said so.** At three the detector
+ * found 6 findings in 1,139 sessions — 0.5%, which is close enough to nothing
+ * that it was kept out of `core` on precision alone. At two, with edit tools
+ * excluded below, it finds 265 across 5.0% of sessions, and the shape of them
+ * is unarguable: `git push 2>&1` ten times with byte-identical output,
+ * `npx tsc --noEmit | head -30` five times nine seconds apart.
+ *
+ * Nothing was loosened to get there. The guards that cut 298 raw groups to 9
+ * all still apply; only the count changed.
+ */
+export const DEFAULT_MIN_REPEATS = 2;
 
 /**
  * A repeat slower than this is waiting, not looping.
@@ -65,6 +78,28 @@ export const DEFAULT_MIN_REPEATS = 3;
  * an otherwise tight run does not excuse it.
  */
 export const POLL_GAP_SECONDS = 60;
+
+/**
+ * Why an edit tool can never produce one of these findings.
+ *
+ * **Measured, after the threshold moved to two.** Of 97 edit/write pairs the
+ * lower floor newly flagged, **92 made a real change** — the harness's own
+ * `structuredPatch` was non-empty — and only 5 changed nothing. Flagging them
+ * would have been 95% wrong.
+ *
+ * The reason is structural rather than bad luck. For every other tool,
+ * identical arguments plus identical output means the same question got the
+ * same answer. For an edit, the output is the file's *new* contents, so two
+ * edits can read identically while the second genuinely changed something —
+ * whether it did is in `structuredPatch`, which this parser does not keep.
+ *
+ * At three repeats the `somethingChangedBetween` guard hid this: the middle
+ * call was itself an edit, so the group was dropped before anyone looked. At
+ * two there is no middle call and the guard is vacuous. Excluding the tools
+ * outright is the honest version of what that guard was accidentally doing,
+ * and it costs nothing — at three repeats, no edit-tool finding existed.
+ */
+export const EXCLUDED_TOOLS = EDIT_TOOLS;
 
 /**
  * Tools whose whole purpose is to report current state.
@@ -107,13 +142,37 @@ function median(xs: number[]): number | undefined {
 export function repeatGroups(events: StructuralEvent[]): RepeatGroup[] {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
 
-  // A result names the call it answered, so identity can include the answer.
-  const callById = new Map<string, StructuralEvent>();
+  // ── A tool-call id is not unique ─────────────────────────────────────────
+  //
+  // **Every** occurrence, in order, never just the last. Measured: one pinned
+  // fixture reuses 90 ids, and a last-wins map made two different results
+  // resolve to the *same* call object — which this detector then counted as
+  // that call repeating itself. All 45 findings it produced on the pinned
+  // corpus were one event counted twice, and none were genuine.
+  //
+  // Threshold 3 hid it, because a fake pair needs only one collision. The fix
+  // is the one `src/detect/edit-retry.ts` already documents: bind a result to
+  // the nearest call *before* it.
+  const callsById = new Map<string, StructuralEvent[]>();
   for (const e of sorted) {
     if (e.turnType === 'tool_use' && e.toolCallId !== undefined && e.argHash !== undefined) {
-      callById.set(e.toolCallId, e);
+      const list = callsById.get(e.toolCallId);
+      if (list === undefined) callsById.set(e.toolCallId, [e]);
+      else list.push(e);
     }
   }
+
+  /** The call this result answered: the nearest one before it with that id. */
+  const callAnsweredBy = (result: StructuralEvent): StructuralEvent | undefined => {
+    const list = callsById.get(result.toolCallId as string);
+    if (list === undefined) return undefined;
+    let best: StructuralEvent | undefined;
+    for (const c of list) {
+      if (c.seq >= result.seq) break; // sorted, so nothing later can qualify
+      best = c;
+    }
+    return best;
+  };
 
   const groups = new Map<string, StructuralEvent[]>();
   for (const e of sorted) {
@@ -121,9 +180,12 @@ export function repeatGroups(events: StructuralEvent[]): RepeatGroup[] {
     // A missing digest is not a match: `outHash` is absent when output was
     // empty or uncapturable, and `unknown` beats guessing.
     if (e.outHash === undefined) continue;
-    const call = callById.get(e.toolCallId);
+    const call = callAnsweredBy(e);
     if (call === undefined) continue;
     if (POLLING_TOOLS.has(call.toolName ?? '')) continue;
+    // An edit's output is the file's new contents, so "the same answer" does
+    // not mean "nothing happened". See `EXCLUDED_TOOLS`.
+    if (EXCLUDED_TOOLS.has(call.toolName ?? '')) continue;
 
     const k = keyOf(call, e.outHash);
     const list = groups.get(k);
@@ -132,7 +194,15 @@ export function repeatGroups(events: StructuralEvent[]): RepeatGroup[] {
   }
 
   const out: RepeatGroup[] = [];
-  for (const [key, calls] of groups) {
+  for (const [key, group] of groups) {
+    // **One call per turn, even when two results claim it.** Nearest-preceding
+    // binding fixes most of the duplicated-id damage, but a reused id can still
+    // point two results at one call — which would then look like that call
+    // repeating itself. 40 such pairs survived the binding fix on SWE-chat.
+    // A repeat means two *different* turns, so the seq is the identity.
+    const bySeq = new Map<number, StructuralEvent>();
+    for (const c of group) if (!bySeq.has(c.seq)) bySeq.set(c.seq, c);
+    const calls = [...bySeq.values()];
     if (calls.length < 2) continue;
     calls.sort((a, b) => a.seq - b.seq);
     const gaps: number[] = [];
