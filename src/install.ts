@@ -52,8 +52,6 @@ export type InstallPlan = {
    * moment a session opens and surfaces at the first `Stop` boundary.
    */
   sessionStartCommand: string;
-  /** Shell command for the statusline. */
-  statusLineCommand: string;
 };
 
 /**
@@ -70,13 +68,32 @@ export function planFor(repoRoot: string, nodePath = process.execPath): InstallP
   return {
     hookCommand: `${run('hook-stop.ts')} || true`,
     sessionStartCommand: `${run('hook-session-start.ts')} || true`,
-    statusLineCommand: run('statusline.ts'),
   };
 }
 
 /** Is this one of ours? */
 function isOurs(h: HookCommand): boolean {
   return h.__agentsensei === true || h.command.includes(`${MARKER}/scripts/`);
+}
+
+/**
+ * Drop a statusline of ours, leaving anyone else's untouched.
+ *
+ * **Load-bearing on upgrade, not just on uninstall.** The previous version set
+ * a statusline pointing at `scripts/statusline.ts`; that script no longer
+ * exists, so installing over it without this would leave a command the harness
+ * runs on every render and which can only fail. Verified against a real machine
+ * that had exactly that state.
+ */
+export function dropOurStatusLine(settings: Settings): Settings {
+  const sl = settings.statusLine;
+  if (sl === undefined || sl === null) return settings;
+  if (!sl.command.includes(`${MARKER}/scripts/`)) return settings;
+  const out = { ...settings };
+  // Deleted, never set to null: the key is absent on a machine that never had
+  // one, and inventing it would make uninstall inexact.
+  delete out.statusLine;
+  return out;
 }
 
 /**
@@ -109,31 +126,11 @@ export function addHook(settings: Settings, plan: InstallPlan, timeout = 5): Set
 }
 
 /**
- * Set the statusline, but **never over somebody else's**.
- *
- * Returns the settings unchanged when a different statusline is configured. A
- * statusline is a single slot, so installing ours would silently remove whatever
- * was there — and a terminal prompt someone built is not ours to take. The CLI
- * reports the refusal; it does not work around it.
- */
-export function addStatusLine(settings: Settings): Settings | 'occupied' {
-  const current = settings.statusLine;
-  if (current !== undefined && current !== null && !current.command.includes(`${MARKER}/scripts/`)) {
-    return 'occupied';
-  }
-  return settings;
-}
-
-/** Set our statusline, having established the slot is free or ours. */
-export function setStatusLine(settings: Settings, plan: InstallPlan): Settings {
-  return {
-    ...settings,
-    statusLine: { type: 'command', command: plan.statusLineCommand, padding: 0 },
-  };
-}
-
-/**
  * Take ours out and leave everything else exactly as it was.
+ *
+ * **Still removes a statusline**, although nothing sets one any more: anyone who
+ * installed the previous version has ours in that slot, and an uninstall that
+ * left it behind would leave a dead command pointing at a deleted script.
  *
  * Matched on the marker, never on position. An empty `Stop` array is removed
  * rather than left behind as `[]`, so uninstall is byte-identical to never
@@ -153,21 +150,7 @@ export function remove(settings: Settings): Settings {
     out.hooks = hooks;
   }
 
-  const sl = settings.statusLine;
-  if (sl !== undefined && sl !== null && sl.command.includes(`${MARKER}/scripts/`)) {
-    // **Deleted, not set to null.** Measured on a real machine: the key is
-    // *absent* when no statusline is configured, and an earlier version set
-    // `null` here — adding a key that was never there, so uninstall was not
-    // byte-exact. The test missed it because the fixture encoded the same wrong
-    // assumption (`statusLine: null`) on both sides.
-    //
-    // Absent and null mean the same thing to the harness, so deleting is exact
-    // in effect for both starting shapes, and it is the only one of the two that
-    // cannot invent a key.
-    delete out.statusLine;
-  }
-
-  return out;
+  return dropOurStatusLine(out);
 }
 
 /**

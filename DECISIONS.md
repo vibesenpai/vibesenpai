@@ -109,6 +109,10 @@ Planned 2026-10-12/15, before any code existed.
 | D56 | **An existing statusline is never taken over.** It is a single slot, and a terminal prompt someone built is not ours to replace; the CLI reports the refusal rather than working around it. | [src/install.ts](src/install.ts) |
 | D57 | **A nudge is scoped to the session it is about.** Two windows share one archive, so an unscoped pick showed one session a finding about another's turns. The statusline reads its session id from the payload it already receives. | [src/queue.ts](src/queue.ts) |
 
+| D58 | **The report renders via `systemMessage` at `SessionStart`, and the statusline is removed.** Reverses D-era "statusline only": `systemMessage` reaches the user and not the model, so the observer effect that drove that choice does not apply. Evidence is Anthropic's own plugins, which contradict their own skill doc. **Never `additionalContext`** — it reaches the model too. | [docs/surfaces.md](docs/surfaces.md), [src/report-line.ts](src/report-line.ts) |
+| D59 | **Each detector has a defined display per level.** L1 session start is terse and capped at two dimensions; L2 `now`/`standing` carries evidence and advice. File churn never reaches L1 — 15% correlation against a 9% base rate is orientation, not news. | [docs/dimensions.md](docs/dimensions.md) |
+| D60 | **Install clears a statusline the previous version set.** An upgrade otherwise leaves the harness running a deleted script on every render. Found on a real machine in exactly that state. | [src/install.ts](src/install.ts) |
+
 ## Reversed or corrected during planning
 
 Kept because the discarded answer is the one a reader will reach for next.

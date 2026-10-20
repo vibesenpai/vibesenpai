@@ -270,6 +270,29 @@ window has to close before the finding exists.
 Silence stays the default: a clean session produces no output at all, and that silence is
 information.
 
+### Superseded 2026-10-19 — `systemMessage` is a user-visible channel
+
+**The table below is wrong in its conclusion, and the reason is new evidence rather than a change of
+mind.** When it was written, the only known way to reach the user was the statusline, because hook
+stdout demonstrably goes to the model's context. That remains true of *stdout*. It is not true of the
+hook's **JSON `systemMessage` field**, which was not examined.
+
+Established by reading Anthropic's own plugins rather than the docs — the `plugin-dev` skill calls
+`systemMessage` an "Explanation for Claude", and is contradicted by both:
+
+- `claude-security/hooks.py` prints an **ASCII-art logo box** through `systemMessage`. Nobody renders
+  ASCII art for a language model.
+- `security-guidance` names it in a comment: *"user-visible TUI message"*, explicitly distinct from
+  `hookSpecificOutput.additionalContext`, *"SessionStart's supported channel for surfacing text to
+  **both the model and the user**"*.
+
+So the observer-effect objection that drove the statusline choice **does not apply to
+`systemMessage`**: it reaches the user and not the model. The report now renders in the main window
+at session start, and the statusline is removed — **zero of ~40 official plugins ship one.**
+
+What survives from the analysis below: context injection is still rejected, `UserPromptSubmit` is
+still never used for surfacing, and direct terminal writes are still banned. Only the *channel* changed.
+
 ### The surfacing channel — verified, and not the obvious one
 
 **Hook stdout is NOT user-visible. It is injected into the model's context.** Verified by reading this

@@ -1,24 +1,27 @@
 /**
- * The `SessionStart` hook. **Spawns and exits. Prints nothing.**
+ * The `SessionStart` hook. Reports to the user, then spawns and exits.
  *
- * ── Why it prints nothing ──────────────────────────────────────────────────
+ * ── The channel, and why it reaches only the user ──────────────────────────
  *
- * A hook's stdout goes into the *agent's* context, not the user's terminal. The
- * original design accepted that for a session-start report, on the grounds that
- * statistics do not contaminate the way instructions do — and that is a fair
- * argument. This is stricter: it puts **nothing** in the model's context, so the
- * tool cannot perturb the session it measures, not even by ~100 tokens, and a
- * finding can never read as if Claude said it.
+ * `{"systemMessage": "..."}` on stdout renders in the **user's** main window.
+ * Established from Anthropic's own plugins rather than from the docs, which get
+ * it wrong: the `plugin-dev` skill calls `systemMessage` an "Explanation for
+ * Claude", but `claude-security` prints an ASCII-art logo box through it, and
+ * `security-guidance` names it in a comment as a *"user-visible TUI message"* —
+ * explicitly distinct from `hookSpecificOutput.additionalContext`, which that
+ * same comment describes as reaching "both the model and the user".
  *
- * The cost of that strictness is one round trip. The standing is not ready at
- * session start, so it surfaces at the first `Stop` boundary instead — which is
- * seconds later and is where the statusline updates anyway.
+ * **We emit `systemMessage` and never `additionalContext`.** Nothing reaches
+ * the model, so the tool stays outside the session it measures. An earlier
+ * version of this hook printed nothing at all, because the only channel then
+ * known went through the model's context; that trade no longer exists.
  *
  * ── Fire and forget ────────────────────────────────────────────────────────
  *
- * Parsing all history takes ~500ms for four transcripts and scales from there,
- * so it cannot happen here. The child is detached with its output discarded and
- * `unref`'d, so this process exits immediately and the session never waits.
+ * The report is read from the last pass — this hook computes nothing. Parsing
+ * all history takes ~500ms for four transcripts and scales from there, so the
+ * refresh is detached, its output discarded, and `unref`'d. The session never
+ * waits, and the pass that runs now covers the session that just ended.
  */
 
 import { spawn } from 'node:child_process';
@@ -26,11 +29,19 @@ import { join } from 'node:path';
 import { isTripped, readBreaker } from '../src/breaker.ts';
 import { resolveConfig } from '../src/config.ts';
 import { isFresh, markStarted, readStanding } from '../src/standing.ts';
+import { reportBlock } from '../src/report-line.ts';
 
 function main(): void {
   if (process.env['AGENTSENSEI_DISABLE'] === '1') return;
 
   const { config } = resolveConfig();
+
+  // Report first, from the last completed pass. Done before the breaker check
+  // so a tripped analyser still shows what it managed to learn earlier —
+  // degrading to stale is better than degrading to silent.
+  const block = reportBlock(readStanding(config.archive));
+  if (block !== '') process.stdout.write(JSON.stringify({ systemMessage: block }));
+
   if (isTripped(readBreaker(config.archive))) return;
 
   // Nothing to do if the standing is recent: four windows in a minute must not

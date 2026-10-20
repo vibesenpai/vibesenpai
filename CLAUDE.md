@@ -46,7 +46,15 @@ than it can repay in insight, and it gets uninstalled permanently.
 
 The worst acceptable outcome is that a nudge goes unnoticed.
 
-- **Statusline only.** Hook stdout goes to the *model's* context, not the user's terminal.
+- **`systemMessage`, at session start only.** A hook returning `{"systemMessage": …}` renders in the
+  *user's* main window and reaches the model not at all — established from Anthropic's own plugins,
+  not the docs: `claude-security` prints an ASCII logo through it, and `security-guidance` calls it a
+  *"user-visible TUI message"*, distinct from `hookSpecificOutput.additionalContext`, which it
+  describes as reaching "both the model and the user". **We never emit `additionalContext`** — that
+  would put the tool inside the session it measures.
+- **Plain hook stdout goes to the *model's* context**, not the terminal. Never surface through it.
+- The statusline was tried and removed: a permanent row of screen for one rarely-changing line, and
+  **no official plugin ships one**. See `GRAVEYARD.md`.
 - Banned with no fallback: `UserPromptSubmit` surfacing, `/dev/tty` writes, OSC escape codes,
   terminal bell, any mid-session desktop notification.
 - Never mid-response. Never on a session's first boundary. Rate-limited. Nudges decay.

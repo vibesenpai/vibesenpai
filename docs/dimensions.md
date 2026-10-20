@@ -116,6 +116,43 @@ parser when a pipeline ends in `head` or `tail`, and the one finding that hit it
 `awk NR<`, `cut` and a bare `| less` go undetected and stay `certain`. A
 narrower claim than `failureKind`, whose envelope set is genuinely closed.
 
+## What each detector shows, and where
+
+Three levels. Nothing appears at a level it cannot justify, and **L1 opens every
+session**, so anything not worth reading every single time belongs lower down.
+
+| | **L1** session start (`systemMessage`) | **L2** `now` / `standing` |
+|---|---|---|
+| `edit_retry` | `3 edits refused then retried` + a reason line | path, per-reason advice, evidence turns |
+| `redundant_call` | `4 identical calls repeated, same answer` | command, the repeated turns |
+| context cost | `context re-ingested 7.4× output (median 12.0)` | + the heaviest turns, by seq |
+| file churn | **never** | `MOST REWRITTEN`, versions and edit calls |
+
+```
+agentsensei · 4 sessions · 174 edits
+  3 edits refused then retried
+      2 not read first · 1 text did not match
+  context re-ingested 7.4× output (median 12.0)
+  `agentsensei now` for this session
+```
+
+Rules, each one something that would otherwise go wrong:
+
+- **A clean history prints one line, not silence:** `… · nothing to flag`.
+  Silence reads as broken; inventing a finding is worse than either.
+- **Reason keys become English** — `not-read-first` → `not read first`. The key
+  is an identifier, not language.
+- **No imperative verb, no severity word.** Advice lives at L2, where there is
+  room to show the evidence that justifies it.
+- **Capped at two dimensions**, with the rest counted. More is a wall of opening
+  text every session.
+- **Never a score, total or grade.** `test/report-line.test.ts` asserts it, along
+  with the absence of `cacheRead` and of file churn.
+
+**Churn is absent from L1** because it correlates with friction at 15% against a
+9% base rate. **Cost is present** because it has a published distribution, so
+`7.4× (median 12.0)` is a statement with a reference point rather than a number.
+
 ## Reported as metadata, not as findings
 
 Both were planned as detectors. **Neither survived measurement**, for different

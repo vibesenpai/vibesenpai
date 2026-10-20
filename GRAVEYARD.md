@@ -136,6 +136,41 @@ positives. Knowledge that must not be re-learned:
 
 ---
 
+## The statusline and its queue (358 lines)
+
+**Removed 2026-10-19, and not because it was broken.** It worked: rate-limited,
+decaying, session-scoped, hand-verified live on a real machine, rendering
+`⌁ 3 edits refused then retried in 4 past sessions`.
+
+It was removed because of what it cost and what replaced it:
+
+- **A permanent row of screen** for one line that rarely changes. The user's
+  words: *"it's taking up good real estate"*.
+- **Zero of ~40 official Claude Code plugins ship a `statusLine`.** It is not how
+  this ecosystem surfaces anything.
+- **`systemMessage` turned out to be a user-visible channel**, which removed the
+  reason the statusline was chosen in the first place. The original analysis
+  picked it because hook *stdout* reaches the model, making every other channel
+  an observer effect. That is true of stdout and false of the hook's JSON
+  `systemMessage` field — see `docs/surfaces.md`.
+
+**Three guards died with it, and a future statusline must re-derive them:**
+
+| guard | why it existed |
+|---|---|
+| rate limiting | one change per 3 boundaries, so the line does not flicker |
+| decay | an unacted entry dropped after 12 boundaries, so it stops accusing |
+| session scoping | two windows share one archive, and an unscoped pick showed one session a finding about another's turns |
+
+Also lost: the producer/consumer split that kept analysis out of the hook. The
+standing pass keeps that shape, so the lesson survives even though the queue does
+not.
+
+**One bug it taught, worth keeping:** `enqueue` dropped `shownAt` while the
+detached analyser re-enqueued every boundary, so the rate limit never engaged and
+the decay never fired. Both guarantees were silently inert and nothing threw. A
+guarantee that lives only in data needs a test that reads the data back.
+
 ## Five probes that counted a harness mechanism and called it behaviour
 
 The procedural lesson, now a rule in `CLAUDE.md` and in `scripts/measure-dimensions.ts`:

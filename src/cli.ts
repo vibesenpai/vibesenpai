@@ -21,12 +21,10 @@ import { countDenominators, detectorsFor, runDetectors, unknownDimensions } from
 import { render as renderFindings } from './render.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
-import {
-  addHook, addStatusLine, describeChange, planFor, remove, setStatusLine, type Settings,
-} from './install.ts';
+import { addHook, describeChange, dropOurStatusLine, planFor, remove, type Settings } from './install.ts';
 import { readBreaker, isTripped } from './breaker.ts';
-import { readQueue, lineFor, pick } from './queue.ts';
-import { computedAtLocal, readStanding, standingLine } from './standing.ts';
+import { computedAtLocal, readStanding } from './standing.ts';
+import { reportBlock } from './report-line.ts';
 import { spawn } from 'node:child_process';
 import { copyFileSync, writeFileSync } from 'node:fs';
 
@@ -131,7 +129,6 @@ install / uninstall
   (prints what it would do and writes NOTHING by default)
   --apply            actually write it; a backup is taken first
   --print-only       emit the fragments to merge by hand, write nothing
-  --no-statusline    install the hook only
 
 report
   --last <7d|4w|6m>  relative range (default 7d)
@@ -255,22 +252,16 @@ function cmdDoctor(a: Argv): number {
   } else if (breaker.consecutiveFailures > 0) {
     console.log(`  ambient    ${breaker.consecutiveFailures} recent failure(s), still enabled`);
   } else {
-    const q = readQueue(config.archive);
-    // Unscoped on purpose: `doctor` reports the whole queue, while a statusline
-    // only ever shows its own session.
-    const live = lineFor(pick(q), q.entries.length);
     const st = readStanding(config.archive);
-    const line = live !== '' ? live : standingLine(st);
-    console.log(
-      `  ambient    ${q.entries.length} queued · ${q.boundaries} boundaries seen` +
-        (line === '' ? ' · nothing showing' : ''),
-    );
-    if (line !== '') console.log(`             showing: ${line}`);
     console.log(
       st === undefined
-        ? `  standing   not computed yet — runs when a session starts`
-        : `  standing   ${st.sessions} session(s), ${st.edits} edits, computed ${computedAtLocal(st)}`,
+        ? `  report     nothing computed yet — runs when a session starts`
+        : `  report     ${st.sessions} session(s), ${st.edits} edits, computed ${computedAtLocal(st)}`,
     );
+    // Exactly what a new session will show, so `doctor` answers "what will I
+    // see" rather than only "is it alive".
+    const block = reportBlock(st);
+    if (block !== '') for (const l of block.split('\n')) console.log(`             ${l}`);
   }
   if (process.env['AGENTSENSEI_DISABLE'] === '1') {
     console.log(`  ambient    AGENTSENSEI_DISABLE=1 is set — every hook exits on line one`);
@@ -543,20 +534,14 @@ function cmdInstall(a: Argv): number {
   const before = readSettings(path);
   const plan = planFor(repoRoot());
 
-  const wantStatusLine = a.flags['no-statusline'] !== true;
-  let after = addHook(before, plan);
-
-  if (wantStatusLine) {
-    if (addStatusLine(after) === 'occupied') {
-      console.log(`statusline: already set to something else — left alone.`);
-      console.log(`  ${before.statusLine?.command ?? ''}`);
-      console.log(`  a statusline is a single slot, and yours is not ours to take.`);
-      console.log(`  install the hook only with --no-statusline, or free the slot first.\n`);
-      after = addHook(before, plan);
-    } else {
-      after = setStatusLine(after, plan);
-    }
-  }
+  // No statusline. It cost a permanent row of screen for one rarely-changing
+  // line, and **no official plugin ships one** — the report goes in the main
+  // window at session start instead. Your status bar stays yours.
+  //
+  // `dropOurStatusLine` is for upgrades: the previous version set one pointing
+  // at a script that no longer exists, and leaving it would have the harness
+  // run a guaranteed-failing command on every render.
+  const after = addHook(dropOurStatusLine(before), plan);
 
   if (a.flags['print-only'] === true) {
     // **Fragments, not the whole file.** Printing the merged settings would
@@ -569,10 +554,6 @@ function cmdInstall(a: Argv): number {
       .filter((h) => h.__agentsensei === true);
     console.log(`// add to hooks.Stop in ${path} — keep your existing entries`);
     console.log(JSON.stringify({ hooks: { Stop: [{ hooks: ours }] } }, null, 2));
-    if (after.statusLine !== undefined && after.statusLine !== null) {
-      console.log(`\n// set statusLine in ${path}`);
-      console.log(JSON.stringify({ statusLine: after.statusLine }, null, 2));
-    }
     console.log('\n// these are fragments to merge, NOT a replacement file.');
     return 0;
   }
@@ -696,8 +677,11 @@ async function cmdStanding(a: Argv): Promise<number> {
     );
   }
 
-  const line = standingLine(s);
-  if (line !== '') console.log(`\n  statusline shows: ${line}`);
+  const block = reportBlock(s);
+  if (block !== '') {
+    console.log('\n  a new session shows:');
+    for (const l of block.split('\n')) console.log(`    ${l}`);
+  }
   return 0;
 }
 
