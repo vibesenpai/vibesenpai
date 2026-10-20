@@ -104,6 +104,8 @@ export type RenderInput = {
   denominators: Denominators;
   /** Shown so a reader can tell an empty result from an unanalysed one. */
   sessionId: string;
+  /** Model-flagged findings for this session, and how stale they are. */
+  judged?: { findings: { dimension: string; turns: number[]; why: string }[]; unjudgedTurns: number };
   /**
    * The pointer to `fix`, printed last.
    *
@@ -540,6 +542,56 @@ export function renderCompaction(stats: SessionStats): string[] {
   return out;
 }
 
+/**
+ * What a model flagged, kept visibly apart from what a rule did.
+ *
+ * **The separation is the point**, not decoration. CLAUDE.md's rule is that the
+ * UI never blurs "flagged by rule" and "flagged by a model at 0.7", and a judge
+ * earns that caution: the first real judge response this project ever received
+ * invented its evidence, citing turn 4 of a session whose packet began at turn
+ * 400. The gate caught it. The next one might be subtler, so the reader is told
+ * which kind of claim they are reading.
+ *
+ * The lag is stated too. A judged finding is as old as the last pass, and
+ * silently showing stale findings beside live rule ones would imply a currency
+ * they do not have.
+ */
+export function renderJudged(
+  findings: { dimension: string; turns: number[]; why: string }[],
+  unjudgedTurns: number,
+): string[] {
+  if (findings.length === 0 && unjudgedTurns <= 0) return [];
+
+  const out: string[] = [`${INDENT}${dim('FLAGGED BY A MODEL')}`];
+  for (const f of findings) {
+    out.push(
+      `${INDENT.repeat(2)}${bold(f.dimension)}  ${dim(`turn${f.turns.length === 1 ? '' : 's'} ${f.turns.join(', ')}`)}`,
+    );
+    for (const l of wrapText(f.why, 62)) out.push(`${INDENT.repeat(3)}${dim(l)}`);
+  }
+  if (findings.length === 0) out.push(`${INDENT.repeat(2)}${dim('nothing so far')}`);
+  if (unjudgedTurns > 0) {
+    out.push(`${INDENT.repeat(2)}${dim(`… ${unjudgedTurns} turns since the last pass`)}`);
+  }
+  return out;
+}
+
+/** Wrap on word boundaries. */
+function wrapText(text: string, width: number): string[] {
+  const out: string[] = [];
+  let line = '';
+  for (const w of text.split(' ')) {
+    if (line === '') line = w;
+    else if (`${line} ${w}`.length <= width) line = `${line} ${w}`;
+    else {
+      out.push(line);
+      line = w;
+    }
+  }
+  if (line !== '') out.push(line);
+  return out;
+}
+
 export function render(input: RenderInput): string {
   const { findings, denominators: d } = input;
   const lines: string[] = [];
@@ -568,6 +620,11 @@ export function render(input: RenderInput): string {
   const stats = sessionStats(input.events);
   const cost = renderCost(d, stats);
   if (cost.length > 0) lines.push(...cost, '');
+
+  if (input.judged !== undefined) {
+    const j = renderJudged(input.judged.findings, input.judged.unjudgedTurns);
+    if (j.length > 0) lines.push(...j, '');
+  }
 
   const compaction = renderCompaction(stats);
   if (compaction.length > 0) lines.push(...compaction, '');

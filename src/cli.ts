@@ -11,15 +11,19 @@
 import { homedir } from 'node:os';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { resolveConfig, type Layer } from './config.ts';
 import { describeCatalog, readCatalog, runScan } from './catalog.ts';
 import { parse, registry } from './parsers/index.ts';
 import {
-  findSessionSource, lookupSession, readSession, resolveCurrentSession,
+  discoverTranscripts, findSessionSource, lookupSession, readSession, resolveCurrentSession,
   MIN_ID_PREFIX, type SessionLookup,
 } from './read.ts';
 import { gatherReport, type ReportData } from './gather.ts';
+import {
+  BYTES_PER_TURN, findingsFor, readJudgeState, writeJudgeState, type JudgeState,
+} from './judge-store.ts';
+import { buildSession, openFailuresBefore, renderPacket } from './judge.ts';
 import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
@@ -479,12 +483,30 @@ async function cmdNow(a: Argv): Promise<number> {
       ? fixLine(repoRoot(), homedir(), res.findings.length > 0)
       : '';
 
+  // Precomputed by the detached pass — `now` reports, it never judges. That is
+  // what keeps this surface instant.
+  const judgeState = readJudgeState(config.archive);
+  const judgedFindings = findingsFor(judgeState, current.sessionId);
+  const judgedBytes = judgeState.ledger[current.sessionId] ?? 0;
+  let unjudgedTurns = 0;
+  try {
+    unjudgedTurns = Math.max(
+      0,
+      Math.floor((statSync(current.source).size - judgedBytes) / BYTES_PER_TURN),
+    );
+  } catch {
+    // Unreadable size is not worth failing over; the lag line is simply absent.
+  }
+
   process.stdout.write(
     renderFindings({
       findings: res.findings,
       denominators: res.denominators,
       sessionId: current.sessionId,
       events: parsed.events,
+      ...(judgeState.settings.enabled
+        ? { judged: { findings: judgedFindings, unjudgedTurns } }
+        : {}),
       ...(nextStep !== '' ? { nextStep } : {}),
       ...(config.mute.length > 0 ? { muted: config.mute } : {}),
     }),
@@ -838,6 +860,93 @@ function cmdUninstall(a: Argv): number {
  * from one session enumeration, so the two cannot disagree about which sessions
  * exist. See `src/gather.ts` for why that mattered.
  */
+/**
+ * `judge` — the one part of this tool that spends money, so the one part that
+ * refuses to do anything without being told twice.
+ *
+ * `--dry-run` builds a real packet and prints what it would cost, calling
+ * nothing. `--enable` shows the same and still writes nothing until `--apply`.
+ * The shape is `install`'s, because the risk is the same shape: a background
+ * process acting on someone's behalf while they are not looking.
+ */
+function cmdJudge(a: Argv): number {
+  const { config } = configFromFlags(a);
+  const state = readJudgeState(config.archive);
+  const f = a.flags;
+
+  if (f['disable'] === true) {
+    if (f['apply'] !== true) {
+      console.log('would disable the judge. re-run with --apply.');
+      return 0;
+    }
+    state.settings.enabled = false;
+    writeJudgeState(config.archive, state);
+    console.log('judge disabled. nothing further will be sent.');
+    return 0;
+  }
+
+  // A real packet from real sessions, so the number printed is the number it
+  // would cost — not a guess from an average.
+  const sessions = [];
+  for (const source of discoverTranscripts(config.sources).slice(0, 5)) {
+    const id = basename(source, '.jsonl');
+    try {
+      const ev = [...parse(source, readFileSync(source, 'utf8'), id).events].sort(
+        (x, y) => x.seq - y.seq,
+      );
+      if (ev.length === 0) continue;
+      const p = buildSession(id, ev, buildSkeletons(id, ev));
+      if (p.windows.length > 0) sessions.push(p);
+    } catch {
+      // Unreadable here is not an error; the runner counts those.
+    }
+  }
+
+  const packetTokens = sessions.length === 0 ? 0 : Math.round((renderPacket(sessions).length / 4) * 1.9);
+
+  console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
+  console.log('');
+  console.log('  what one pass would send');
+  console.log(`    ${sessions.length} session(s) · ~${packetTokens.toLocaleString()} tokens of packet`);
+  // The invocation overhead is the dominant term and is not ours to shrink:
+  // it is Claude Code loading its system prompt, tools and skills.
+  console.log('    ~27,000 tokens of invocation overhead, whatever we send');
+  console.log('    output is roughly 98% thinking — measured, not estimated');
+  console.log('');
+  console.log(`  cadence  every ~${state.settings.cadence} turns of new transcript`);
+  console.log(`  ceiling  ${state.settings.maxBatchTokens.toLocaleString()} tokens per batch`);
+  if (state.usage.calls > 0) {
+    console.log('');
+    console.log(
+      `  spent so far  ${state.usage.calls} call(s) · ` +
+        `${state.usage.inputTokens.toLocaleString()} in · ` +
+        `${state.usage.outputTokens.toLocaleString()} out`,
+    );
+  }
+  console.log('');
+  console.log('  Tokens, not money: what a token costs depends on your plan, your');
+  console.log('  tier and the model, and on a subscription it is notional.');
+
+  if (f['dry-run'] === true) {
+    console.log('\n  --dry-run: nothing was sent.');
+    return 0;
+  }
+  if (f['enable'] !== true) {
+    console.log('\n  --enable to turn it on, --dry-run to see a packet, --disable to stop.');
+    return 0;
+  }
+  if (f['apply'] !== true) {
+    console.log('\n  nothing written. re-run with --enable --apply to turn it on.');
+    return 0;
+  }
+
+  state.settings.enabled = true;
+  writeJudgeState(config.archive, state);
+  console.log('\n  judge enabled. it runs detached, after your turn ends.');
+  console.log('  `agentsensei judge --disable --apply` stops it.');
+  return 0;
+}
+
 async function cmdReport(a: Argv): Promise<number> {
   const { config } = configFromFlags(a);
   const f = a.flags;
@@ -1041,6 +1150,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdStanding(a);
     case 'fix':
       return cmdFix(a);
+    case 'judge':
+      return cmdJudge(a);
     case 'install':
       return cmdInstall(a);
     case 'uninstall':

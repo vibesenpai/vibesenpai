@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { caveatFor, durationOf, renderCompaction, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
+import { caveatFor, durationOf, renderCompaction, renderJudged, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
 import { materialise } from '../src/finding.ts';
 import type { Denominators } from '../src/detect/index.ts';
 import type { Event, Finding } from '../src/types.ts';
@@ -307,5 +307,34 @@ describe('render — CONTEXT states compaction without judging it', () => {
     ).join('\n');
     expect(out).toContain('compacted 3×');
     expect(out).toContain('2 without reported sizes');
+  });
+});
+
+describe('render — model findings are kept visibly apart', () => {
+  it('labels the section so a reader knows what kind of claim it is', () => {
+    // CLAUDE.md: the UI never blurs "flagged by rule" and "flagged by a model
+    // at 0.7". A judge earns that caution — the first real judge response this
+    // project received invented its evidence.
+    const out = renderJudged(
+      [{ dimension: 'inaccurate_self_report', turns: [412, 460], why: 'said green, 412 failed' }],
+      0,
+    ).join('\n');
+    expect(out).toContain('FLAGGED BY A MODEL');
+    expect(out).toContain('inaccurate_self_report');
+    expect(out).toContain('412, 460');
+  });
+
+  it('states the lag, because a judged finding is as old as the last pass', () => {
+    // Showing stale model findings beside live rule findings without saying so
+    // would imply a currency they do not have.
+    expect(renderJudged([], 23).join('\n')).toContain('23 turns since the last pass');
+  });
+
+  it('says nothing at all when there is nothing and no lag', () => {
+    expect(renderJudged([], 0)).toEqual([]);
+  });
+
+  it('says "nothing so far" rather than looking broken when only lagging', () => {
+    expect(renderJudged([], 5).join('\n')).toContain('nothing so far');
   });
 });
