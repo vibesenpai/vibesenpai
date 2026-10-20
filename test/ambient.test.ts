@@ -15,7 +15,10 @@ import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closed, isTripped, readBreaker, recordFailure, recordSuccess, TRIP_AFTER } from '../src/breaker.ts';
-import { addHook, describeChange, dropOurStatusLine, planFor, remove, type Settings } from '../src/install.ts';
+import {
+  addHook, commandFilePath, describeChange, dropOurStatusLine, fixCommandFilePath,
+  legacyCommandFiles, planFor, remove, type Settings,
+} from '../src/install.ts';
 import { materialise } from '../src/finding.ts';
 import {
   clearStarted, computeStanding, computedAtLocal, isFresh, isProcessing, markStarted,
@@ -358,6 +361,24 @@ describe('standing — "sit tight" while the first pass runs', () => {
     for (const nag of ['fix', 'should', 'must', 'warning', 'error', '!']) {
       expect(line.toLowerCase(), `must not contain "${nag}"`).not.toContain(nag);
     }
+  });
+});
+
+describe('install — commands are namespaced by their directory', () => {
+  it('nests them so they read as /agentsensei:now and :fix', () => {
+    // A command at `.claude/commands/agentsensei/fix.md` is `/agentsensei:fix`;
+    // the same file flat is `/agentsensei-fix`. From the harness changelog:
+    // "Restored namespacing in command names based on subdirectories".
+    expect(commandFilePath('/h')).toBe('/h/.claude/commands/agentsensei/now.md');
+    expect(fixCommandFilePath('/h')).toBe('/h/.claude/commands/agentsensei/fix.md');
+  });
+
+  it('knows the flat files an earlier version wrote', () => {
+    // Left behind they would show up as a second, un-namespaced /agentsensei.
+    expect(legacyCommandFiles('/h')).toEqual([
+      '/h/.claude/commands/agentsensei.md',
+      '/h/.claude/commands/agentsensei-fix.md',
+    ]);
   });
 });
 

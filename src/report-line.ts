@@ -138,7 +138,9 @@ export function costLine(s: Standing): string {
  * Checked rather than assumed, and cheap: a few `access` calls at session start.
  */
 export function commandPath(home: string): string {
-  return join(home, '.claude', 'commands', 'agentsensei.md');
+  // The namespaced location: `.claude/commands/agentsensei/now.md` is
+  // `/agentsensei:now`. See `src/install.ts`.
+  return join(home, '.claude', 'commands', 'agentsensei', 'now.md');
 }
 
 /**
@@ -152,7 +154,7 @@ export function commandPath(home: string): string {
  */
 export function detailLine(repoRoot: string, home: string): string {
   return existsSync(commandPath(home))
-    ? '/agentsensei for the exact turns'
+    ? '/agentsensei:now for the exact turns'
     : `node --experimental-strip-types ${repoRoot}/src/cli.ts now`;
 }
 

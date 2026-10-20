@@ -76,13 +76,40 @@ act on it, or change how you work until the answer is yes.
 `;
 }
 
-/** Where the command files live, relative to a home directory. */
+/**
+ * Where the command files live.
+ *
+ * **A subdirectory, because that is what namespaces them.** A command at
+ * `.claude/commands/agentsensei/fix.md` is `/agentsensei:fix`; the same file
+ * flat at `.claude/commands/agentsensei-fix.md` is `/agentsensei-fix`. From the
+ * harness changelog: *"Restored namespacing in command names based on
+ * subdirectories … `.claude/commands/frontend/component.md` is now
+ * `/frontend:component`"*.
+ *
+ * That also gets the colon form without packaging a plugin — `mem0:remember`
+ * and `commit-commands:commit` are plugin commands, but a nested user command
+ * reaches the same shape.
+ */
+export function commandDir(home: string): string {
+  return `${home}/.claude/commands/${MARKER}`;
+}
+
 export function commandFilePath(home: string): string {
-  return `${home}/.claude/commands/${MARKER}.md`;
+  return `${commandDir(home)}/now.md`;
 }
 
 export function fixCommandFilePath(home: string): string {
-  return `${home}/.claude/commands/${MARKER}-fix.md`;
+  return `${commandDir(home)}/fix.md`;
+}
+
+/**
+ * The flat files an earlier version installed.
+ *
+ * Removed on install, like the stale statusline: leaving them behind means two
+ * `/agentsensei` entries, one of them pointing at the old un-namespaced form.
+ */
+export function legacyCommandFiles(home: string): string[] {
+  return [`${home}/.claude/commands/${MARKER}.md`, `${home}/.claude/commands/${MARKER}-fix.md`];
 }
 
 /** A Claude Code hook entry, as the settings file holds them. */

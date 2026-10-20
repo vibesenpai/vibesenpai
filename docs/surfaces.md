@@ -409,14 +409,22 @@ disables live surfacing entirely, leaving `/sensei:now` and `report`. For many u
 right setting, and the tool loses nothing essential — the value proposition does not depend on
 nudging anyone.
 
-### `/agentsensei` — a slash command, without a plugin
+### `/agentsensei:now` and `/agentsensei:fix` — slash commands, without a plugin
 
-Custom commands live in `.claude/commands/*.md`, and `` !`cmd` `` in the body
-runs a shell command and injects its output, gated by `allowed-tools` in the
-frontmatter — verified in Anthropic's own `commit-commands`. So the command is a
-single file in the user's commands directory, written by `agentsensei install`
-and removed by `uninstall`. **No plugin packaging needed**, which is what makes
-it affordable before M3.
+Custom commands live in `.claude/commands/`, and `` !`cmd` `` in the body runs a
+shell command and injects its output, gated by `allowed-tools` in the
+frontmatter — verified in Anthropic's own `commit-commands`.
+
+**The colon form needs no plugin, only a subdirectory.** `mem0:remember` and
+`commit-commands:commit` are plugin commands, but the harness namespaces nested
+user commands the same way: *"Restored namespacing in command names based on
+subdirectories … `.claude/commands/frontend/component.md` is now
+`/frontend:component`"*. So `commands/agentsensei/now.md` is `/agentsensei:now`,
+written by `agentsensei install` and removed by `uninstall` — **no plugin
+packaging**, which is what makes it affordable before M3.
+
+`uninstall` removes the directory with `rmdirSync`, which refuses a non-empty
+one: a command somebody else put there survives, and so does the folder.
 
 Its body asks for the output verbatim: letting the model summarise would replace
 evidence with a paraphrase of evidence, which is the one thing this project will

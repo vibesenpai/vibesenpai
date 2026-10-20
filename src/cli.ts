@@ -22,15 +22,15 @@ import { render as renderFindings } from './render.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
 import {
-  addHook, commandFileBody, commandFilePath, describeChange, dropOurStatusLine, fixCommandBody,
-  fixCommandFilePath, planFor, remove, type Settings,
+  addHook, commandDir, commandFileBody, commandFilePath, describeChange, dropOurStatusLine,
+  fixCommandBody, fixCommandFilePath, legacyCommandFiles, planFor, remove, type Settings,
 } from './install.ts';
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
 import { detailLine, reportBlock } from './report-line.ts';
 import { recommend, renderFix } from './fix.ts';
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 
 type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
 
@@ -572,10 +572,13 @@ function cmdInstall(a: Argv): number {
   console.log('this would change:');
   for (const l of change) console.log(l);
   for (const [p_, name] of [
-    [commandFilePath(home), '/agentsensei'],
-    [fixCommandFilePath(home), '/agentsensei-fix'],
+    [commandFilePath(home), '/agentsensei:now'],
+    [fixCommandFilePath(home), '/agentsensei:fix'],
   ] as const) {
     console.log(`  ${existsSync(p_) ? 'command (exists)' : 'command (new)   '}  ${name.padEnd(17)} ${p_}`);
+  }
+  for (const old of legacyCommandFiles(home)) {
+    if (existsSync(old)) console.log(`  command (remove)  ${'un-namespaced'.padEnd(17)} ${old}`);
   }
 
   if (a.flags['apply'] !== true) {
@@ -612,9 +615,12 @@ function cmdInstall(a: Argv): number {
   // A new file in their directory rather than an edit to one of theirs, so the
   // risk is lower — but it is still their directory, and `uninstall` removes it.
   try {
-    mkdirSync(join(home, '.claude', 'commands'), { recursive: true });
+    mkdirSync(commandDir(home), { recursive: true });
     writeFileSync(commandFilePath(home), commandFileBody(repoRoot()));
     writeFileSync(fixCommandFilePath(home), fixCommandBody(repoRoot()));
+    // The flat files an earlier version wrote, which would otherwise linger as
+    // a second, un-namespaced `/agentsensei`.
+    for (const old of legacyCommandFiles(home)) rmSync(old, { force: true });
   } catch {
     console.error(`could not write the command files — the slash commands will be missing.`);
   }
@@ -737,7 +743,9 @@ function cmdUninstall(a: Argv): number {
 
   const change = describeChange(before, after);
   console.log(`settings: ${path}\n`);
-  const cmdFiles = [commandFilePath(home), fixCommandFilePath(home)].filter((f) => existsSync(f));
+  const cmdFiles = [commandFilePath(home), fixCommandFilePath(home), ...legacyCommandFiles(home)].filter(
+    (f) => existsSync(f),
+  );
   if (change.length === 0 && cmdFiles.length === 0) {
     console.log('nothing of ours is installed.');
     return 0;
@@ -746,10 +754,13 @@ function cmdUninstall(a: Argv): number {
   console.log('this would change:');
   for (const l of change) console.log(l);
   for (const [p_, name] of [
-    [commandFilePath(home), '/agentsensei'],
-    [fixCommandFilePath(home), '/agentsensei-fix'],
+    [commandFilePath(home), '/agentsensei:now'],
+    [fixCommandFilePath(home), '/agentsensei:fix'],
   ] as const) {
     console.log(`  ${existsSync(p_) ? 'command (exists)' : 'command (new)   '}  ${name.padEnd(17)} ${p_}`);
+  }
+  for (const old of legacyCommandFiles(home)) {
+    if (existsSync(old)) console.log(`  command (remove)  ${'un-namespaced'.padEnd(17)} ${old}`);
   }
 
   if (a.flags['apply'] !== true) {
@@ -760,6 +771,11 @@ function cmdUninstall(a: Argv): number {
   try {
     rmSync(commandFilePath(home), { force: true });
     rmSync(fixCommandFilePath(home), { force: true });
+    for (const old of legacyCommandFiles(home)) rmSync(old, { force: true });
+    // `rmdirSync`, not `rmSync`: it refuses a non-empty directory, which is
+    // exactly the guard wanted. If someone put their own command in there, the
+    // directory stays and so does their file.
+    rmdirSync(commandDir(home));
   } catch {
     // Already gone, or never ours to remove.
   }
