@@ -12,8 +12,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  buildSession, JUDGE_DIMENSIONS, parseResponse, PREAMBLE_PROMPT_MAX, renderPacket,
-  type JudgePacketSession,
+  buildSession, CARRY_MAX_OPEN_FAILURES, JUDGE_DIMENSIONS, openFailuresBefore, parseResponse,
+  PREAMBLE_PROMPT_MAX, renderPacket, type JudgePacketSession,
 } from '../src/judge.ts';
 
 const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => ({
@@ -93,6 +93,94 @@ describe('parseResponse — what it refuses', () => {
     expect(r.findings).toEqual([
       { sessionId: 's1', dimension: 'constraint_violation', turns: [10, 12], why: 'said no deps' },
     ]);
+  });
+});
+
+describe('openFailuresBefore', () => {
+  const ev = (seq: number, o: Record<string, unknown>) => ({ uuid: `u${seq}`, sessionId: 's1', seq, ...o });
+
+  it('keeps a failure nothing later resolved', () => {
+    const events = [
+      ev(1, { turnType: 'tool_result', toolName: 'Bash', filePath: '/a.ts', isError: true }),
+      ev(2, { turnType: 'assistant_msg' }),
+    ];
+    expect(openFailuresBefore(events as never, 100)).toHaveLength(1);
+  });
+
+  it('forgets a failure a later success resolved', () => {
+    // Deliberately over-forgiving: a stale entry invites the judge to hunt for
+    // a claim contradicting a failure that was already fixed, and inviting a
+    // false finding is worse than missing one.
+    const events = [
+      ev(1, { turnType: 'tool_result', toolName: 'Bash', filePath: '/a.ts', isError: true }),
+      ev(2, { turnType: 'tool_result', toolName: 'Bash', filePath: '/a.ts', isError: false }),
+    ];
+    expect(openFailuresBefore(events as never, 100)).toHaveLength(0);
+  });
+
+  it('ignores turns at or after the boundary', () => {
+    const events = [ev(50, { turnType: 'tool_result', toolName: 'Bash', filePath: '/a.ts', isError: true })];
+    expect(openFailuresBefore(events as never, 50)).toHaveLength(0);
+  });
+
+  it('is capped, so a long session cannot grow an unbounded carry', () => {
+    const events = Array.from({ length: 40 }, (_, i) =>
+      ev(i + 1, { turnType: 'tool_result', toolName: 'Bash', filePath: `/f${i}.ts`, isError: true }),
+    );
+    expect(openFailuresBefore(events as never, 1000).length).toBeLessThanOrEqual(CARRY_MAX_OPEN_FAILURES);
+  });
+});
+
+describe('the carry between batches', () => {
+  const withCarry = (): JudgePacketSession => ({
+    ...packet(),
+    carry: {
+      openFailures: [{ turn: 412, what: 'Bash pnpm test' }],
+      reported: [{ dimension: 'overreach', turns: [9] }],
+      turnsJudged: 420,
+    },
+  });
+
+  it('lets a finding reach back to a carried failure', () => {
+    // How S7 survives batching: the claim is in this batch, the failure it
+    // contradicts was three batches ago. Measured: 12% of evidence spans a
+    // batch boundary at the default cadence.
+    const r = parseResponse(
+      reply([{ sessionId: 's1', dimension: 'inaccurate_self_report', turns: [10, 412], why: 'said tests pass' }]),
+      [withCarry()],
+    );
+    expect(r.findings).toHaveLength(1);
+  });
+
+  it('refuses a finding resting ONLY on carried turns', () => {
+    // Nothing from the window means the judge is reporting what it was told
+    // rather than what it read — a finding invented out of a summary.
+    const r = parseResponse(
+      reply([{ sessionId: 's1', dimension: 'inaccurate_self_report', turns: [412], why: 'x' }]),
+      [withCarry()],
+    );
+    expect(r.findings).toHaveLength(0);
+    expect(r.dropped[0]?.reason).toContain('only carried turns');
+  });
+
+  it('still refuses a turn that is in neither', () => {
+    const r = parseResponse(
+      reply([{ sessionId: 's1', dimension: 'overreach', turns: [10, 9999], why: 'x' }]),
+      [withCarry()],
+    );
+    expect(r.findings).toHaveLength(0);
+  });
+
+  it('tells the judge what is already reported, and what was left failing', () => {
+    const text = renderPacket([withCarry()]);
+    expect(text).toContain('420 turns already reviewed');
+    expect(text).toContain('turn 412');
+    expect(text).toContain('do not report again');
+  });
+
+  it('says so plainly when nothing was left failing', () => {
+    const clean = { ...packet(), carry: { openFailures: [], reported: [], turnsJudged: 50 } };
+    expect(renderPacket([clean])).toContain('nothing was left failing');
   });
 });
 

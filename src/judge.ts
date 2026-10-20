@@ -116,6 +116,52 @@ export const RUBRIC: Record<JudgeDimension, { prevalence: string; test: string }
   },
 };
 
+/**
+ * What the judge is told about turns it is no longer being shown.
+ *
+ * ── Why this exists ────────────────────────────────────────────────────────
+ *
+ * Judging in batches loses the thread between them. Measured on 400 corpus
+ * sessions at the default 50-turn cadence:
+ *
+ * ```
+ *   evidence for one finding spanning a batch    12%
+ *   boundaries leaving an edit_retry unresolved   1.0%
+ *   boundaries leaving ANY tool failure open     18.9%   <- what this carries
+ * ```
+ *
+ * The three measure different things and the last is the one that matters: a
+ * failure needs no retry to contradict a later claim of success. Mean 1.1
+ * failures carried, maximum 2 across 2,842 boundaries, so the cap below is
+ * generous rather than binding.
+ *
+ * The prompt preamble already carries the developer's side across the whole
+ * session, so S3 (constraint violation) and S2 (misread intent) survive
+ * batching untouched. **S7 is the one that breaks**: "the agent said it was
+ * done" can sit three batches after "it failed", and nothing in the preamble
+ * says a thing about failures. It costs ~109 tokens on a real packet.
+ *
+ * ── Deterministic, and bounded ─────────────────────────────────────────────
+ *
+ * Every field here is **computed**, never written by a model. A summary the
+ * judge writes and then re-reads compounds its own errors across batches, and
+ * this project has no appetite for a detector that drifts — the one place a
+ * model's words would carry forward is the one place they must not.
+ *
+ * It is also capped, so a long session cannot grow a carry that eventually
+ * costs more than the turns it describes.
+ */
+export type JudgeCarry = {
+  /** Failures with no later success on the same target. The S7 trigger. */
+  openFailures: { turn: number; what: string }[];
+  /** Already reported, so the judge does not say it twice. */
+  reported: { dimension: JudgeDimension; turns: number[] }[];
+  /** Turns judged so far, so "earlier" has a shape. */
+  turnsJudged: number;
+};
+
+export const CARRY_MAX_OPEN_FAILURES = 8;
+
 export type JudgePacketSession = {
   sessionId: string;
   /** Every user prompt, in order. The cross-window constraint memory. */
@@ -124,7 +170,33 @@ export type JudgePacketSession = {
   windows: string[];
   /** Turn numbers the packet actually contains, for anchoring. */
   turns: number[];
+  /** What happened before these windows. Absent on the first batch. */
+  carry?: JudgeCarry;
 };
+
+/**
+ * Failures from earlier turns that nothing has since resolved.
+ *
+ * "Resolved" is deliberately crude — a later successful call naming the same
+ * target. It over-forgives rather than over-reports, which is the right
+ * direction: a stale entry here invites the judge to look for a claim that
+ * contradicts a failure already fixed, and inviting a false finding is worse
+ * than missing one.
+ */
+export function openFailuresBefore(events: Event[], before: number): JudgeCarry['openFailures'] {
+  const failed = new Map<string, { turn: number; what: string }>();
+  for (const e of events) {
+    if (e.seq >= before) break;
+    const target = e.filePath ?? e.toolName;
+    if (target === undefined) continue;
+    if (e.turnType === 'tool_result' && e.isError === true) {
+      failed.set(target, { turn: e.seq, what: `${e.toolName ?? 'tool'} ${e.filePath ?? ''}`.trim() });
+    } else if (e.turnType === 'tool_result' && e.isError !== true) {
+      failed.delete(target);
+    }
+  }
+  return [...failed.values()].slice(-CARRY_MAX_OPEN_FAILURES);
+}
 
 /** Each prompt in the preamble is capped; one pasted log must not be the packet. */
 export const PREAMBLE_PROMPT_MAX = 600;
@@ -149,6 +221,7 @@ export function buildSession(
   sessionId: string,
   events: Event[],
   skeletons: Skeleton[],
+  carry?: JudgeCarry,
 ): JudgePacketSession {
   const prompts: string[] = [];
   for (const e of events) {
@@ -170,7 +243,13 @@ export function buildSession(
     }
   }
 
-  return { sessionId, prompts, windows, turns };
+  return {
+    sessionId,
+    prompts,
+    windows,
+    turns,
+    ...(carry !== undefined ? { carry } : {}),
+  };
 }
 
 /**
@@ -190,11 +269,26 @@ export function renderPacket(sessions: JudgePacketSession[]): string {
   const body = sessions
     .map((s) => {
       const prompts = s.prompts.map((p, i) => `  [${i + 1}] ${p}`).join('\n');
+      const carry = s.carry === undefined ? [] : [
+        '',
+        `Earlier in this session (${s.carry.turnsJudged} turns already reviewed, not shown):`,
+        ...(s.carry.openFailures.length === 0
+          ? ['  nothing was left failing']
+          : s.carry.openFailures.map((f) => `  turn ${f.turn}: ${f.what} failed and was not seen to succeed`)),
+        ...(s.carry.reported.length === 0
+          ? []
+          : [
+              '  already reported, do not report again:',
+              ...s.carry.reported.map((r) => `    ${r.dimension} at turns ${r.turns.join(', ')}`),
+            ]),
+        '  You may cite these turns ONLY for a claim made in the turns below.',
+      ];
       return [
         `=== SESSION ${s.sessionId} ===`,
         '',
         'What the developer asked for, in order:',
         prompts === '' ? '  (none recorded)' : prompts,
+        ...carry,
         '',
         'Turns:',
         s.windows.join('\n\n'),
@@ -245,7 +339,19 @@ export type ParseResult = {
  * silently would hide exactly the failure mode that killed three rule detectors.
  */
 export function parseResponse(raw: string, sessions: JudgePacketSession[]): ParseResult {
-  const known = new Map(sessions.map((s) => [s.sessionId, new Set(s.turns)]));
+  // Two sets per session, because they permit different things. A finding has
+  // to be **anchored** in turns the judge was actually shown; it may also point
+  // at a carried failure, which is how S7 works across a batch boundary ("the
+  // agent says it is done here, but turn 412 failed and never recovered").
+  // Without the split the carry would either be uncitable — making it useless —
+  // or would let a finding rest entirely on turns nobody showed the model.
+  const shown = new Map(sessions.map((s) => [s.sessionId, new Set(s.turns)]));
+  const citable = new Map(
+    sessions.map((s) => [
+      s.sessionId,
+      new Set([...s.turns, ...(s.carry?.openFailures ?? []).map((f) => f.turn)]),
+    ]),
+  );
   const drops = new Map<string, number>();
   const drop = (reason: string): void => {
     drops.set(reason, (drops.get(reason) ?? 0) + 1);
@@ -271,7 +377,7 @@ export function parseResponse(raw: string, sessions: JudgePacketSession[]): Pars
   const findings: JudgeFinding[] = [];
   for (const item of list) {
     const f = item as Partial<JudgeFinding>;
-    if (typeof f.sessionId !== 'string' || !known.has(f.sessionId)) {
+    if (typeof f.sessionId !== 'string' || !shown.has(f.sessionId)) {
       drop('session not in this batch');
       continue;
     }
@@ -284,9 +390,17 @@ export function parseResponse(raw: string, sessions: JudgePacketSession[]): Pars
       drop('no turns cited');
       continue;
     }
-    const inPacket = known.get(f.sessionId) as Set<number>;
-    if (!turns.every((t) => inPacket.has(t))) {
+    const mayCite = citable.get(f.sessionId) as Set<number>;
+    if (!turns.every((t) => mayCite.has(t))) {
       drop('cited a turn the packet does not contain');
+      continue;
+    }
+    const anchors = shown.get(f.sessionId) as Set<number>;
+    if (!turns.some((t) => anchors.has(t))) {
+      // Every cited turn came from the carry. The judge is reporting something
+      // it was told about rather than something it read, which is the shape of
+      // a finding invented out of a summary.
+      drop('cited only carried turns, none from the window');
       continue;
     }
     if (typeof f.why !== 'string' || f.why.trim() === '') {
