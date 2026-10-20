@@ -249,7 +249,15 @@ describe('standing — history is processed so day one is not blank', () => {
       { now: '2026-10-19T12:00:00.000Z' },
     );
     expect(s.sessions).toBe(3);
-    expect(s.dimensions).toEqual([{ dimension: 'edit_retry', occurrences: 2, sessions: 2 }]);
+    expect(s.dimensions).toEqual([
+      {
+        dimension: 'edit_retry',
+        occurrences: 2,
+        sessions: 2,
+        files: 2,
+        top: { subject: '/x.ts', occurrences: 1 },
+      },
+    ]);
     expect(s.reasons).toEqual({ 'not-read-first': 2 });
   });
 

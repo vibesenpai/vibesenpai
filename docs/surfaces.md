@@ -409,6 +409,22 @@ disables live surfacing entirely, leaving `/sensei:now` and `report`. For many u
 right setting, and the tool loses nothing essential — the value proposition does not depend on
 nudging anyone.
 
+### `/agentsensei` — a slash command, without a plugin
+
+Custom commands live in `.claude/commands/*.md`, and `` !`cmd` `` in the body
+runs a shell command and injects its output, gated by `allowed-tools` in the
+frontmatter — verified in Anthropic's own `commit-commands`. So the command is a
+single file in the user's commands directory, written by `agentsensei install`
+and removed by `uninstall`. **No plugin packaging needed**, which is what makes
+it affordable before M3.
+
+Its body asks for the output verbatim: letting the model summarise would replace
+evidence with a paraphrase of evidence, which is the one thing this project will
+not do.
+
+Same caveat as the hooks (D54): the path is absolute, so moving the checkout
+breaks it until re-install.
+
 ### Command surface
 
 ```

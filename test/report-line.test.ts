@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { costLine, dimensionLine, MAX_DIMENSIONS, reasonLabel, reasonsLine, reportBlock } from '../src/report-line.ts';
+import { costLine, dimensionLine, MAX_DIMENSIONS, reasonLabel, reasonLines, reportBlock } from '../src/report-line.ts';
 import type { Standing } from '../src/standing.ts';
 
 const base = (over: Partial<Standing> = {}): Standing => ({
@@ -17,20 +17,48 @@ const base = (over: Partial<Standing> = {}): Standing => ({
   sessions: 4,
   edits: 174,
   tokens: { output: 4_200_000, cacheCreation: 31_400_000 },
-  dimensions: [{ dimension: 'edit_retry', occurrences: 3, sessions: 1 }],
-  reasons: { 'not-read-first': 2, 'string-not-found': 1 },
+  dimensions: [
+    {
+      dimension: 'edit_retry',
+      occurrences: 4,
+      sessions: 2,
+      files: 3,
+      top: { subject: '~/.claude/plans/rosy-seeking-feather.md', occurrences: 2 },
+    },
+  ],
+  reasons: { 'not-read-first': 2, 'string-not-found': 2 },
   unreadable: 0,
   ...over,
 });
 
 describe('report — the real standing from this machine', () => {
   it('produces the agreed block', () => {
-    const out = reportBlock(base());
-    expect(out).toContain('agentsensei · 4 sessions · 174 edits');
-    expect(out).toContain('3 edits refused then retried');
-    expect(out).toContain('2 not read first');
-    expect(out).toContain('context re-ingested 7.5× output (median 12.0)');
-    expect(out).toContain('`agentsensei now`');
+    const out = reportBlock(base(), '/agentsensei for the exact turns');
+    expect(out).toContain('agentsensei report · your last 4 sessions');
+    expect(out).toContain('4 edits were rejected and retried, across 3 files');
+    expect(out).toContain('most often rosy-seeking-feather.md');
+    expect(out).toContain("the text didn't match");
+    expect(out).toContain("the file wasn't read first");
+    expect(out).toContain('/agentsensei for the exact turns');
+  });
+
+  it('starts on its own line, so it does not run on from the harness prefix', () => {
+    // The harness renders `SessionStart:startup says:` immediately before this,
+    // and without the newline the first line read "says: agentsensei · …".
+    expect(reportBlock(base()).startsWith('\n')).toBe(true);
+  });
+
+  it('answers "4 what edits?" by naming the worst file', () => {
+    // The first reader's actual question. One name is enough to recognise;
+    // the rest stays a count so the block height does not grow with the files.
+    expect(reportBlock(base())).toContain('rosy-seeking-feather.md');
+  });
+
+  it('keeps every line narrow enough not to wrap', () => {
+    // Measured against a real terminal: ~70 columns available. An earlier
+    // version ran to 87 and wrapped mid-sentence.
+    const lines = reportBlock(base(), '/agentsensei for the exact turns').split('\n');
+    expect(Math.max(...lines.map((l) => l.length))).toBeLessThanOrEqual(70);
   });
 
   it('stays short enough to read every single session', () => {
@@ -82,26 +110,37 @@ describe('report — the empty and edge cases', () => {
     // Silence here would read as broken, and inventing a finding is worse.
     const out = reportBlock(base({ dimensions: [], reasons: {}, tokens: { output: 0, cacheCreation: 0 } }));
     expect(out).toContain('nothing to flag');
-    expect(out.split('\n')).toHaveLength(1);
+    expect(out).toContain('174 edits'); // the denominator is what makes it a result
+    expect(out.trim().split('\n')).toHaveLength(1);
   });
 
-  it('still reports the cost when there are no findings', () => {
+  it('stays silent about a normal cost even with no findings', () => {
+    // Below the corpus p90 the line said "you are normal" every session. The
+    // person who built the metric could not read it; now its presence is the
+    // signal.
     const out = reportBlock(base({ dimensions: [], reasons: {} }));
-    expect(out).toContain('context re-ingested');
-    expect(out).not.toContain('nothing to flag');
+    expect(out).not.toMatch(/re-ingest|context/i);
+    expect(out).toContain('nothing to flag');
+  });
+
+  it('speaks up when the cost is genuinely unusual', () => {
+    const hot = base({ dimensions: [], reasons: {}, tokens: { output: 1000, cacheCreation: 200_000 } });
+    const out = reportBlock(hot);
+    expect(out).toContain('rebuilt its context far more often than usual');
+    expect(out).not.toMatch(/\d+(\.\d+)?×/); // no ratio to decode
   });
 
   it('caps the dimensions and counts the rest', () => {
     const many = base({
       dimensions: [
-        { dimension: 'edit_retry', occurrences: 9, sessions: 3 },
-        { dimension: 'redundant_call', occurrences: 4, sessions: 2 },
-        { dimension: 'something_else', occurrences: 1, sessions: 1 },
+        { dimension: 'edit_retry', occurrences: 9, sessions: 3, files: 2, top: { subject: '/a/x.ts', occurrences: 7 } },
+        { dimension: 'redundant_call', occurrences: 4, sessions: 2, files: 1, top: { subject: '/a/y.ts', occurrences: 4 } },
+        { dimension: 'something_else', occurrences: 1, sessions: 1, files: 1 },
       ],
     });
     const out = reportBlock(many);
-    expect(out).toContain('9 edits refused then retried');
-    expect(out).toContain('4 identical calls repeated');
+    expect(out).toContain('9 edits were rejected and retried');
+    expect(out).toContain('4 calls were repeated with the same answer');
     expect(out).not.toContain('something_else');
     expect(out).toContain('…1 more');
     expect(MAX_DIMENSIONS).toBe(2);
@@ -111,14 +150,14 @@ describe('report — the empty and edge cases', () => {
     expect(reportBlock(base({ unreadable: 2 }))).toContain('2 sessions could not be read');
   });
 
-  it('says where an outlier sits without calling it bad', () => {
-    const hot = base({ tokens: { output: 1000, cacheCreation: 200_000 } });
-    const out = costLine(hot);
-    expect(out).toContain('corpus p90');
-    expect(out).not.toMatch(/high|excessive|too much/i);
+  it('says an outlier is unusual without calling it bad', () => {
+    const out = costLine(base({ tokens: { output: 1000, cacheCreation: 200_000 } }));
+    expect(out).toContain('far more often than usual');
+    expect(out).not.toMatch(/high|excessive|too much|bad|wrong/i);
   });
 
-  it('omits the cost line when there is no token data', () => {
+  it('is silent below the threshold and with no token data', () => {
+    expect(costLine(base())).toBe(''); // 7.5x, below p90
     expect(costLine(base({ tokens: { output: 0, cacheCreation: 0 } }))).toBe('');
   });
 });
@@ -138,12 +177,12 @@ describe('report — reason keys become English', () => {
     expect(reasonLabel('some-new-thing')).toBe('some new thing');
   });
 
-  it('orders reasons by weight', () => {
-    expect(reasonsLine({ a: 1, b: 5 })).toBe('5 b · 1 a');
+  it('orders reasons by weight, one per line', () => {
+    expect(reasonLines({ a: 1, b: 5 })).toEqual(['     5  b', '     1  a']);
   });
 
   it('pluralises the dimension line correctly', () => {
-    expect(dimensionLine({ dimension: 'edit_retry', occurrences: 1, sessions: 1 })).toContain('1 edit refused');
-    expect(dimensionLine({ dimension: 'edit_retry', occurrences: 2, sessions: 1 })).toContain('2 edits refused');
+    expect(dimensionLine({ dimension: 'edit_retry', occurrences: 1, sessions: 1, files: 0 })).toContain('1 edit was rejected');
+    expect(dimensionLine({ dimension: 'edit_retry', occurrences: 2, sessions: 1, files: 0 })).toContain('2 edits were rejected');
   });
 });

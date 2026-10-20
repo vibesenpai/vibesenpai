@@ -25,6 +25,39 @@
 
 export const MARKER = 'agentsensei';
 
+/**
+ * The `/agentsensei` slash command.
+ *
+ * A custom command is a markdown file under `.claude/commands/`, and `` !`cmd` ``
+ * in its body runs a shell command and injects the output — gated by
+ * `allowed-tools` in the frontmatter. Verified in Anthropic's own
+ * `commit-commands/commands/commit-push-pr.md`.
+ *
+ * This is what makes `/agentsensei` real **without packaging a plugin**: a file
+ * in their commands directory, installed and removed with everything else.
+ *
+ * The body asks for the output verbatim. Letting the model summarise would
+ * replace evidence with a paraphrase of evidence, which is the one thing this
+ * project will not do.
+ */
+export function commandFileBody(repoRoot: string, nodePath = process.execPath): string {
+  return `---
+description: What agentsensei found in this session
+allowed-tools: Bash(${nodePath}:*)
+---
+
+!\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts now\`
+
+Show the output above exactly as it is, with no summary and no commentary.
+It is evidence; paraphrasing it defeats the point.
+`;
+}
+
+/** Where the command file lives, relative to a home directory. */
+export function commandFilePath(home: string): string {
+  return `${home}/.claude/commands/${MARKER}.md`;
+}
+
 /** A Claude Code hook entry, as the settings file holds them. */
 export type HookCommand = {
   type: 'command';

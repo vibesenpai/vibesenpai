@@ -21,12 +21,15 @@ import { countDenominators, detectorsFor, runDetectors, unknownDimensions } from
 import { render as renderFindings } from './render.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
-import { addHook, describeChange, dropOurStatusLine, planFor, remove, type Settings } from './install.ts';
+import {
+  addHook, commandFileBody, commandFilePath, describeChange, dropOurStatusLine, planFor, remove,
+  type Settings,
+} from './install.ts';
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
-import { reportBlock } from './report-line.ts';
+import { detailLine, reportBlock } from './report-line.ts';
 import { spawn } from 'node:child_process';
-import { copyFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
 
@@ -260,7 +263,7 @@ function cmdDoctor(a: Argv): number {
     );
     // Exactly what a new session will show, so `doctor` answers "what will I
     // see" rather than only "is it alive".
-    const block = reportBlock(st);
+    const block = reportBlock(st, detailLine(repoRoot(), home));
     if (block !== '') for (const l of block.split('\n')) console.log(`             ${l}`);
   }
   if (process.env['AGENTSENSEI_DISABLE'] === '1') {
@@ -566,6 +569,10 @@ function cmdInstall(a: Argv): number {
   }
   console.log('this would change:');
   for (const l of change) console.log(l);
+  const cmdPath = commandFilePath(home);
+  console.log(
+    `  ${existsSync(cmdPath) ? 'command (exists)' : 'command (new)   '}  ${cmdPath}  → /${'agentsensei'}`,
+  );
 
   if (a.flags['apply'] !== true) {
     console.log('\nnothing written. re-run with --apply to write it,');
@@ -591,6 +598,15 @@ function cmdInstall(a: Argv): number {
     copyFileSync(backup, path);
     console.error('\nwhat landed was not what was intended — restored from backup.');
     return 1;
+  }
+
+  // A new file in their directory rather than an edit to one of theirs, so the
+  // risk is lower — but it is still their directory, and `uninstall` removes it.
+  try {
+    mkdirSync(join(home, '.claude', 'commands'), { recursive: true });
+    writeFileSync(cmdPath, commandFileBody(repoRoot()));
+  } catch {
+    console.error(`could not write ${cmdPath} — /agentsensei will not be available.`);
   }
 
   console.log(`\nwritten. backup at ${backup}`);
@@ -677,7 +693,7 @@ async function cmdStanding(a: Argv): Promise<number> {
     );
   }
 
-  const block = reportBlock(s);
+  const block = reportBlock(s, detailLine(repoRoot(), homedir()));
   if (block !== '') {
     console.log('\n  a new session shows:');
     for (const l of block.split('\n')) console.log(`    ${l}`);
@@ -694,18 +710,28 @@ function cmdUninstall(a: Argv): number {
 
   const change = describeChange(before, after);
   console.log(`settings: ${path}\n`);
-  if (change.length === 0) {
+  if (change.length === 0 && !existsSync(commandFilePath(home))) {
     console.log('nothing of ours is installed.');
     return 0;
   }
+  if (existsSync(commandFilePath(home))) console.log(`  remove  ${commandFilePath(home)}`);
   console.log('this would change:');
   for (const l of change) console.log(l);
+  const cmdPath = commandFilePath(home);
+  console.log(
+    `  ${existsSync(cmdPath) ? 'command (exists)' : 'command (new)   '}  ${cmdPath}  → /${'agentsensei'}`,
+  );
 
   if (a.flags['apply'] !== true) {
     console.log('\nnothing written. re-run with --apply.');
     return 0;
   }
   writeFileSync(path, `${JSON.stringify(after, null, 2)}\n`);
+  try {
+    rmSync(commandFilePath(home), { force: true });
+  } catch {
+    // Already gone, or never ours to remove.
+  }
   console.log('\nremoved.');
   return 0;
 }

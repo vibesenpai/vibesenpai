@@ -113,6 +113,10 @@ Planned 2026-10-12/15, before any code existed.
 | D59 | **Each detector has a defined display per level.** L1 session start is terse and capped at two dimensions; L2 `now`/`standing` carries evidence and advice. File churn never reaches L1 — 15% correlation against a 9% base rate is orientation, not news. | [docs/dimensions.md](docs/dimensions.md) |
 | D60 | **Install clears a statusline the previous version set.** An upgrade otherwise leaves the harness running a deleted script on every render. Found on a real machine in exactly that state. | [src/install.ts](src/install.ts) |
 
+| D61 | **`/agentsensei` is a command file, not a plugin.** `.claude/commands/*.md` with an embedded `` !`cmd` `` shell line gives a working slash command with no packaging. The body demands verbatim output — a summary of evidence is not evidence. | [src/install.ts](src/install.ts) |
+| D62 | **The cost line appears only when unusual, as a sentence.** A cache-creation-to-output ratio is meaningful only against other sessions, so below threshold it reported "normal" every session, and the metric's own author could not read it. Presence is now the signal. | [src/report-line.ts](src/report-line.ts) |
+| D63 | **The report names the worst file.** "4 edits" with no subject drew the question "4 *what* edits?" from its first reader. One name, plus a count of the rest, keeps the block a fixed height. | [src/standing.ts](src/standing.ts) |
+
 ## Reversed or corrected during planning
 
 Kept because the discarded answer is the one a reader will reach for next.

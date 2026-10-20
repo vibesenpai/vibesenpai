@@ -27,8 +27,12 @@ function transcripts(sources: string[]): string[] {
   const out: string[] = [];
   for (const dir of sources) {
     try {
+      // stderr discarded: a configured source that does not exist is normal
+      // (the codex directory on a Claude-only machine), and `find` complaining
+      // about it would surface as noise from a detached pass.
       const found = execFileSync('find', [dir, '-name', '*.jsonl', '-size', '+0'], {
         encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
       });
       out.push(...found.trim().split('\n').filter(Boolean));
     } catch {

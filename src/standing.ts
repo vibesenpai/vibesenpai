@@ -69,8 +69,23 @@ export type Standing = {
   sessions: number;
   edits: number;
   tokens: { output: number; cacheCreation: number };
-  /** Occurrences and session spread, per dimension, biggest first. */
-  dimensions: { dimension: string; occurrences: number; sessions: number }[];
+  /**
+   * Occurrences and spread, per dimension, biggest first.
+   *
+   * `top` and `files` exist so the report can answer "4 *what* edits?" — the
+   * first version named a count with no subject, and the first person to read
+   * it asked exactly that. Only the worst subject is kept: storing every one
+   * would grow `standing.json` without bound, and the report has room for one.
+   */
+  dimensions: {
+    dimension: string;
+    occurrences: number;
+    sessions: number;
+    /** Distinct subjects, for "across 3 files". */
+    files: number;
+    /** The subject it happened to most, for "most often X". */
+    top?: { subject: string; occurrences: number };
+  }[];
   /** The harness's own reasons, summed across every finding. */
   reasons: Record<string, number>;
   /**
@@ -135,7 +150,10 @@ export async function computeStanding(
   let edits = 0;
   let output = 0;
   let cacheCreation = 0;
-  const perDimension = new Map<string, { occurrences: number; sessions: Set<string> }>();
+  const perDimension = new Map<
+    string,
+    { occurrences: number; sessions: Set<string>; subjects: Map<string, number> }
+  >();
   const reasons: Record<string, number> = {};
 
   for (const s of sessions) {
@@ -151,9 +169,16 @@ export async function computeStanding(
     });
 
     for (const f of res.findings) {
-      const slot = perDimension.get(f.dimension) ?? { occurrences: 0, sessions: new Set<string>() };
+      const slot = perDimension.get(f.dimension) ?? {
+        occurrences: 0,
+        sessions: new Set<string>(),
+        subjects: new Map<string, number>(),
+      };
       slot.occurrences += f.occurrences;
       slot.sessions.add(s.sessionId);
+      // Summed across sessions: the same file hit in two sessions is one
+      // subject with two occurrences, not two subjects.
+      slot.subjects.set(f.subject, (slot.subjects.get(f.subject) ?? 0) + f.occurrences);
       perDimension.set(f.dimension, slot);
       for (const [reason, n] of Object.entries(f.reasons ?? {})) {
         reasons[reason] = (reasons[reason] ?? 0) + n;
@@ -168,7 +193,17 @@ export async function computeStanding(
     edits,
     tokens: { output, cacheCreation },
     dimensions: [...perDimension]
-      .map(([dimension, v]) => ({ dimension, occurrences: v.occurrences, sessions: v.sessions.size }))
+      .map(([dimension, v]) => {
+        const ranked = [...v.subjects].sort((a, b) => b[1] - a[1]);
+        const first = ranked[0];
+        return {
+          dimension,
+          occurrences: v.occurrences,
+          sessions: v.sessions.size,
+          files: v.subjects.size,
+          ...(first !== undefined ? { top: { subject: first[0], occurrences: first[1] } } : {}),
+        };
+      })
       .sort((a, b) => b.occurrences - a.occurrences),
     reasons,
     unreadable: opts.unreadable ?? 0,

@@ -129,19 +129,36 @@ session**, so anything not worth reading every single time belongs lower down.
 | file churn | **never** | `MOST REWRITTEN`, versions and edit calls |
 
 ```
-agentsensei · 4 sessions · 174 edits
-  3 edits refused then retried
-      2 not read first · 1 text did not match
-  context re-ingested 7.4× output (median 12.0)
-  `agentsensei now` for this session
+SessionStart:startup says:
+
+agentsensei report · your last 5 sessions
+  4 edits were rejected and retried, across 3 files
+     most often rosy-seeking-feather.md
+     2  the text didn't match
+     2  the file wasn't read first
+  /agentsensei for the exact turns
 ```
 
 Rules, each one something that would otherwise go wrong:
 
-- **A clean history prints one line, not silence:** `… · nothing to flag`.
-  Silence reads as broken; inventing a finding is worse than either.
-- **Reason keys become English** — `not-read-first` → `not read first`. The key
-  is an identifier, not language.
+- **It starts on its own line.** The harness prefixes the block with
+  `SessionStart:startup says:`, and without a leading newline the first line
+  read "says: agentsensei · …".
+- **It names the worst file.** The first person to read it asked "4 *what*
+  edits?". One name answers that; the rest stays a count, so the block is a
+  fixed height however many files are involved.
+- **A clean history prints one line, not silence:** `… · nothing to flag across
+  174 edits`. Silence reads as broken; inventing a finding is worse than either.
+- **Reason keys become clauses** — `not-read-first` → `the file wasn't read
+  first`. The key is an identifier, not language.
+- **The cost line appears only when unusual**, as a sentence. It used to print
+  `context re-ingested 7.2× output (median 12.0)` every session; the person who
+  built the metric could not read it, and below the threshold it said "you are
+  normal" forever. Its presence is now the signal.
+- **The detail line names a command that exists.** `/agentsensei` when the
+  command file is installed, the working `node …` form when it is not — checked,
+  never assumed.
+- **Every line fits in ~70 columns.** An earlier version ran to 87 and wrapped.
 - **No imperative verb, no severity word.** Advice lives at L2, where there is
   room to show the evidence that justifies it.
 - **Capped at two dimensions**, with the rest counted. More is a wall of opening
