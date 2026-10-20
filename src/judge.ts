@@ -164,8 +164,18 @@ export const CARRY_MAX_OPEN_FAILURES = 8;
 
 export type JudgePacketSession = {
   sessionId: string;
-  /** Every user prompt, in order. The cross-window constraint memory. */
-  prompts: string[];
+  /**
+   * Every user prompt, with its real turn number.
+   *
+   * **Numbered by turn, never by position.** The first version listed them as
+   * `[1] [2] [3]`, which gave the packet two numbering schemes — bracket
+   * indices in the preamble, `turn NNN` in the windows — and models duly cited
+   * the bracket numbers as turns. Three of the first four responses did it,
+   * and the anchor gate dropped them as hallucinations: the reasoning was
+   * sometimes sound and the citation was answering a question the packet asked
+   * badly. A prompt *is* a turn, so it is labelled like one.
+   */
+  prompts: { turn: number; text: string }[];
   /** Rendered windows, already filtered and deduped. */
   windows: string[];
   /** Turn numbers the packet actually contains, for anchoring. */
@@ -212,9 +222,51 @@ function dedupe(text: string): string {
   return out.join('\n');
 }
 
-/** Does this window contain a user prompt? That is what makes it worth judging. */
-function hasPrompt(rendered: string): boolean {
-  return /(?:^|\n)U\s/.test(rendered);
+/**
+ * A `user` record the harness wrote, not something the developer said.
+ *
+ * Task notifications arrive as user turns and are long — one filled 600
+ * characters of preamble with a tool-use id. Asking a judge what the developer
+ * wanted, and then quoting the harness at it, wastes the budget and invites a
+ * finding about a constraint nobody set.
+ */
+function isHarnessNoise(text: string): boolean {
+  return /^<(?:task-notification|command-message|command-name|local-command)/.test(text);
+}
+
+/**
+ * Is this window worth sending?
+ *
+ * ── Prompts alone were far too lossy, and the number is embarrassing ───────
+ *
+ * The first version kept only prompt-bearing windows, justified by "the signal
+ * lives where the prompts are". Measured afterwards, on six real sessions:
+ *
+ * ```
+ *   prompts only   3-7% of the session reached the judge
+ *   + failures     9-25%                           2.6x the tokens
+ *   everything     48-65%                          9.5x
+ * ```
+ *
+ * A 1,640-event session holds ~7 prompts, so at most 7 of its 89 windows
+ * survive a prompt filter. The judge was being shown 3% of the work and asked
+ * what went wrong with it — and duly found nothing, on twelve sessions where
+ * hand-reading had found candidates it could see.
+ *
+ * **Failures are the other half of the signal.** The developer's side lives
+ * near prompts; the agent's lives near what broke. S7 is a claim contradicted
+ * by a failure, and a failure is rarely adjacent to a prompt — so dropping
+ * those windows removed the evidence for the dimension most worth having.
+ *
+ * Everything would be better still and costs nine times as much for coverage
+ * that is itself only ~55%; this is the knee of the curve, not a compromise
+ * nobody measured.
+ */
+function worthJudging(rendered: string): boolean {
+  const hasPrompt = /(?:^|\n)U\s/.test(rendered);
+  // The skeleton marks a failed result; `render` writes it with a leading ✗.
+  const hasFailure = /(?:^|\n)✗/.test(rendered);
+  return hasPrompt || hasFailure;
 }
 
 export function buildSession(
@@ -223,24 +275,31 @@ export function buildSession(
   skeletons: Skeleton[],
   carry?: JudgeCarry,
 ): JudgePacketSession {
-  const prompts: string[] = [];
+  const prompts: { turn: number; text: string }[] = [];
   for (const e of events) {
     if (e.turnType !== 'user_prompt') continue;
     const t = (e.textSummary ?? '').trim();
-    if (t !== '') prompts.push(t.slice(0, PREAMBLE_PROMPT_MAX));
+    if (t === '' || isHarnessNoise(t)) continue;
+    prompts.push({ turn: e.seq, text: t.slice(0, PREAMBLE_PROMPT_MAX) });
   }
 
   const windows: string[] = [];
   const turns: number[] = [];
   for (const sk of skeletons) {
     const text = render(sk);
-    if (!hasPrompt(text)) continue;
+    if (!worthJudging(text)) continue;
     windows.push(dedupe(text));
     // `ref.seq` — a skeleton line carries a TurnRef, and the seq inside it is
     // the number the rendered line shows and the model is told to cite.
     for (const l of sk.lines) {
       if (l.ref.seq !== undefined) turns.push(l.ref.seq);
     }
+  }
+
+  // A prompt shown in the preamble is shown, so it can be cited. Leaving them
+  // out made the packet quote a turn and then refuse it.
+  for (const p of prompts) {
+    if (!turns.includes(p.turn)) turns.push(p.turn);
   }
 
   return {
@@ -268,7 +327,7 @@ export function renderPacket(sessions: JudgePacketSession[]): string {
 
   const body = sessions
     .map((s) => {
-      const prompts = s.prompts.map((p, i) => `  [${i + 1}] ${p}`).join('\n');
+      const prompts = s.prompts.map((p) => `  turn ${p.turn}: ${p.text}`).join('\n');
       const carry = s.carry === undefined ? [] : [
         '',
         `Earlier in this session (${s.carry.turnsJudged} turns already reviewed, not shown):`,

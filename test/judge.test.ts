@@ -18,7 +18,7 @@ import {
 
 const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => ({
   sessionId: 's1',
-  prompts: ['do the thing, but do not add dependencies'],
+  prompts: [{ turn: 9, text: 'do the thing, but do not add dependencies' }],
   windows: ['U  do the thing\nA  on it\n→  Bash pnpm add left-pad'],
   turns: [10, 11, 12],
   ...over,
@@ -207,8 +207,34 @@ describe('the packet', () => {
     // The cross-window constraint memory: a rule stated early must be visible
     // when judging late. ~288 tokens at p50 buys the largest dimension.
     expect(s.prompts).toHaveLength(2);
-    expect(s.prompts[0]).toHaveLength(PREAMBLE_PROMPT_MAX);
-    expect(s.prompts[1]).toBe('no new deps');
+    expect(s.prompts[0]?.text).toHaveLength(PREAMBLE_PROMPT_MAX);
+    expect(s.prompts[1]?.text).toBe('no new deps');
+    // Labelled by turn, so the packet has ONE numbering scheme. Bracket
+    // indices made models cite `[3]` as turn 3.
+    expect(s.prompts.map((p) => p.turn)).toEqual([1, 2]);
+    expect(s.turns).toContain(1);
+  });
+
+  it('uses ONE numbering scheme, so a prompt index cannot read as a turn', () => {
+    // The bug that produced three "hallucinations": the preamble numbered
+    // prompts [1] [2] [3] while windows said `turn NNN`, and models cited the
+    // bracket numbers. The reasoning was sometimes sound; the citation was
+    // answering a question the packet asked badly.
+    const text = renderPacket([packet()]);
+    expect(text).toContain('turn 9:');
+    expect(text).not.toMatch(/^\s*\[\d+\]/m);
+  });
+
+  it('leaves harness task-notifications out of the preamble', () => {
+    // They arrive as user turns and are long. Quoting the harness back at a
+    // judge asking "what did the developer want" invites a finding about a
+    // constraint nobody set.
+    const events = [
+      { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: '<task-notification> id 123' },
+      { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'user_prompt', textSummary: 'real request' },
+    ];
+    const s = buildSession('s1', events as never, []);
+    expect(s.prompts.map((p) => p.text)).toEqual(['real request']);
   });
 
   it('tells the model to cite turns and to prefer saying nothing', () => {
