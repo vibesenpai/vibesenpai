@@ -1,0 +1,92 @@
+/**
+ * The detached standing pass. Parses every transcript it can find and writes
+ * the aggregate for the statusline to pick up later.
+ *
+ * Spawned by `SessionStart` and never waited on. It is the slow side of the
+ * handoff: parsing is 95% of the cost and scales with history, which is exactly
+ * why no hook may do it.
+ *
+ * Principle Zero: exits 0 unconditionally. A session that cannot be read is
+ * counted rather than skipped silently, and a total failure is recorded in the
+ * circuit breaker so `doctor` can say so.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
+import { parse } from '../src/parsers/index.ts';
+import { detectorsFor } from '../src/detect/index.ts';
+import { resolveConfig } from '../src/config.ts';
+import {
+  clearStarted, computeStanding, isFresh, readStanding, writeStanding, type SessionInput,
+} from '../src/standing.ts';
+import { recordFailure, recordSuccess } from '../src/breaker.ts';
+
+/** Transcripts under the configured sources. `find` so a missing dir is not fatal. */
+function transcripts(sources: string[]): string[] {
+  const out: string[] = [];
+  for (const dir of sources) {
+    try {
+      const found = execFileSync('find', [dir, '-name', '*.jsonl', '-size', '+0'], {
+        encoding: 'utf8',
+      });
+      out.push(...found.trim().split('\n').filter(Boolean));
+    } catch {
+      // A source that does not exist contributes nothing. Normal, not an error.
+    }
+  }
+  return out;
+}
+
+async function main(): Promise<void> {
+  const { config } = resolveConfig();
+
+  // Opening several windows at once must not parse the whole history several
+  // times. `--force` is for the CLI, where somebody asked for it explicitly.
+  const force = process.argv.includes('--force');
+  if (!force && isFresh(readStanding(config.archive))) {
+    clearStarted(config.archive);
+    return;
+  }
+
+  try {
+    const sessions: SessionInput[] = [];
+    let unreadable = 0;
+    for (const f of transcripts(config.sources)) {
+      try {
+        const id = basename(f, '.jsonl');
+        const parsed = parse(f, readFileSync(f, 'utf8'), id);
+        if (parsed.events.length === 0) continue;
+        sessions.push({ sessionId: id, project: projectOf(f), events: parsed.events });
+      } catch {
+        unreadable++;
+      }
+    }
+
+    const standing = await computeStanding(
+      sessions,
+      detectorsFor(config.preset, undefined, config.mute),
+      { unreadable },
+    );
+    writeStanding(config.archive, standing);
+    recordSuccess(config.archive);
+  } catch (err) {
+    recordFailure(config.archive, err instanceof Error ? err.message : 'standing pass failed');
+  } finally {
+    // Cleared either way: a marker left behind would keep the statusline saying
+    // "reading your past sessions" over a pass that is no longer running.
+    clearStarted(config.archive);
+  }
+}
+
+function projectOf(source: string): string {
+  const parts = source.split(/[\\/]/).filter((p) => p !== '');
+  return parts.at(-2) ?? 'unknown';
+}
+
+try {
+  await main();
+} catch {
+  // Last line of defence.
+}
+process.exit(0);

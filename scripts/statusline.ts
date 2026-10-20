@@ -29,6 +29,7 @@
 
 import { readFileSync } from 'node:fs';
 import { countFor, lineFor, pick, readQueue } from '../src/queue.ts';
+import { isProcessing, processingLine, readStanding, standingLine } from '../src/standing.ts';
 import { resolveConfig } from '../src/config.ts';
 
 /** The payload Claude Code sends a statusline command on stdin. */
@@ -58,8 +59,28 @@ function main(): void {
 
   const { config } = resolveConfig();
   const q = readQueue(config.archive);
-  const line = lineFor(pick(q, sessionId), countFor(q, sessionId));
-  if (line !== '') process.stdout.write(line);
+
+  // This session first. It is about work just done, so it is the more useful of
+  // the two whenever it exists.
+  const live = lineFor(pick(q, sessionId), countFor(q, sessionId));
+  if (live !== '') {
+    process.stdout.write(live);
+    return;
+  }
+
+  // Otherwise the baseline from history, computed by the detached pass that
+  // SessionStart kicked off. This is what makes day one non-blank: the answer
+  // was already on disk, and `edit_retry` firing in a third of sessions means
+  // waiting for a live finding could take days.
+  const standing = standingLine(readStanding(config.archive));
+  if (standing !== '') {
+    process.stdout.write(standing);
+    return;
+  }
+
+  // Still reading. Said once, finitely, so a fresh install does not look broken
+  // while the first pass runs.
+  if (isProcessing(config.archive)) process.stdout.write(processingLine());
 }
 
 try {

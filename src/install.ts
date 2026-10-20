@@ -45,6 +45,13 @@ export type Settings = {
 export type InstallPlan = {
   /** Shell command for the `Stop` hook. */
   hookCommand: string;
+  /**
+   * Shell command for the `SessionStart` hook.
+   *
+   * Spawns the standing pass and prints nothing, so history is processed the
+   * moment a session opens and surfaces at the first `Stop` boundary.
+   */
+  sessionStartCommand: string;
   /** Shell command for the statusline. */
   statusLineCommand: string;
 };
@@ -62,6 +69,7 @@ export function planFor(repoRoot: string, nodePath = process.execPath): InstallP
     `${nodePath} --experimental-strip-types ${repoRoot}/scripts/${script}`;
   return {
     hookCommand: `${run('hook-stop.ts')} || true`,
+    sessionStartCommand: `${run('hook-session-start.ts')} || true`,
     statusLineCommand: run('statusline.ts'),
   };
 }
@@ -80,22 +88,24 @@ function isOurs(h: HookCommand): boolean {
  */
 export function addHook(settings: Settings, plan: InstallPlan, timeout = 5): Settings {
   const hooks = { ...(settings.hooks ?? {}) };
-  const existing = hooks['Stop'] ?? [];
 
-  const ours: HookCommand = {
-    type: 'command',
-    command: plan.hookCommand,
-    timeout,
-    __agentsensei: true,
+  /** Add one of ours to one event, leaving every existing entry in place. */
+  const into = (event: string, command: string): void => {
+    const ours: HookCommand = { type: 'command', command, timeout, __agentsensei: true };
+    // Our own matcher group, so we never touch anyone else's. A matcher-less
+    // group applies to every occurrence of the event, which is what we want.
+    const withoutOurs = (hooks[event] ?? [])
+      .map((m) => ({ ...m, hooks: m.hooks.filter((h) => !isOurs(h)) }))
+      .filter((m) => m.hooks.length > 0);
+    hooks[event] = [...withoutOurs, { hooks: [ours] }];
   };
 
-  // Our own matcher group, so we never touch anyone else's. A matcher-less
-  // group applies to every Stop, which is what we want.
-  const withoutOurs = existing
-    .map((m) => ({ ...m, hooks: m.hooks.filter((h) => !isOurs(h)) }))
-    .filter((m) => m.hooks.length > 0);
+  into('Stop', plan.hookCommand);
+  // SessionStart only triggers the standing pass; it prints nothing, so nothing
+  // of ours ever enters the model's context.
+  into('SessionStart', plan.sessionStartCommand);
 
-  return { ...settings, hooks: { ...hooks, Stop: [...withoutOurs, { hooks: [ours] }] } };
+  return { ...settings, hooks };
 }
 
 /**
@@ -170,17 +180,17 @@ export function remove(settings: Settings): Settings {
 export function describeChange(before: Settings, after: Settings): string[] {
   const out: string[] = [];
 
-  const beforeStop = before.hooks?.['Stop'] ?? [];
-  const afterStop = after.hooks?.['Stop'] ?? [];
-  const beforeCount = beforeStop.reduce((n, m) => n + m.hooks.length, 0);
-  const afterCount = afterStop.reduce((n, m) => n + m.hooks.length, 0);
-
-  if (beforeCount !== afterCount) {
-    out.push(`  hooks.Stop        ${beforeCount} hook(s) → ${afterCount} hook(s)`);
-    for (const m of afterStop) {
+  for (const event of ['Stop', 'SessionStart']) {
+    const b = before.hooks?.[event] ?? [];
+    const a = after.hooks?.[event] ?? [];
+    const bn = b.reduce((n, m) => n + m.hooks.length, 0);
+    const an = a.reduce((n, m) => n + m.hooks.length, 0);
+    if (bn === an) continue;
+    out.push(`  hooks.${event.padEnd(13)}${bn} hook(s) → ${an} hook(s)`);
+    for (const m of a) {
       for (const h of m.hooks) {
         const tag = h.__agentsensei === true ? '+ ' : '  ';
-        out.push(`    ${tag}${h.command.slice(0, 92)}`);
+        out.push(`    ${tag}${h.command.slice(0, 88)}`);
       }
     }
   }
@@ -196,7 +206,9 @@ export function describeChange(before: Settings, after: Settings): string[] {
   const untouched = Object.keys(before).filter((k) => k !== 'hooks' && k !== 'statusLine');
   if (untouched.length > 0) out.push(`  untouched         ${untouched.join(', ')}`);
 
-  const otherEvents = Object.keys(before.hooks ?? {}).filter((e) => e !== 'Stop');
+  const otherEvents = Object.keys(before.hooks ?? {}).filter(
+    (e) => e !== 'Stop' && e !== 'SessionStart',
+  );
   if (otherEvents.length > 0) {
     out.push(`  hooks untouched   ${otherEvents.join(', ')}`);
   }

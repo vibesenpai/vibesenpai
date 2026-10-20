@@ -26,6 +26,8 @@ import {
 } from './install.ts';
 import { readBreaker, isTripped } from './breaker.ts';
 import { readQueue, lineFor, pick } from './queue.ts';
+import { computedAtLocal, readStanding, standingLine } from './standing.ts';
+import { spawn } from 'node:child_process';
 import { copyFileSync, writeFileSync } from 'node:fs';
 
 type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
@@ -102,7 +104,8 @@ Usage
   agentsensei skeleton <id>      print a session's windows as evidence
   agentsensei now                the session you are in, read live
   agentsensei report             retrospective over a date range
-  agentsensei install           add the Stop hook + statusline (prints first)
+  agentsensei standing          what your history says (the baseline)
+  agentsensei install           add the hooks + statusline (prints first)
   agentsensei uninstall         take them back out
 
 Options
@@ -120,6 +123,9 @@ skeleton / now
   --session <id>     which session \`now\` should read
   --skeleton         also dump the token-budget windows (debug view)
   --window <n>       print only window n (1-based)
+
+standing
+  --refresh          recompute from every transcript now, in the foreground
 
 install / uninstall
   (prints what it would do and writes NOTHING by default)
@@ -252,12 +258,19 @@ function cmdDoctor(a: Argv): number {
     const q = readQueue(config.archive);
     // Unscoped on purpose: `doctor` reports the whole queue, while a statusline
     // only ever shows its own session.
-    const line = lineFor(pick(q), q.entries.length);
+    const live = lineFor(pick(q), q.entries.length);
+    const st = readStanding(config.archive);
+    const line = live !== '' ? live : standingLine(st);
     console.log(
       `  ambient    ${q.entries.length} queued · ${q.boundaries} boundaries seen` +
         (line === '' ? ' · nothing showing' : ''),
     );
     if (line !== '') console.log(`             showing: ${line}`);
+    console.log(
+      st === undefined
+        ? `  standing   not computed yet — runs when a session starts`
+        : `  standing   ${st.sessions} session(s), ${st.edits} edits, computed ${computedAtLocal(st)}`,
+    );
   }
   if (process.env['AGENTSENSEI_DISABLE'] === '1') {
     console.log(`  ambient    AGENTSENSEI_DISABLE=1 is set — every hook exits on line one`);
@@ -601,6 +614,90 @@ function cmdInstall(a: Argv): number {
 
   console.log(`\nwritten. backup at ${backup}`);
   console.log('reverse it with `agentsensei uninstall --apply`.');
+
+  // Process history right now rather than waiting for the next session to open.
+  // The harness deletes transcripts after `cleanupPeriodDays` (30 by default)
+  // and we keep no copies, so waiting is not neutral — it loses data.
+  const child = spawn(
+    process.execPath,
+    ['--experimental-strip-types', join(repoRoot(), 'scripts', 'compute-standing.ts'), '--force'],
+    { detached: true, stdio: 'ignore' },
+  );
+  child.unref();
+  console.log(
+    '\nagentsensei has started reading your existing transcripts and will report\n' +
+      'back shortly — sit tight. Nothing is copied; they are read in place.\n' +
+      '  `agentsensei standing` shows the result, and the statusline will pick it\n' +
+      '  up on its own at the next response boundary.',
+  );
+  return 0;
+}
+
+/**
+ * What history says. The baseline a new install arrives with.
+ *
+ * Reads the stored pass rather than computing, so this is instant and shows
+ * exactly what the statusline will show. `--refresh` recomputes in the
+ * foreground, for when somebody wants it now.
+ */
+async function cmdStanding(a: Argv): Promise<number> {
+  const { config } = configFromFlags(a);
+
+  if (a.flags['refresh'] === true) {
+    const { execFileSync } = await import('node:child_process');
+    try {
+      execFileSync(
+        process.execPath,
+        ['--experimental-strip-types', join(repoRoot(), 'scripts', 'compute-standing.ts'), '--force'],
+        { stdio: 'inherit' },
+      );
+    } catch {
+      console.error('the standing pass failed — see `agentsensei doctor`.');
+      return 1;
+    }
+  }
+
+  const s = readStanding(config.archive);
+  if (s === undefined) {
+    console.log('no standing yet.');
+    console.log('  it is computed when a session starts, or now with --refresh.');
+    return 0;
+  }
+
+  console.log(`standing · computed ${computedAtLocal(s)}`);
+  console.log(`  ${s.sessions} session(s) · ${s.edits} edits`);
+  if (s.unreadable > 0) {
+    // Stated, never dropped: a standing that quietly covered fewer sessions
+    // than it claims is the implied-coverage problem depth labelling prevents.
+    console.log(`  ${s.unreadable} session(s) could not be read`);
+  }
+
+  if (s.dimensions.length === 0) {
+    console.log(`\n  no findings across ${s.edits} edits`);
+  } else {
+    console.log('');
+    for (const d of s.dimensions) {
+      console.log(
+        `  ${d.dimension.padEnd(16)} ${d.occurrences} occurrence(s) across ${d.sessions} session(s)`,
+      );
+    }
+    const reasons = Object.entries(s.reasons).sort((x, y) => y[1] - x[1]);
+    if (reasons.length > 0) {
+      console.log('');
+      for (const [reason, n] of reasons) console.log(`    ${String(n).padStart(3)}  ${reason}`);
+    }
+  }
+
+  if (s.tokens.output > 0) {
+    const ratio = s.tokens.cacheCreation / s.tokens.output;
+    console.log(
+      `\n  ${(s.tokens.output / 1e6).toFixed(1)}M out · ` +
+        `${(s.tokens.cacheCreation / 1e6).toFixed(1)}M re-ingested · ratio ${ratio.toFixed(1)}`,
+    );
+  }
+
+  const line = standingLine(s);
+  if (line !== '') console.log(`\n  statusline shows: ${line}`);
   return 0;
 }
 
@@ -770,6 +867,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdNow(a);
     case 'report':
       return cmdReport(a);
+    case 'standing':
+      return cmdStanding(a);
     case 'install':
       return cmdInstall(a);
     case 'uninstall':
