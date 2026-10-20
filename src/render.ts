@@ -275,6 +275,50 @@ function turnColumns(e: Event, subject: string): { what: string; detail: string 
 
 /** The reason tally as advice lines, widest reason name first for alignment. */
 /**
+ * The qualifier on a finding, when there is one — otherwise nothing.
+ *
+ * ── Why `[certain]` is gone ────────────────────────────────────────────────
+ *
+ * It was printed on every finding, because every live detector is a rule and
+ * every rule emits `certain`. A label with one possible value tells a reader
+ * nothing, and "certain" in particular reads as a boast about a tool that
+ * should be understating itself.
+ *
+ * **CLAUDE.md still holds**: the UI must never blur "flagged by rule" and
+ * "flagged by a model at 0.7". That rule is about not hiding a *weaker* claim,
+ * and it is satisfied better this way. Silence now means the strongest case —
+ * a rule, no doubt — so anything less than that has to say so, in words rather
+ * than a severity token:
+ *
+ * ```
+ *   RULE  + certain    (nothing)
+ *   RULE  + high       "the output was clipped, so this is a close match"
+ *   JUDGE + anything   "flagged by a model"
+ * ```
+ *
+ * When the model-backed detectors land they will be visibly distinct, which is
+ * the whole point of the rule — and they will be distinct because they are
+ * *marked*, not because the rule-based ones carry a badge too.
+ */
+const MODEL_METHODS = new Set(['LEX', 'EMB', 'CLS', 'NLI', 'JUDGE']);
+
+export function caveatFor(f: Finding): string {
+  if (MODEL_METHODS.has(f.method)) {
+    return f.confidence === 'certain' ? 'flagged by a model' : `flagged by a model · ${f.confidence}`;
+  }
+  switch (f.confidence) {
+    case 'certain':
+      return '';
+    case 'high':
+      // The only way a rule reaches this today: `redundant_call` compared a
+      // clipped output, so "the same answer" is a weaker claim than usual.
+      return 'close match — compared output was clipped';
+    default:
+      return `${f.confidence} confidence`;
+  }
+}
+
+/**
  * How a finding's subject is named.
  *
  * A path shows as a path. A digest-suffixed subject — which is what
@@ -312,9 +356,10 @@ export function renderFinding(
   events: Event[] = [],
 ): string[] {
   const times = f.occurrences > 1 ? ` ×${f.occurrences}` : '';
+  const caveat = caveatFor(f);
   const head =
     `${INDENT}${bold(f.dimension)}${times === '' ? '' : dim(times)}` +
-    `  ${green(`[${f.confidence}]`)}`;
+    (caveat === '' ? '' : `  ${dim(caveat)}`);
 
   return [
     head,

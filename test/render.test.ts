@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { durationOf, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
+import { caveatFor, durationOf, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
 import { materialise } from '../src/finding.ts';
 import type { Denominators } from '../src/detect/index.ts';
 import type { Event, Finding } from '../src/types.ts';
@@ -240,5 +240,35 @@ describe('shortenPath keeps the identifying end', () => {
 
   it('leaves a short path alone', () => {
     expect(shortenPath('src/a.ts')).toBe('src/a.ts');
+  });
+});
+
+describe('render — the confidence badge is gone, the caveat is not', () => {
+  it('says nothing for a rule that is certain', () => {
+    // Every live detector is a rule emitting `certain`, so the old `[certain]`
+    // badge had one possible value and told a reader nothing.
+    expect(caveatFor(finding({}))).toBe('');
+  });
+
+  it('explains a rule that is merely close', () => {
+    const c = caveatFor(finding({ confidence: 'high' }));
+    expect(c).toContain('clipped');
+    // Words, not a severity token.
+    expect(c).not.toContain('high');
+  });
+
+  it('marks a model-flagged finding, which is the rule CLAUDE.md cares about', () => {
+    expect(caveatFor(finding({ method: 'JUDGE' }))).toContain('flagged by a model');
+    expect(caveatFor(finding({ method: 'JUDGE', confidence: 'low' }))).toContain('low');
+  });
+
+  it('never prints "certain" anywhere in a report', () => {
+    const out = render({
+      findings: [finding({})],
+      denominators: { ...zeros, editCount: 2 },
+      sessionId: 'abcdef1234',
+      events: [],
+    });
+    expect(out).not.toContain('certain');
   });
 });
