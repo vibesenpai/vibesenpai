@@ -25,8 +25,16 @@ const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => (
   packet: {
     sessionId: 's1',
     turns: [
-      { role: 'USER', seqs: [9], text: 'do the thing, but do not add dependencies' },
-      { role: 'AGENT', seqs: [10, 11, 12], text: 'on it\n\n[Bash] pnpm add left-pad' },
+      {
+        role: 'USER', seqs: [9], text: 'do the thing, but do not add dependencies',
+        parts: [{ seq: 9, start: 0, end: 41 }],
+      },
+      {
+        role: 'AGENT', seqs: [10, 11, 12], text: 'on it\n\n[Bash] pnpm add left-pad',
+        // Two constituents: the prose at 10, the call at 12. A quote from the
+        // call must resolve to 12, not to the block start.
+        parts: [{ seq: 10, start: 0, end: 5 }, { seq: 12, start: 7, end: 31 }],
+      },
     ],
     seqs: [9, 10, 11, 12],
   },
@@ -118,7 +126,10 @@ describe('parseResponse — what it refuses', () => {
       [packet()],
     );
     expect(r.findings).toEqual([
-      { sessionId: 's1', dimension: 'constraint_violation', turns: [10], quote: 'pnpm add left-pad', why: 'said no deps' },
+      // 12, not 10: the quote sits in the SECOND constituent of the merged
+      // turn. Collapsing to the block start cost 43 "wrong place" rows against
+      // the gold set, and looked like a judge failure.
+      { sessionId: 's1', dimension: 'constraint_violation', turns: [12], quote: 'pnpm add left-pad', why: 'said no deps' },
     ]);
   });
 
@@ -188,7 +199,7 @@ describe('the carry between batches', () => {
       [withCarry()],
     );
     expect(r.findings).toHaveLength(1);
-    expect(r.findings[0]?.turns).toEqual([10]);
+    expect(r.findings[0]?.turns).toEqual([12]);
   });
 
   it('refuses a finding that quotes only the carry', () => {

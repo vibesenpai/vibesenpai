@@ -138,7 +138,16 @@ async function main(): Promise<void> {
     }
     const r = parseResponse(reply, batch);
     for (const d of r.dropped) dropped[d.reason] = (dropped[d.reason] ?? 0) + d.count;
-    found.push(...r.findings.map((f) => ({ sessionId: f.sessionId, dimension: f.dimension, turns: f.turns })));
+    // The quote is cached too, so a change to turn derivation can be re-scored
+    // without paying for the model again. Not caching it cost a full re-run.
+    found.push(
+      ...r.findings.map((f) => ({
+        sessionId: f.sessionId,
+        dimension: f.dimension,
+        turns: f.turns,
+        quote: f.quote,
+      })),
+    );
     console.log(`${r.findings.length} kept`);
   }
 

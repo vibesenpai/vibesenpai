@@ -119,6 +119,16 @@ export type PacketTurn = {
   /** Turns merged into this one, so a quote can be traced back. */
   seqs: number[];
   text: string;
+  /**
+   * Where each constituent turn's text sits inside `text`.
+   *
+   * **Without this a quote resolves to the block it is in, not the turn.** A
+   * merged agent turn spans a measured p90 of 92 `seq` and a maximum of 768,
+   * so returning the first seq put the evidence up to hundreds of turns from
+   * where it actually was — which scored as "right dimension, wrong place"
+   * and was mistaken for a judge failure.
+   */
+  parts: { seq: number; start: number; end: number }[];
 };
 
 /** A `user` record the harness wrote, not something the developer said. */
@@ -167,18 +177,29 @@ export function buildTurns(events: Event[], full: Map<number, string>): PacketTu
     if (line === undefined) continue;
     const last = merged[merged.length - 1];
     if (last !== undefined && last.role === line.role) {
+      const start = last.text.length + 2;
       last.text += `\n\n${line.text}`;
       last.seqs.push(e.seq);
+      last.parts.push({ seq: e.seq, start, end: last.text.length });
     } else {
-      merged.push({ role: line.role, seqs: [e.seq], text: line.text });
+      merged.push({
+        role: line.role,
+        seqs: [e.seq],
+        text: line.text,
+        parts: [{ seq: e.seq, start: 0, end: line.text.length }],
+      });
     }
   }
 
   const budget = agentBudget(merged.length);
-  return merged.map((t) => ({
-    ...t,
-    text: truncate(t.text, t.role === 'USER' ? PROMPT_UNCAPPED : budget),
-  }));
+  return merged.map((t) => {
+    const text = truncate(t.text, t.role === 'USER' ? PROMPT_UNCAPPED : budget);
+    // Truncation moves everything after the cut, so offsets computed on the
+    // full text no longer hold. Rather than guess, parts are kept only when
+    // nothing was removed; `turnForQuote` falls back to the block start, which
+    // is the honest answer once the middle is gone.
+    return text === t.text ? { ...t, text } : { ...t, text, parts: [] };
+  });
 }
 
 export type SessionPacket = {
@@ -247,8 +268,23 @@ export function renderSession(p: SessionPacket): string {
 export function turnForQuote(p: SessionPacket, quote: string): number | undefined {
   const needle = quote.replace(/\s+/g, ' ').trim().slice(0, 60);
   if (needle.length < 8) return undefined;
+
   for (const t of p.turns) {
-    if (t.text.replace(/\s+/g, ' ').includes(needle)) return t.seqs[0];
+    // Normalised for the search, then mapped back through the same transform
+    // so an offset in one is an offset in the other.
+    const flat = t.text.replace(/\s+/g, ' ');
+    const at = flat.indexOf(needle);
+    if (at === -1) continue;
+
+    // Which constituent turn that offset fell in. Whitespace collapsing shifts
+    // offsets slightly, so the comparison is against normalised part bounds
+    // rather than raw ones.
+    for (const part of t.parts) {
+      const startFlat = t.text.slice(0, part.start).replace(/\s+/g, ' ').length;
+      const endFlat = t.text.slice(0, part.end).replace(/\s+/g, ' ').length;
+      if (at >= startFlat && at <= endFlat) return part.seq;
+    }
+    return t.seqs[0];
   }
   return undefined;
 }
