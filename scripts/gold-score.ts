@@ -27,11 +27,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { parse } from '../src/parsers/index.ts';
-import { buildSkeletons } from '../src/skeleton.ts';
+import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
 import { buildSession, parseResponse, renderPacket, type JudgePacketSession } from '../src/judge.ts';
 import { JUDGE_CWD_MARKER } from '../src/read.ts';
 import { loadGold, locateSessions, locateTurns, score, type JudgeOutput } from '../src/gold.ts';
+import { redact } from '../src/redact.ts';
 import type { Event } from '../src/types.ts';
 
 const GOLD_JSON = process.env['AGENTSENSEI_GOLD'] ?? '/tmp/cam-check/misalignments.json';
@@ -85,15 +85,18 @@ async function main(): Promise<void> {
   for (const sha of shas) {
     const path = files.get(sha) as string;
     let events: Event[];
+    let fullText: Map<number, string>;
     try {
-      events = [...parse(path, readFileSync(path, 'utf8'), sha).events].sort((a, b) => a.seq - b.seq);
+      const r = withFullText(() => parseTranscript(readFileSync(path, 'utf8').split('\n'), sha));
+      events = [...r.result.events].sort((a, b) => a.seq - b.seq);
+      fullText = r.fullText;
     } catch {
       continue;
     }
     if (events.length === 0) continue;
 
-    const p = buildSession(sha, events, buildSkeletons(sha, events));
-    if (p.windows.length === 0) continue;
+    const p = buildSession(sha, events, fullText);
+    if (p.packet.turns.length === 0) continue;
     packets.push(p);
 
     for (const ep of episodes) {
@@ -121,7 +124,14 @@ async function main(): Promise<void> {
   const dropped: Record<string, number> = {};
   for (const [i, batch] of batches.entries()) {
     process.stdout.write(`  batch ${i + 1}/${batches.length} (${batch.length} sessions) … `);
-    const reply = callModel(renderPacket(batch), model);
+    const text = renderPacket(batch);
+    // The same gate the runner enforces. A scoring harness that sent what the
+    // product refuses to send would be measuring a different system.
+    if (redact(text).text !== text) {
+      console.log('REFUSED by the redaction gate');
+      continue;
+    }
+    const reply = callModel(text, model);
     if (reply === undefined) {
       console.log('call failed');
       continue;

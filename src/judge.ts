@@ -70,8 +70,8 @@
  * function is load-bearing; see `test/judge.test.ts`.
  */
 
-import { render } from './skeleton.ts';
-import type { Event, Skeleton } from './types.ts';
+import { buildPacket, renderSession, turnForQuote, type SessionPacket } from './packet.ts';
+import type { Event } from './types.ts';
 
 /** What a judged finding may claim. Deliberately narrow. */
 export type JudgeDimension =
@@ -164,6 +164,8 @@ export const CARRY_MAX_OPEN_FAILURES = 8;
 
 export type JudgePacketSession = {
   sessionId: string;
+  /** The session as the model reads it. See `src/packet.ts`. */
+  packet: SessionPacket;
   /**
    * Every user prompt, with its real turn number.
    *
@@ -176,8 +178,6 @@ export type JudgePacketSession = {
    * badly. A prompt *is* a turn, so it is labelled like one.
    */
   prompts: { turn: number; text: string }[];
-  /** Rendered windows, already filtered and deduped. */
-  windows: string[];
   /** Turn numbers the packet actually contains, for anchoring. */
   turns: number[];
   /** What happened before these windows. Absent on the first batch. */
@@ -272,41 +272,26 @@ function worthJudging(rendered: string): boolean {
 export function buildSession(
   sessionId: string,
   events: Event[],
-  skeletons: Skeleton[],
+  fullText: Map<number, string>,
   carry?: JudgeCarry,
 ): JudgePacketSession {
+  // Prompts stay capped **here** and nowhere else: the preamble is a reminder
+  // of what was asked, and the turns below carry every prompt whole. Without
+  // the cap the packet would send each one twice.
   const prompts: { turn: number; text: string }[] = [];
   for (const e of events) {
     if (e.turnType !== 'user_prompt') continue;
-    const t = (e.textSummary ?? '').trim();
+    const t = (fullText.get(e.seq) ?? e.textSummary ?? '').trim();
     if (t === '' || isHarnessNoise(t)) continue;
     prompts.push({ turn: e.seq, text: t.slice(0, PREAMBLE_PROMPT_MAX) });
   }
 
-  const windows: string[] = [];
-  const turns: number[] = [];
-  for (const sk of skeletons) {
-    const text = render(sk);
-    if (!worthJudging(text)) continue;
-    windows.push(dedupe(text));
-    // `ref.seq` — a skeleton line carries a TurnRef, and the seq inside it is
-    // the number the rendered line shows and the model is told to cite.
-    for (const l of sk.lines) {
-      if (l.ref.seq !== undefined) turns.push(l.ref.seq);
-    }
-  }
-
-  // A prompt shown in the preamble is shown, so it can be cited. Leaving them
-  // out made the packet quote a turn and then refuse it.
-  for (const p of prompts) {
-    if (!turns.includes(p.turn)) turns.push(p.turn);
-  }
-
+  const packet = buildPacket(sessionId, events, fullText);
   return {
     sessionId,
     prompts,
-    windows,
-    turns,
+    packet,
+    turns: packet.seqs,
     ...(carry !== undefined ? { carry } : {}),
   };
 }
@@ -350,7 +335,7 @@ export function renderPacket(sessions: JudgePacketSession[]): string {
         ...carry,
         '',
         'Turns:',
-        s.windows.join('\n\n'),
+        renderSession(s.packet),
       ].join('\n');
     })
     .join('\n\n');
@@ -362,15 +347,16 @@ Dimensions, and nothing else:
 ${rubric}
 
 Rules:
-- Every finding MUST cite turn numbers that appear in the packet. A finding
-  without them is discarded, so do not produce one.
+- Every finding MUST include a \`quote\`: text copied **verbatim** from the turns
+  below. Do not paraphrase and do not write a turn number — the quote is how a
+  finding is located, and one that cannot be found is discarded.
 - Report only what the packet shows. You cannot see the codebase, the diffs, or
   anything outside these turns. If a thing is plausible but not shown, omit it.
 - Most sessions contain nothing. An empty list is the correct answer far more
   often than not, and is strongly preferred to a weak finding.
 
 Reply with JSON only, no prose:
-{"findings":[{"sessionId":"...","dimension":"...","turns":[12,15],"why":"one sentence, quoting the developer"}]}
+{"findings":[{"sessionId":"...","dimension":"...","quote":"exact text copied from a turn","why":"one sentence"}]}
 
 ${body}`;
 }
@@ -378,7 +364,10 @@ ${body}`;
 export type JudgeFinding = {
   sessionId: string;
   dimension: JudgeDimension;
+  /** Derived from the quote by us, never reported by the model. */
   turns: number[];
+  /** What the model copied, kept so a reader can check the anchor. */
+  quote: string;
   why: string;
 };
 
@@ -398,26 +387,13 @@ export type ParseResult = {
  * silently would hide exactly the failure mode that killed three rule detectors.
  */
 export function parseResponse(raw: string, sessions: JudgePacketSession[]): ParseResult {
-  // Two sets per session, because they permit different things. A finding has
-  // to be **anchored** in turns the judge was actually shown; it may also point
-  // at a carried failure, which is how S7 works across a batch boundary ("the
-  // agent says it is done here, but turn 412 failed and never recovered").
-  // Without the split the carry would either be uncitable — making it useless —
-  // or would let a finding rest entirely on turns nobody showed the model.
-  const shown = new Map(sessions.map((s) => [s.sessionId, new Set(s.turns)]));
-  const citable = new Map(
-    sessions.map((s) => [
-      s.sessionId,
-      new Set([...s.turns, ...(s.carry?.openFailures ?? []).map((f) => f.turn)]),
-    ]),
-  );
+  const byId = new Map(sessions.map((s) => [s.sessionId, s]));
   const drops = new Map<string, number>();
   const drop = (reason: string): void => {
     drops.set(reason, (drops.get(reason) ?? 0) + 1);
   };
 
-  // The model is asked for bare JSON; a fenced block is the common near-miss
-  // and is cheap to accept.
+  // Bare JSON is asked for; a fenced block is the common near-miss.
   const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(raw);
   const text = (fence?.[1] ?? raw).trim();
 
@@ -435,8 +411,10 @@ export function parseResponse(raw: string, sessions: JudgePacketSession[]): Pars
 
   const findings: JudgeFinding[] = [];
   for (const item of list) {
-    const f = item as Partial<JudgeFinding>;
-    if (typeof f.sessionId !== 'string' || !shown.has(f.sessionId)) {
+    const f = item as { sessionId?: unknown; dimension?: unknown; quote?: unknown; why?: unknown };
+
+    const session = typeof f.sessionId === 'string' ? byId.get(f.sessionId) : undefined;
+    if (session === undefined) {
       drop('session not in this batch');
       continue;
     }
@@ -444,32 +422,32 @@ export function parseResponse(raw: string, sessions: JudgePacketSession[]): Pars
       drop('dimension not in the rubric');
       continue;
     }
-    const turns = Array.isArray(f.turns) ? f.turns.filter((t): t is number => typeof t === 'number') : [];
-    if (turns.length === 0) {
-      drop('no turns cited');
-      continue;
-    }
-    const mayCite = citable.get(f.sessionId) as Set<number>;
-    if (!turns.every((t) => mayCite.has(t))) {
-      drop('cited a turn the packet does not contain');
-      continue;
-    }
-    const anchors = shown.get(f.sessionId) as Set<number>;
-    if (!turns.some((t) => anchors.has(t))) {
-      // Every cited turn came from the carry. The judge is reporting something
-      // it was told about rather than something it read, which is the shape of
-      // a finding invented out of a summary.
-      drop('cited only carried turns, none from the window');
+    if (typeof f.quote !== 'string' || f.quote.trim() === '') {
+      drop('no quote given');
       continue;
     }
     if (typeof f.why !== 'string' || f.why.trim() === '') {
       drop('no reason given');
       continue;
     }
+
+    // ── The model quotes; we derive the turn ────────────────────────────────
+    //
+    // It never counts, so it cannot miscount — the failure mode behind four
+    // "hallucinations" whose reasoning was sound. And a fabricated quote is
+    // simply not found, where a fabricated number can pass by coincidence and
+    // attach itself to the wrong claim.
+    const turn = turnForQuote(session.packet, f.quote);
+    if (turn === undefined) {
+      drop('quote is not in the packet');
+      continue;
+    }
+
     findings.push({
-      sessionId: f.sessionId,
+      sessionId: session.sessionId,
       dimension: f.dimension as JudgeDimension,
-      turns,
+      turns: [turn],
+      quote: f.quote.trim(),
       why: f.why.trim(),
     });
   }

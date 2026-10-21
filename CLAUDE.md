@@ -200,7 +200,9 @@ deliberate.
 - **No hardcoded paths.** CLI flag → env var → config file → platform default.
 - `scripts/` entrypoints take paths and session id from **arguments and env**, never Claude-specific
   assumptions — the plugin layout is multi-harness by design.
-- Vitest. Pinned versions. No telemetry. No network in the shipped analysis path.
+- Vitest. Pinned versions. No telemetry. No network in the shipped analysis path,
+  **except the judge** — see below.
+
 - `tsconfig` covers `src/`, `test/` **and `scripts/`**. It did not, and the reset silently broke
   `npm run measure` while every check stayed green.
 - **Every published frequency comes from `npm run measure`**, over the pinned corpus, so a number in
@@ -209,6 +211,42 @@ deliberate.
 - The redactor is written and tested **before** anything is stored or displayed.
 - `src/catalog.ts` must never gain a file-copy path. It imports no write target under the store
   except `index.json`.
+
+## The judge may send session content, and only on these terms
+
+The structural tier is exhausted: Edit and Write are 998 of ~1,400 tool
+refusals and both are covered by `edit_retry`. The research this project's
+dimension table comes from ([arXiv 2605.29442](https://arxiv.org/abs/2605.29442),
+20,574 sessions) found the rest is detected from developer pushback in the chat
+logs, **"not on structural signals such as tool-call errors, exit codes, or test
+failures."** We proved it the expensive way: `inaccurate_self_report` is their
+S7, was built here on rules, and died 0 true positives against 5 false.
+
+So the analysis path may invoke the **local harness CLI** — no API key, no
+model download, no telemetry — and that is a real amendment to the line above,
+not a technicality. It is bounded by five rules, every one of which exists
+because something was measured:
+
+- **Off until enabled by an explicit act.** `judge --enable --apply`, the same
+  shape as `install`. A detached process that spends someone's money unprompted
+  is the Self-Initiated Overreach this tool exists to detect.
+- **The payload is redacted at construction, and that is asserted immediately
+  before the call.** `redact(packet) === packet`, or the send aborts. Measured:
+  **50% of sessions carry secret-class content** at full fidelity —
+  `secret-assignment`, `api-key`, `jwt`, `url-credentials`, `bearer` — and tool
+  output is where they concentrate. A warning would not do; a warning in a
+  detached process is a thing nobody reads.
+- **Batched, and accounted for in tokens.** ~27,000 tokens of invocation
+  overhead dwarf a ~9,000-token session, so N sessions go in one call. Usage is
+  recorded and `doctor` prints it. Never dollars — see the note on prices.
+- **The child is isolated.** `AGENTSENSEI_DISABLE=1` and a dedicated working
+  directory that `discoverTranscripts` filters out. `--bare` would be better
+  but demands `ANTHROPIC_API_KEY` and silently returns "Not logged in" on a
+  subscription. Measured the hard way: three probe calls took one machine from
+  9 discovered sessions to 12.
+- **A model finding never blurs into a rule finding.** `method: 'JUDGE'`
+  renders as *"flagged by a model"*, and a finding that cannot quote the packet
+  is discarded on the way out.
 
 ## Milestones
 

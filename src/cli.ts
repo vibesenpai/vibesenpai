@@ -24,6 +24,7 @@ import {
   BYTES_PER_TURN, findingsFor, readJudgeState, writeJudgeState, type JudgeState,
 } from './judge-store.ts';
 import { buildSession, openFailuresBefore, renderPacket } from './judge.ts';
+import { parseTranscript, withFullText } from './parsers/claude-code.ts';
 import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
@@ -891,12 +892,11 @@ function cmdJudge(a: Argv): number {
   for (const source of discoverTranscripts(config.sources).slice(0, 5)) {
     const id = basename(source, '.jsonl');
     try {
-      const ev = [...parse(source, readFileSync(source, 'utf8'), id).events].sort(
-        (x, y) => x.seq - y.seq,
-      );
+      const r = withFullText(() => parseTranscript(readFileSync(source, 'utf8').split('\n'), id));
+      const ev = [...r.result.events].sort((x, y) => x.seq - y.seq);
       if (ev.length === 0) continue;
-      const p = buildSession(id, ev, buildSkeletons(id, ev));
-      if (p.windows.length > 0) sessions.push(p);
+      const p = buildSession(id, ev, r.fullText);
+      if (p.packet.turns.length > 0) sessions.push(p);
     } catch {
       // Unreadable here is not an error; the runner counts those.
     }

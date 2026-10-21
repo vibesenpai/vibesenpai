@@ -41,10 +41,11 @@ import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { recordFailure, recordSuccess, isTripped, readBreaker } from '../src/breaker.ts';
+import { redact } from '../src/redact.ts';
 import { resolveConfig } from '../src/config.ts';
-import { parse } from '../src/parsers/index.ts';
+import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
 import { discoverTranscripts, JUDGE_CWD_MARKER } from '../src/read.ts';
-import { buildSkeletons } from '../src/skeleton.ts';
+
 import {
   buildSession, openFailuresBefore, parseResponse, renderPacket,
   type JudgeCarry, type JudgePacketSession,
@@ -54,6 +55,30 @@ import type { Event } from '../src/types.ts';
 
 /** Well under any reasonable hook budget, and the model call is the long pole. */
 const TIMEOUT_MS = 180_000;
+
+/**
+ * Refuse to send anything redaction would still change.
+ *
+ * **Asserted here, not merely in a test.** The packet leaves the machine, and
+ * every input to it is redacted already — the parser does it, `packet.ts` does
+ * it as its last construction step. This catches the case those cannot: a
+ * future path that assembles a packet without coming through the builder.
+ *
+ * Measured: **50% of corpus sessions carry secret-class content** at this
+ * fidelity — `secret-assignment`, `api-key`, `jwt`, `url-credentials`,
+ * `bearer` — and tool output is where they concentrate. A warning would not
+ * do; a warning in a detached process is a thing nobody reads.
+ *
+ * The offending text is never logged, only the fact and the sessions.
+ */
+function refuseIfUnredacted(packet: string, sessionIds: string[]): boolean {
+  if (redact(packet).text === packet) return false;
+  recordFailure(
+    resolveConfig().config.archive,
+    `judge packet failed the redaction gate (${sessionIds.length} session(s)); nothing sent`,
+  );
+  return true;
+}
 
 /** Where the child runs. The marker is what keeps its transcript out of ours. */
 function judgeCwd(): string {
@@ -142,10 +167,13 @@ async function main(): Promise<void> {
     if (size <= judged) continue;
 
     let events: Event[];
+    let fullText: Map<number, string>;
     try {
-      events = [...parse(source, readFileSync(source, 'utf8'), sessionId).events].sort(
-        (a, b) => a.seq - b.seq,
+      const r = withFullText(() =>
+        parseTranscript(readFileSync(source, 'utf8').split('\n'), sessionId),
       );
+      events = [...r.result.events].sort((a, b) => a.seq - b.seq);
+      fullText = r.fullText;
     } catch {
       continue;
     }
@@ -161,10 +189,10 @@ async function main(): Promise<void> {
     const packet = buildSession(
       sessionId,
       fresh,
-      buildSkeletons(sessionId, fresh),
+      fullText,
       judged === 0 ? undefined : carryFor(state, sessionId, events, fromSeq),
     );
-    if (packet.windows.length === 0) {
+    if (packet.packet.turns.length === 0) {
       // Nothing worth judging, but the bytes are still read — record it so the
       // same quiet stretch is not reconsidered every single pass.
       offsets.set(sessionId, size);
@@ -218,6 +246,8 @@ async function main(): Promise<void> {
   }
 
   const packet = renderPacket(batch);
+
+  if (refuseIfUnredacted(packet, batch.map((b) => b.sessionId))) return;
 
   const result = callModel(packet, state.settings.model);
   if (result === undefined) {

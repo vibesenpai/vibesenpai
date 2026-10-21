@@ -227,9 +227,15 @@ function summarise(s: unknown, max = 200): string | undefined {
   if (flat === '') return undefined;
   const clean = redact(flat).text;
   if (clean.length <= max) return clean;
+
   // The marker is space-separated because `/home/…` would otherwise read `…` as
   // the username and mask it to `/home/[USER]`, inventing a path segment that
   // was never there.
+  //
+  // **Head-only, deliberately.** `src/packet.ts` keeps head *and* tail for the
+  // judge, where an agent's verdict sits at the end and must survive. This is
+  // the display path: a terminal row, guarded by tests from the redactor
+  // commit that this cut must not break a replacement token.
   return redactToFixedPoint(`${clean.slice(0, max)} …`);
 }
 
@@ -265,8 +271,50 @@ function redactToFixedPoint(s: string, limit = 4): string {
  * Build the optional `textSummary` property in one step. Calling `summarise()`
  * inside a ternary defeats narrowing under `exactOptionalPropertyTypes`.
  */
+/**
+ * Judge mode: keep the **full redacted text** alongside the capped summary.
+ *
+ * ── Why this is module state rather than a threaded option ─────────────────
+ *
+ * `sum()` is called from eight places, always inside the object literal that
+ * becomes an event, and always immediately before `push` assigns the `seq`.
+ * Threading a flag to all eight would touch every record type for a feature
+ * only one caller wants; adding a field to `Event` would risk persisting it.
+ *
+ * So `sum` leaves the full text here and `push` claims it under the seq it is
+ * about to assign. Parsing is not reentrant and Node is single-threaded, so
+ * the handoff is a local one despite the module scope. `withFullText()` owns
+ * the lifetime and always clears it.
+ *
+ * **Never stored.** The map lives in `ParseResult` and dies with it;
+ * `textSummary` remains the only form that reaches disk.
+ */
+let keepFullText = false;
+let pendingFullText: string | undefined;
+
+export function withFullText<T>(fn: () => T): { result: T; fullText: Map<number, string> } {
+  keepFullText = true;
+  capturedFullText = new Map();
+  try {
+    const result = fn();
+    return { result, fullText: capturedFullText };
+  } finally {
+    keepFullText = false;
+    pendingFullText = undefined;
+    capturedFullText = new Map();
+  }
+}
+
+let capturedFullText = new Map<number, string>();
+
 function sum(s: unknown, max?: number): { textSummary: string } | Record<string, never> {
   const t = max === undefined ? summarise(s) : summarise(s, max);
+  if (keepFullText && typeof s === 'string') {
+    const flat = s.replace(/\s+/g, ' ').trim();
+    // Redacted here, exactly as the summary is — the uncapped form must not be
+    // the one that skips redaction.
+    if (flat !== '') pendingFullText = redactToFixedPoint(redact(flat).text);
+  }
   return t === undefined ? {} : { textSummary: t };
 }
 
@@ -599,6 +647,11 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
 
     const push = (turnType: TurnType, extra: Partial<Event> = {}): void => {
       eventUuid.push(base.uuid);
+      // Claim whatever `sum` left, under the seq this event is getting.
+      if (pendingFullText !== undefined) {
+        capturedFullText.set(seq, pendingFullText);
+        pendingFullText = undefined;
+      }
       events.push({ ...base, seq: seq++, turnType, ...extra });
     };
 

@@ -11,44 +11,56 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { redact } from '../src/redact.ts';
+import { buildPacket, renderSession } from '../src/packet.ts';
 import {
   buildSession, CARRY_MAX_OPEN_FAILURES, JUDGE_DIMENSIONS, openFailuresBefore, parseResponse,
   PREAMBLE_PROMPT_MAX, renderPacket, type JudgePacketSession,
 } from '../src/judge.ts';
 
+/** A packet whose turns really contain the text a finding must quote. */
 const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => ({
   sessionId: 's1',
   prompts: [{ turn: 9, text: 'do the thing, but do not add dependencies' }],
-  windows: ['U  do the thing\nA  on it\n→  Bash pnpm add left-pad'],
-  turns: [10, 11, 12],
+  packet: {
+    sessionId: 's1',
+    turns: [
+      { role: 'USER', seqs: [9], text: 'do the thing, but do not add dependencies' },
+      { role: 'AGENT', seqs: [10, 11, 12], text: 'on it\n\n[Bash] pnpm add left-pad' },
+    ],
+    seqs: [9, 10, 11, 12],
+  },
+  turns: [9, 10, 11, 12],
   ...over,
 });
 
 const reply = (findings: unknown[]): string => JSON.stringify({ findings });
 
 describe('parseResponse — what it refuses', () => {
-  it('drops a finding citing a turn the packet never contained', () => {
-    // The exact shape of the first real hallucination.
+  it('drops a finding whose quote is not in the packet', () => {
+    // The shape of the first real hallucination — now unmissable, because a
+    // fabricated quote simply is not found.
     const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'constraint_violation', turns: [4], why: 'plausible prose' }]),
+      reply([{ sessionId: 's1', dimension: 'constraint_violation', quote: 'a sentence nobody ever wrote', why: 'plausible prose' }]),
       [packet()],
     );
     expect(r.findings).toHaveLength(0);
-    expect(r.dropped[0]?.reason).toContain('turn the packet does not contain');
+    expect(r.dropped[0]?.reason).toContain('quote is not in the packet');
   });
 
-  it('drops a finding with no turns at all', () => {
+  it('drops a finding with no quote at all', () => {
     const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'overreach', turns: [], why: 'felt wrong' }]),
+      reply([{ sessionId: 's1', dimension: 'overreach', why: 'felt wrong' }]),
       [packet()],
     );
     expect(r.findings).toHaveLength(0);
+    expect(r.dropped[0]?.reason).toContain('no quote');
   });
 
   it('drops a dimension outside the rubric', () => {
     // The model cannot widen its own remit.
     const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'code_smell', turns: [10], why: 'x' }]),
+      reply([{ sessionId: 's1', dimension: 'code_smell', quote: 'pnpm add left-pad', why: 'x' }]),
       [packet()],
     );
     expect(r.findings).toHaveLength(0);
@@ -57,7 +69,7 @@ describe('parseResponse — what it refuses', () => {
 
   it('drops a session that was not in the batch', () => {
     const r = parseResponse(
-      reply([{ sessionId: 'never-sent', dimension: 'overreach', turns: [10], why: 'x' }]),
+      reply([{ sessionId: 'never-sent', dimension: 'overreach', quote: 'pnpm add left-pad', why: 'x' }]),
       [packet()],
     );
     expect(r.findings).toHaveLength(0);
@@ -65,7 +77,7 @@ describe('parseResponse — what it refuses', () => {
 
   it('drops a finding with no reason', () => {
     const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'overreach', turns: [10], why: '  ' }]),
+      reply([{ sessionId: 's1', dimension: 'overreach', quote: 'pnpm add left-pad', why: '  ' }]),
       [packet()],
     );
     expect(r.findings).toHaveLength(0);
@@ -79,20 +91,43 @@ describe('parseResponse — what it refuses', () => {
 
   it('accepts a fenced block, the common near-miss', () => {
     const r = parseResponse(
-      '```json\n' + reply([{ sessionId: 's1', dimension: 'overreach', turns: [10], why: 'ok' }]) + '\n```',
+      '```json\n' +
+        reply([{ sessionId: 's1', dimension: 'overreach', quote: 'pnpm add left-pad', why: 'ok' }]) +
+        '\n```',
       [packet()],
     );
     expect(r.findings).toHaveLength(1);
   });
 
-  it('keeps a well-formed finding, so the gate is not just "refuse everything"', () => {
+  it('refuses a quote too short to identify a turn', () => {
+    // A handful of characters could match anywhere. An anchor that ambiguous
+    // is not an anchor, so it fails rather than attaching to the first hit.
     const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'constraint_violation', turns: [10, 12], why: 'said no deps' }]),
+      reply([{ sessionId: 's1', dimension: 'overreach', quote: 'on it', why: 'ok' }]),
+      [packet()],
+    );
+    expect(r.findings).toHaveLength(0);
+  });
+
+  it('keeps a well-formed finding and DERIVES the turn from the quote', () => {
+    // The model never reports a number. It copies text; we locate it.
+    const r = parseResponse(
+      reply([
+        { sessionId: 's1', dimension: 'constraint_violation', quote: 'pnpm add left-pad', why: 'said no deps' },
+      ]),
       [packet()],
     );
     expect(r.findings).toEqual([
-      { sessionId: 's1', dimension: 'constraint_violation', turns: [10, 12], why: 'said no deps' },
+      { sessionId: 's1', dimension: 'constraint_violation', turns: [10], quote: 'pnpm add left-pad', why: 'said no deps' },
     ]);
+  });
+
+  it('tolerates reflowed whitespace in a quote', () => {
+    const r = parseResponse(
+      reply([{ sessionId: 's1', dimension: 'overreach', quote: 'pnpm   add\n left-pad', why: 'x' }]),
+      [packet()],
+    );
+    expect(r.findings).toHaveLength(1);
   });
 });
 
@@ -141,34 +176,32 @@ describe('the carry between batches', () => {
     },
   });
 
-  it('lets a finding reach back to a carried failure', () => {
+  it('informs the judge, while the finding still quotes what was shown', () => {
     // How S7 survives batching: the claim is in this batch, the failure it
-    // contradicts was three batches ago. Measured: 12% of evidence spans a
-    // batch boundary at the default cadence.
+    // contradicts was batches ago. Measured: 18.9% of boundaries leave a
+    // failure open. The carry supplies that context — but the anchor is still
+    // text from the turns, so a finding can never rest on the summary alone.
     const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'inaccurate_self_report', turns: [10, 412], why: 'said tests pass' }]),
+      reply([
+        { sessionId: 's1', dimension: 'inaccurate_self_report', quote: 'pnpm add left-pad', why: 'said tests pass' },
+      ]),
       [withCarry()],
     );
     expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]?.turns).toEqual([10]);
   });
 
-  it('refuses a finding resting ONLY on carried turns', () => {
-    // Nothing from the window means the judge is reporting what it was told
-    // rather than what it read — a finding invented out of a summary.
+  it('refuses a finding that quotes only the carry', () => {
+    // Quoting the summary rather than the transcript is the judge reporting
+    // what it was told rather than what it read.
     const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'inaccurate_self_report', turns: [412], why: 'x' }]),
+      reply([
+        { sessionId: 's1', dimension: 'inaccurate_self_report', quote: 'Bash pnpm test failed', why: 'x' },
+      ]),
       [withCarry()],
     );
     expect(r.findings).toHaveLength(0);
-    expect(r.dropped[0]?.reason).toContain('only carried turns');
-  });
-
-  it('still refuses a turn that is in neither', () => {
-    const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'overreach', turns: [10, 9999], why: 'x' }]),
-      [withCarry()],
-    );
-    expect(r.findings).toHaveLength(0);
+    expect(r.dropped[0]?.reason).toContain('quote is not in the packet');
   });
 
   it('tells the judge what is already reported, and what was left failing', () => {
@@ -185,17 +218,20 @@ describe('the carry between batches', () => {
 });
 
 describe('the packet', () => {
-  it('includes only windows containing a user prompt', () => {
-    const sk = (seq: number, k: 'user' | 'tool') => ({
-      v: 1, tool: 'claude-code', schema: 'skeleton',
-      lines: [k === 'user'
-        ? { k: 'user', text: 'hello', ref: { uuid: `u${seq}`, sessionId: 's1', seq } }
-        : { k: 'tool', tool: 'Bash', ref: { uuid: `u${seq}`, sessionId: 's1', seq } }],
-    });
-    const s = buildSession('s1', [], [sk(1, 'user'), sk(2, 'tool')] as never);
-    // 39% of windows carry a prompt, and that filter is the whole cost saving.
-    expect(s.windows).toHaveLength(1);
-    expect(s.turns).toEqual([1]);
+  it('sends the whole session, not a filtered slice of it', () => {
+    // The old packet kept only prompt-bearing windows, which showed the judge
+    // **3-7%** of a long session — it was asked what went wrong with work it
+    // could not see. Merging and tiering replaced filtering.
+    const events = [
+      { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: 'do the thing' },
+      { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'tool_use', toolName: 'Bash', command: 'pnpm test' },
+      { uuid: 'c', sessionId: 's1', seq: 3, turnType: 'tool_result', isError: true, textSummary: 'FAIL' },
+    ];
+    const s = buildSession('s1', events as never, new Map());
+    expect(s.turns).toEqual([1, 2, 3]);
+    // Consecutive agent turns merge into one; the prompt stays its own.
+    expect(s.packet.turns).toHaveLength(2);
+    expect(s.packet.turns[1]?.role).toBe('AGENT');
   });
 
   it('carries every prompt as a preamble, capped', () => {
@@ -203,7 +239,7 @@ describe('the packet', () => {
       { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: 'x'.repeat(900) },
       { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'user_prompt', textSummary: 'no new deps' },
     ];
-    const s = buildSession('s1', events as never, []);
+    const s = buildSession('s1', events as never, new Map());
     // The cross-window constraint memory: a rule stated early must be visible
     // when judging late. ~288 tokens at p50 buys the largest dimension.
     expect(s.prompts).toHaveLength(2);
@@ -215,7 +251,7 @@ describe('the packet', () => {
     expect(s.turns).toContain(1);
   });
 
-  it('uses ONE numbering scheme, so a prompt index cannot read as a turn', () => {
+  it('labels prompts by turn, never by position', () => {
     // The bug that produced three "hallucinations": the preamble numbered
     // prompts [1] [2] [3] while windows said `turn NNN`, and models cited the
     // bracket numbers. The reasoning was sometimes sound; the citation was
@@ -233,14 +269,39 @@ describe('the packet', () => {
       { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: '<task-notification> id 123' },
       { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'user_prompt', textSummary: 'real request' },
     ];
-    const s = buildSession('s1', events as never, []);
+    const s = buildSession('s1', events as never, new Map());
     expect(s.prompts.map((p) => p.text)).toEqual(['real request']);
   });
 
-  it('tells the model to cite turns and to prefer saying nothing', () => {
+  it('tells the model to quote verbatim and to prefer saying nothing', () => {
     const text = renderPacket([packet()]);
-    expect(text).toMatch(/MUST cite turn numbers/);
+    expect(text).toMatch(/MUST include a .quote./);
+    expect(text).toMatch(/do not write a turn number/);
     expect(text).toMatch(/empty list is the correct answer/i);
     for (const d of JUDGE_DIMENSIONS) expect(text).toContain(d);
+  });
+});
+
+describe('the redaction gate refuses rather than redacts', () => {
+  it('a packet containing a secret is not clean, so the send must abort', () => {
+    // The product asserts `redact(packet) === packet` immediately before the
+    // call. This test holds the *predicate* to account: it must notice, not
+    // quietly fix. Measured: 50% of corpus sessions carry secret-class content
+    // at full fidelity, and tool output is where it concentrates.
+    const dirty = 'turn 1 | AGENT\n[Bash] export TOKEN=sk-ant-api03-REDACTEDLOOKALIKE123456';
+    expect(redact(dirty).text).not.toBe(dirty);
+  });
+
+  it('a packet built by the builder is already clean', () => {
+    // Belt and braces: the builder redacts as its last construction step, so
+    // the gate should never fire on its output. Verified over 200 real
+    // sessions during development; this pins the contract.
+    const events = [
+      { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: 'ship it' },
+      { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'tool_use', toolName: 'Bash', command: 'echo hi' },
+    ];
+    const full = new Map([[1, 'ship it'], [2, 'echo hi']]);
+    const text = renderSession(buildPacket('s1', events as never, full));
+    expect(redact(text).text).toBe(text);
   });
 });

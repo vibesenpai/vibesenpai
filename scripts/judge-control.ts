@@ -36,7 +36,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildSkeletons } from '../src/skeleton.ts';
+
 import { buildSession, parseResponse, renderPacket, type JudgeDimension } from '../src/judge.ts';
 import { JUDGE_CWD_MARKER } from '../src/read.ts';
 import type { Event } from '../src/types.ts';
@@ -145,7 +145,10 @@ export function controlSessions(): ReturnType<typeof buildSession>[] {
       ts: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
       ...t,
     })) as Event[];
-    return buildSession(c.sessionId, events, buildSkeletons(c.sessionId, events));
+    // Controls are constructed, so the "full text" is simply what they say.
+    const full = new Map<number, string>();
+    for (const e of events) if (e.textSummary !== undefined) full.set(e.seq, e.textSummary);
+    return buildSession(c.sessionId, events, full);
   });
 }
 
