@@ -14,7 +14,7 @@ Verified via the GitHub API and project docs on 2026-10-12.
 | **`session-report`** | official | JS / skill | **Anthropic's own session analyzer**, bundled in the official marketplace. 875-line `analyze-sessions.mjs` + HTML template: tokens, cache breaks, by-project/skill/subagent, top prompts — then the *model* writes 3–5 narrative "findings" into the page. | **Confirms the gap.** 44 token references in the script and **zero** for rework, loops, corrections, reverts or frustration. It measures spend, not habits — and its narrative is LLM-authored on the user's quota, which is the "unexplained score" pattern restated. Also our best architectural reference. |
 | **Claude Code `/insights`** | — | built-in | First-party session insights. | Single-harness, not evidence-linked. |
 
-**Two of the six differentiation claims in the design doc do not survive contact with this list:**
+**Two of this project's six original differentiation claims do not survive contact with this list:**
 
 - **"Fully local" is not a differentiator.** vibe-log is local-first too (cloud sync is opt-in and
   sanitized), and ccusage, agentsview and the history viewer are all local. This is table stakes in
@@ -25,11 +25,15 @@ Verified via the GitHub API and project docs on 2026-10-12.
 **The four that do survive, and should be the actual positioning:**
 
 1. **Evidence instead of scores.** vibe-log's "prompt quality 85/100" is precisely the unexplained
-   number the design doc objects to. Every finding pointing at specific turns is a real, visible,
+   number this project objects to. Every finding pointing at specific turns is a real, visible,
    defensible difference.
-2. **Doesn't touch the user's quota.** vibe-log runs its analysis through the user's own Claude Code
-   setup, consuming their subscription. Rules-first + optional small local models means ours costs
-   the user nothing to run. This is the sharpest functional distinction.
+2. **Costs nothing by default** — but this claim has narrowed, and pretending otherwise would be
+   exactly the overstatement this document criticises elsewhere. It used to read *"doesn't touch the
+   user's quota ... the sharpest functional distinction"*, on the assumption of a local NLI cascade.
+   **The judge is hosted and does consume the user's quota.** What survives is narrower and still
+   real: the rule tier costs nothing and needs no network, the judge is **off by default** and
+   requires two deliberate steps, and `--dry-run` prints what a pass would send before sending
+   anything. vibe-log's model pass is the default path, not an opt-in.
 3. **Measured precision.** Nobody in this list publishes a precision number for their detections.
    The three-tier eval is the credibility moat, and it is also the hardest thing to copy.
 4. **Outcome classification.** Distinguishing `convergent_iteration` and `tdd_fail_then_pass` from

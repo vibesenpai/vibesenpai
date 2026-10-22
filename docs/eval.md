@@ -41,8 +41,9 @@ extractor error — the rest is scope and corpus they lacked. Treat it as an upp
 
 **There is still no gold tier, and nothing here substitutes for one.**
 
-**Fixtures ship as JSONL, not Parquet.** `eval` is a shipped command, so whatever format the gold and
-silver sets live in would put that reader in the distributed tool. The derived windows are therefore
+**Fixtures ship as JSONL, not Parquet.** The reasoning is conditional on `eval` shipping — which it
+has not, per the note above — because whatever format the gold and silver sets live in would put that
+reader in the distributed tool. The derived windows are therefore
 converted to JSONL and committed to the repo (with `NOTICE` attribution — ODC-BY/CC-BY/MIT all permit
 redistributing derivatives). Parquet is read exactly once, during fixture extraction, and stays a
 dev-only dependency that never reaches the runtime path.

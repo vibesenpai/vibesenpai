@@ -176,7 +176,7 @@ feedback that closes the loop.
    dimension over the next N sessions  →  report the delta  →  keep, or revert and try again
 ```
 
-This is an A/B test the user runs on themselves, and **it is the design doc's sixth differentiator
+This is an A/B test the user runs on themselves, and **it is the sixth differentiator
 ("proves improvement") made concrete.** Nothing in the competitive landscape does it: vibe-log gives
 advice and never checks whether the advice worked; `session-report` has the model write narrative
 suggestions with no follow-up at all.

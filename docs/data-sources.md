@@ -59,7 +59,7 @@ language is the highest-yield detector signal, and worth building first.
 
 ## Existing parsers: reuse is permitted, and one solves our hardest problem
 
-Per §4.1 of the design doc. All three are **MIT**, so reuse and adaptation are permitted with
+All three are **MIT**, so reuse and adaptation are permitted with
 attribution. Verified via the GitHub API on 2026-10-12.
 
 | Project | Stars | Language | License | Verdict |

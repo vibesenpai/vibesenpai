@@ -291,7 +291,7 @@ Needs the non-convergence signal to be solid, and it inherits every weakness of 
 ### F. Healthy patterns — credited, not merely withheld
 
 These are the precision defence — each is the benign twin of a problem dimension, and flagging them is
-how trust dies. They are also reported as **positives**, because the design doc calls for rewarding
+how trust dies. They are also reported as **positives**, because the original plan called for rewarding
 good habits. The published taxonomies catalogue only failures, so this entire group is our own.
 
 **`convergent_iteration`** — repeated edits that *resolve*. Benign twin of `rework_loop`.
@@ -527,7 +527,7 @@ security product. **Off by default for exactly that reason.**
 ### Deferred, with reason
 
 **`spend_without_progress`** — tokens and context climbing while nothing passes or commits. In the
-design doc, but **deferred**: `usage` was all zeros in the only local session containing assistant
+original plan, but **deferred**: `usage` was all zeros in the only local session containing assistant
 turns, so there is no verified input on this build. Revisited against SWE-chat's `input_tokens` /
 `output_tokens` columns rather than built blind. The project also explicitly rewards skill over
 volume, so a token-based detector needs to be especially careful not to become a spend scold.

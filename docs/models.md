@@ -1,9 +1,19 @@
 # Semantic analysis (models)
 
-> **Note (2026-10-19):** examples below may name dimensions that were deleted in the reset —
-> `tool_loop`, `revert_churn`, `inaccurate_self_report`, `no_verification`. The mechanics they
-> illustrate still hold; the dimension names do not. See [dimensions.md](dimensions.md) for what is
-> actually detected and `GRAVEYARD.md` for why.
+> ⚠ **SUPERSEDED (2026-10-22).** This document specifies an embeddings → NLI cross-encoder →
+> optional-local-LLM cascade. **None of it was built.** The semantic tier that exists is the
+> two-stage hosted judge in [`src/judge.ts`](../src/judge.ts), described in
+> [architecture.md](architecture.md#the-judge) and
+> [dimensions.md](dimensions.md).
+>
+> It is kept because the reasoning is still worth reading — in particular *why embeddings shortlist
+> but never decide*, which is the argument that `cosine("use pnpm, never npm", "ran pnpm install")`
+> scores high while the correct answer is "no problem here". That reasoning is why the judge reads
+> conversation rather than matching patterns near it, so the conclusion survived even though this
+> design did not.
+>
+> The dimension names here are also stale — `tool_loop`, `revert_churn`, `no_verification` were all
+> deleted (`GRAVEYARD.md`).
 
 
 ## How models and classifiers actually work here

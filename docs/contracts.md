@@ -177,7 +177,7 @@ Revisit only if measurement shows re-parsing is the bottleneck.
 `constraints` is the non-obvious table: the `CLAUDE.md` audit needs *violation history per rule over
 time*, which cannot be reconstructed from findings alone once sessions age out.
 
-**Migrations exist from the first write**, per the design doc — a `meta.schema_version` row and an
+**Migrations exist from the first write** — a `meta.schema_version` row and an
 ordered list of forward migrations, applied in a transaction. Not because the first schema is likely
 right, but because it is likely wrong.
 

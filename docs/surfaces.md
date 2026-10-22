@@ -136,7 +136,9 @@ whatever did not surface in time — and the garbage collector for what turned o
 
 Deliberately **not** `PostToolUse` or `UserPromptSubmit` per-event analysis. mem0 hooks those, but it
 is adding context to the session; we are observing it. Analyzing on every tool call is the polling
-loop the design doc forbids, and the cost lands in your typing latency. ### Principle zero: a broken analyzer must never break a session
+loop this project rules out, and the cost lands in your typing latency.
+
+### Principle zero: a broken analyzer must never break a session
 
 This outranks every other goal in the project, including correctness of findings. A session-analysis
 tool that costs someone a working session has done more damage than it could ever repay in insight,
@@ -241,7 +243,7 @@ agent has stopped, you have not started. It costs no typing latency and interrup
 
 **The consequence: analysis cannot run inside the hook.** A `Stop` hook has a timeout budget, and
 blocking it to run detectors would add latency to every single response — the exact "light footprint"
-violation the design doc forbids. So the ambient layer is a **producer/consumer queue**, not a
+violation this project rules out. So the ambient layer is a **producer/consumer queue**, not a
 synchronous analyzer:
 
 ```
@@ -501,7 +503,7 @@ explicitly:**
 The CLI is the single implementation; both the harness commands and the external binary are thin
 wrappers over the same code paths, so there is no second analyzer to keep in sync.
 
-Three changes from the design doc's list, all deliberate:
+Three changes from the originally planned list, all deliberate:
 
 - **`scan` is the catalog command.** It advances the offset over new transcript bytes and copies
   nothing. `report` scans first if it needs to.
@@ -622,7 +624,7 @@ as the unit.
 
 ## Two surfaces: live in-session, and async retrospective
 
-These are different products sharing a detector core, and the design doc's flat command list
+These are different products sharing a detector core, and a flat command list
 (`scan`/`report`/`dashboard`) hides that. Separating them changes what M1 must support.
 
 ### A. Live — `agentsensei now`

@@ -230,13 +230,13 @@ misleading in aggregate: a 30-day report over ~40 sessions is roughly 600 window
 | `STAT` | n/a | seconds (reads stored findings) | aggregate only |
 
 Three consequences: **`core` stays all-rule** so the default `report` is near-instant; **every `EMB`
-and `CLS` verdict is cached by window hash** so a re-scan costs nothing (the design doc's "cache every
+and `CLS` verdict is cached by window hash** so a re-scan costs nothing (the "cache every
 verdict" requirement, which matters far more for reports than for live use); and **`JUDGE` only ever
 runs detached**, as a background pass whose results land in the store for the *next* read. A preset
 that puts the judge tier on an interactive path is unusable, which is why `weak_evidence_commitment`
 and `capability_overcommitment` sit in `all` rather than `standard`.
 
-**The `core` preset is deliberately all `RULE` and `RULE+T`.** That is what makes the design doc's
+**The `core` preset is deliberately all `RULE` and `RULE+T`.** That is what makes the
 "zero required dependencies for value" real rather than aspirational: the default experience needs no
 model download, no Ollama, no network, and costs single-digit milliseconds.
 

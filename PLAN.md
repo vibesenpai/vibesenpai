@@ -41,7 +41,7 @@ report rather than an empty shell. The implications:
 ### Teams later: what that demands of v1
 
 Teams need aggregation, which needs transmission, which collides with local-first. The bridge already
-exists in the design doc's own terms — *any future sync is explicit opt-in and sends only redacted
+exists on this project's own original terms — *any future sync is explicit opt-in and sends only redacted
 skeletons, never raw code* — and that has a consequence worth building for now:
 
 **The skeleton is the future team product's wire format.** It should be designed as if it will be
@@ -60,8 +60,8 @@ The goal is a local-first, open-source tool that analyzes AI coding-agent sessio
 developers on how they work — detecting rework loops, constraint decay and clarification churn,
 with evidence for every finding.
 
-Inspecting the real data on this machine turned up two facts that reorder the milestones from the
-original design doc. Neither is a pivot; both are sequencing changes.
+Inspecting the real data on this machine turned up two facts that reorder the originally planned
+milestones. Neither is a pivot; both are sequencing changes.
 
 **1. The data substrate is being deleted, and the deletion can resume at any time.**
 
@@ -284,7 +284,7 @@ re-scan reads zero redundant bytes, this document is split with no orphaned rati
 2. **Redactor** (`src/redact.ts`): runs before anything is stored or displayed. API keys, tokens,
    `.env` values, private keys, absolute home paths. Tested first, against deliberately planted
    secrets — SWE-chat's use of Presidio + TruffleHog is the reference bar.
-3. **Skeletonizer** (`src/skeleton.ts`): target 5–10% of raw tokens; the shape in the design doc is
+3. **Skeletonizer** (`src/skeleton.ts`): target 5–10% of raw tokens; the originally planned shape is
    the output contract. Measured and asserted in tests — **and the target needed its scope stated.**
    Measured over 223 public transcripts: the aggregate ratio is 1.28%, but that number is flattering,
    dominated by a few very large files. Per file the median is 5.2% and **69 of 223 exceed 10%** —

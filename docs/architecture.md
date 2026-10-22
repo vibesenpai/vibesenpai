@@ -26,8 +26,14 @@ It produces exactly two kinds of output, and never a third:
 It does not give advice, and it does not produce a score. Everything it says points at specific
 turns. Where there is nothing you can apply, it says so rather than inventing a suggestion.
 
-Everything runs on your machine. The default experience needs no model download, no account, and no
-network access at all.
+Everything runs on your machine, and the default experience needs no model download, no account and
+no network access.
+
+**One amendment, which is real rather than a technicality.** The opt-in judge
+([below](#the-judge)) sends redacted transcript text to a model through your own Claude Code CLI.
+It is off by default, enabling it takes two deliberate steps, and nothing is sent until you do —
+but "no network access at all" was true of an earlier design and is not true of this one, so the
+sentence is amended rather than quietly kept.
 
 ## Vocabulary
 
@@ -274,27 +280,34 @@ flowchart TD
   class JN note
 ```
 
-**The nine default dimensions are all pure rules**, which is why the default experience needs no
-download. A rule is a structural check — *did a test run after this edit?*, *does this success claim
-contradict the last test result?* — and when it fires, the condition is literally true in the
-transcript.
+> ⚠ **SUPERSEDED.** The three paragraphs that stood here described an
+> embeddings → NLI cross-encoder → local-LLM cascade, with the local model as a
+> contingency that would only be built if NLI failed. That design was replaced.
+> What follows is what exists.
 
-**Embeddings shortlist; they never decide.** This distinction prevents a whole class of false
-positive. Cosine similarity measures *topic*, not logical relation, so
-`cosine("use pnpm, never npm", "ran pnpm install")` scores high — the correct answer is "no problem
-here." An NLI cross-encoder asks the real question instead, premise against hypothesis, and returns
-entailment, neutral, or contradiction. It gets `npm` and `pnpm` right in both directions. The
-detector interface enforces this: a dimension marked as embedding-based cannot emit a finding without
-a second-stage verdict.
+**Two tiers, not four.**
 
-**The local LLM judge is a contingency, not a stage.** Its only two dimensions are entailment
-questions, which the NLI model answers at ~92% on SNLI in ~50ms rather than 2–5s. It is built only if
-NLI measurably fails against the hand-labelled gold set. The `Backend` interface already exists in
-[types.ts](../src/types.ts) so that stays a configuration change rather than a refactor — and if NLI
-holds, the system ships with no LLM dependency anywhere ([D33](../DECISIONS.md)).
+**Rules are structural**, and that is enforced by the type system rather than by discipline:
+`StructuralEvent` is `Omit<Event, 'command' | 'pattern' | 'textSummary'>`, so reading text inside a
+detector is a compile error. When a rule fires, the condition is literally true in the transcript —
+the harness itself said so, in an error field or an exit code.
 
-Every tier is optional. A missing model removes dimensions; it never degrades the ones that remain.
-And when something cannot be determined, that is reported — never guessed.
+Two rules ship: `edit_retry` and `redundant_call`. Not nine. The gap between those numbers is
+[`GRAVEYARD.md`](../GRAVEYARD.md), which holds ten detectors that were built, measured and deleted.
+
+<a id="the-judge"></a>
+**The judge reads conversation, and it is opt-in.** The structural well is dry, and that was
+measured rather than assumed: Edit and Write account for 998 of roughly 1,400 tool refusals in the
+public corpus, and `edit_retry` already covers both.
+
+It is a model behind the `Backend` interface — but a hosted one through the user's own CLI, not the
+local NLI cascade this section used to describe. The reason is the strongest evidence in the repo:
+`inaccurate_self_report` was first built as a rule and died at **0 true positives against 5 false**.
+The same dimension works as a judge dimension. Same target, different tier, opposite outcome.
+
+Both tiers remain optional, and the original closing sentences still hold: a missing tier removes
+dimensions and never degrades the ones that remain, and when something cannot be determined that is
+reported rather than guessed.
 
 Which raises the hardest question in the system.
 
@@ -510,7 +523,7 @@ Enforced in code and asserted in tests, not left to discipline.
 | I1 | A hook exits 0 unconditionally, always | every `scripts/` entrypoint |
 | I2 | No hook ever downloads, under any configuration | model loader |
 | I3 | Nothing is written to your harness config without printed, per-item consent | `init`, `fix --guard` |
-| I4 | Nothing surfaces mid-response; the statusline is the only ambient channel | queue + statusline |
+| I4 | Nothing surfaces mid-response | queue; drained at a `Stop` boundary. ⚠ The statusline this invariant named was built and then deliberately removed ([D58](../DECISIONS.md)) — it cost a permanent row of screen for one rarely-changing number |
 | I5 | **No transcript is ever copied.** `catalog.ts` writes nothing under the store but `index.json` | `catalog.test.ts` ✅ |
 | I6 | The store is `0700` | `initCatalog` ✅ |
 | I7 | Evidence is keyed by `uuid`, never by `seq` | `TurnRef` ✅ |
