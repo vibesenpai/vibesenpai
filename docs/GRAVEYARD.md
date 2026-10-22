@@ -122,14 +122,46 @@ product-relevant. Session-level is the right unit for a tool that surfaces one
 thing to try, and the least stable (16 points).** There is no version of this
 where the number we care about is the number we can measure cheaply.
 
+### Correction: most of that spread was a sample size I chose
+
+The entry above was written as though 16 points were a property of LLM judging.
+It is mostly a property of **n = 58**, and the sample was 58 because an early
+cost decision picked `60` and a dozen runs inherited it without anyone asking.
+
+Sitting on the same disk the whole time:
+
+```
+  transcripts locally                1,140
+    with published POSITIVE labels     246   <- we used 60
+    labelled NEGATIVE (clean)          319   <- we used 60
+  claims across all 246                557   <- we scored against 165
+```
+
+Standard error falls as 1/sqrt(n), so reading the whole set buys the same
+precision as repeating the run, and raises the claim count at the same time:
+
+```
+  strategy                      sessions   cost     SE of result
+  1 run  x 60   (all day)            58    $0.58    +/- 8.4 pts
+  3 runs x 60   (first proposal)     58    $1.74    +/- 4.8 pts
+  1 run  x 246  (whole gold set)    246    $2.46    +/- 4.1 pts
+  2 runs x 246                      246    $4.92    +/- 2.9 pts
+```
+
+**One pass over the full set beats three over a quarter of it** — tighter, one
+wall-clock run instead of three, and 557 claims instead of 165.
+
 ### The rule this leaves behind
 
-- **No conclusion from a single run.** Three runs minimum per arm, and a change
-  must move the *mean* by more than ~8 points at session level to be a result.
-- At ~$0.60 a run that is ~$1.80 per arm, so a two-arm hypothesis costs ~$3.60.
-  Budget it before designing the experiment, not after.
-- Prefer claim-level during development (2.5x more stable, 2.5x sharper per
-  dollar) and confirm at session level before shipping.
-- A deterministic re-score from a cached run costs nothing and has no variance.
-  Prefer it wherever the change is to scoring or derivation rather than to the
-  prompt.
+- **Use the whole labelled set.** It is local, it costs ~$2.46, and sampling it
+  was never a decision anyone made on purpose.
+- **No conclusion from a single run on a subset.** At +/- 4.1 pts on the full
+  set, an 8-point improvement is detectable — about the size worth shipping.
+  Add a second run when a result lands near the boundary.
+- A deterministic re-score from a cached run costs nothing and has **zero**
+  variance. Prefer it wherever the change is to scoring or derivation rather
+  than to the prompt — it is why the quote-anchor fix is the one result from
+  this day that stands without an error bar.
+- Claim-level remains the most stable metric and the least product-relevant;
+  session-level the reverse. On the full set both tighten, which is the real
+  argument for reading all of it.
