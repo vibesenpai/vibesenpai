@@ -42,7 +42,7 @@ Nine terms do most of the work in this document.
 | **event** | One turn after parsing — normalised into the same shape regardless of harness. |
 | **window** | A slice of 6–12 consecutive turns. Detectors look at windows, not whole sessions. |
 | **skeleton** | A window with the bulk stripped out — no file contents, no long output. Roughly 5–10% of the original size. |
-| **dimension** | One measurable pattern, e.g. `edit_retry`. [dimensions.md](dimensions.md) holds what is detected and measured; [dimension-survey.md](dimension-survey.md) holds the 40-dimension literature survey it replaced. |
+| **dimension** | One measurable pattern, e.g. `edit_retry`. [dimensions.md](dimensions.md) holds what is detected and measured; [archive/dimension-survey.md](archive/dimension-survey.md) holds the 40-dimension literature survey it replaced. |
 | **finding** | One occurrence of a dimension in a session, with its evidence attached. |
 | **guard** | A generated hook that prevents or catches a mistake mechanically, instead of relying on anyone remembering. |
 

@@ -250,20 +250,30 @@ because something was measured:
 
 ## Milestones
 
-`PLAN.md` is authoritative. Current state: **M1 done** — catalog, parser factory, contracts,
-redactor, skeletonizer, reader modes, and the `scan` / `doctor` / `config` / `skeleton` / `now` /
-`report` CLI. Validated against 231 public transcripts plus local sessions; `npm run verify:corpus`
-is the gate and fails on count drift or any leak.
+`PLAN.md` holds the milestone plan **up to M2a and no further** — it has no judge milestone at all,
+which is the project's active front. Treat it as authoritative for the structural tier and as history
+for everything after. Current state: **M1 done** — catalog, parser factory, contracts, redactor,
+skeletonizer, reader modes, and the `scan` / `doctor` / `config` / `skeleton` / `now` / `report` /
+`fix` / `judge` CLI. Validated against 231 public transcripts plus local sessions;
+`npm run verify:corpus` is the gate and fails on count drift or any leak.
 
-**M2a in progress, restarted 2026-10-19.** The three original detectors are deleted — see
-`GRAVEYARD.md`. `edit_retry` is the first replacement and the first detector in this project's
-history to produce a real finding: **380 of 1,139 sessions (33.4%)**, 927 instances, every one
-`certain`, 926 of 927 labelled with the harness's own reason.
+**M2a: two detectors shipped.** The three original detectors are deleted — see `GRAVEYARD.md`.
+`edit_retry` was the first replacement and the first detector in this project's history to produce a
+real finding: **380 of 1,139 sessions (33.4%)**, 927 instances, every one `certain`, 926 of 927
+labelled with the harness's own reason. `redundant_call` followed.
 
-Next, in order of how clearly each can point at a turn: `file_churn`, `context_reingest`,
-`redundant_call`. Still unbuilt and deliberately so: `permission_denied` (18.1% and now structural, but
-declining is the person exercising control and it is not obvious it should ever be surfaced) and
-`user_correction` (needs parser work — 45% of prompts hit the 200-char cap).
+Settled since, and not to be re-litigated: `file_churn` was **rejected** by measurement (48% of
+sessions, and that churn is waste is not established — `GRAVEYARD.md`); `context_reingest` was
+**reclassified** as session metadata rather than a finding; `permission_denied` stays unbuilt at 18.1%
+because declining is the person exercising control; `user_correction` needs parser work (45% of
+prompts hit the 200-char cap, though the judge now bypasses it via `withFullText`).
+
+**The semantic tier is where the work is.** The judge ships as two stages — extract without
+labelling, then label the record — which is the paper's own architecture and measured **165/232
+sessions against 129/232** for the single-pass prompt it replaced. `docs/eval.md` has the numbers and
+insists on the right word for them: silver agreement, not precision. Five dimensions, including
+`other` as an escape hatch so a real problem outside the four has somewhere to go instead of being
+silenced. `overreach` is **established broken** at 2/38 across three arms and two models.
 
 **A detector is not done until its findings have been read on real data.** This is the only check
 that has ever caught anything here.

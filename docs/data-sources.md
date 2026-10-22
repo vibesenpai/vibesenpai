@@ -130,25 +130,49 @@ population, not for unlocking structural detectors.
 
 Read 2026-10-20 from the replication package
 ([ND-SaNDwichLAB/coding-agent-misalignment](https://github.com/ND-SaNDwichLAB/coding-agent-misalignment)),
-after our judge scored **10–14% recall** against their labels.
+after our judge scored **10–14% silver agreement** against their labels.
 
-### Their three stages against our one
+### Their three stages against ours — resolved, and they were right
 
-| | theirs | ours |
+This section used to ask why our recall was low and point at the structural
+difference. The answer is in: **adopting the split took session-level agreement
+from 129/232 to 165/232**, and the paper's wording took it from 104/232 to
+129/232 before that. The diagnosis the section opened with was correct.
+
+| | theirs | ours, now |
 |---|---|---|
-| stage 1 | **extract** a free-form narrative episode | classify into 4 dimensions |
-| stage 2 | **validate**, filtering unsupported records | — |
-| stage 3 | **annotate** with S1–S8, on an already-validated episode | — |
-| anchor | a **direct quotation** | a turn number |
-| trigger | "only when it surfaces through subsequent developer **correction or pushback**" | abstract per-dimension definitions |
-| input | the full formatted session | 9–25% of it |
-| model | GPT-5.4 | Haiku |
+| stage 1 | **extract** a free-form narrative episode | same — `renderExtract`, no dimension offered |
+| stage 2 | **validate**, filtering unsupported records | a ~2% mechanical guard, not their 46% funnel |
+| stage 3 | **annotate** with S1–S8 on a validated episode | `renderLabel`, reasoning before the label |
+| anchor | a **direct quotation** | same — a quote, with the turn derived from it |
+| trigger | "only when it surfaces through subsequent developer **correction or pushback**" | deliberately not adopted — see below |
+| input | the full formatted session | the full merged session, **plus tool calls and results** |
+| model | GPT-5.4 | Haiku (measured better than Sonnet here, at 1/18 the cost) |
 
 **The taxonomy is applied last, not first.** Their extractor never sees S1–S8; it
 is asked only to find episodes where "the collaboration broke down" and write
-them up. Classification happens in stage 3, against a record already confirmed
-to be real. We ask one model to recognise *and* categorise in a single pass,
-which is the harder task by some distance.
+them up. Classification happens afterwards, against a record already confirmed
+to be real. We now do the same, and the dimension hardest to pick while reading
+— `misread_intent` — more than doubled as a result (28 → 64 of 147).
+
+### Where we are deliberately wider, and it is the biggest one
+
+**Their formatter carries no tool calls and no tool results.**
+`session-formatting/format_sessions.py` handles `role` and text only. That is why
+`invisible_agent_action` is their largest rejection category at 4,910 of 13,778 —
+their judge cannot tell whether the agent executed anything, so "it said it ran
+the tests but didn't" is unverifiable for them.
+
+Our packet renders `[Bash] <cmd>` and `[result ok|FAILED] <output>`. **The single
+largest source of their false positives is a limitation we do not have**, which
+also means some of their 13,778 rejected records — and some of the 319 sessions
+they marked clean — may be real.
+
+**And their 46% rejection rate is not a quality signal.** Decomposed: 17.9% is
+their push-back trigger (a scope decision we do not share), 26.6% is data their
+transcripts lack, and only **1.6% is genuine extractor error**. Porting their
+validation wholesale would have imported limitations we do not have and
+discarded findings we want.
 
 **Correction is the definition, not a hint.** Their prompt scopes misalignment
 to what "surfaces through subsequent developer correction or pushback visible

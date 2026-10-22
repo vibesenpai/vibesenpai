@@ -8,7 +8,7 @@ deliberately — see [DECISIONS.md](../DECISIONS.md) for the decision index with
 |---|---|
 | [architecture.md](architecture.md) | **Start here.** Pipeline, flow diagrams, module map, and the invariants |
 | [dimensions.md](dimensions.md) | **What the tool actually detects**, with the measured frequency and hand-verified precision for each — plus selection presets and config |
-| [dimension-survey.md](dimension-survey.md) | The 40-dimension catalogue from five published taxonomies. A **literature survey, not a backlog** — kept because the research is sound, marked because it must not be built from |
+| [archive/dimension-survey.md](archive/dimension-survey.md) | The 40-dimension catalogue from five published taxonomies. **Archived**, so its status is structural rather than a warning line someone skips: a literature survey, not a backlog. Of 381 real friction statements it maps 3 to anything we detect. The research is sound; it must not be built from |
 | [findings-frequency.md](findings-frequency.md) | What we measured over 1,139 real sessions, and the five probes that were wrong in the same way |
 | [surfaces.md](surfaces.md) | Install model, hooks, the two surfaces (live / retrospective), the running score, and both principles |
 | [artifacts.md](artifacts.md) | How a finding becomes a prompt, a guard, or a rule diff — and the evidence on what actually works |

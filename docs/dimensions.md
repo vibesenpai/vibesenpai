@@ -5,7 +5,7 @@ What this tool detects, and the evidence for each. **Every frequency here comes 
 rather than trusted.
 
 Rewritten 2026-10-19. The 40-dimension research catalogue that preceded it is
-[dimension-survey.md](dimension-survey.md) — kept because the research is sound, marked clearly
+[archive/dimension-survey.md](archive/dimension-survey.md) — kept because the research is sound, archived so it cannot be mistaken for a backlog
 because it must not be built from. `GRAVEYARD.md` holds what was deleted and why.
 
 ## The rule every dimension obeys
@@ -191,7 +191,7 @@ asserts it never reaches the output.
 | dimension | measured | why not |
 |---|---|---|
 | `permission_denied` | 20%, 443 instances | structural at last, via `failureKind` — but **declining is the person exercising control.** It is not obvious this should ever be surfaced, and "frequent and detectable" is not a reason to ship |
-| `user_correction` | SWE-chat labels 4,664 corrections (39% of annotated prompts) | needs parser work first: `summarise()` caps text at 200 chars and **40% of prompts hit the cap**, so a correction at the end of a long prompt is invisible. Also an *anchor*, never surfaced alone — correcting is normal and healthy |
+| `user_correction` | SWE-chat labels 4,664 corrections (39% of annotated prompts) | needs parser work first: `summarise()` caps text at 200 chars and **45% of prompts hit the cap**, so a correction at the end of a long prompt is invisible. Also an *anchor*, never surfaced alone — correcting is normal and healthy |
 | `user_interrupt` | — | the published 64% was wrong: **3,504 of 3,606 enqueues sit at a turn boundary** and 1,858 are `<task-notification>`. Needs a real mid-action signal first |
 | the verification family | — | `no_verification`, `tdd_fail_then_pass`, `premature_external_write`, `fail_fix_fail`. All need to know which command is a test, which is irreducibly framework-specific. Deleted knowingly; `no_verification` was the most actionable sentence this tool could produce |
 

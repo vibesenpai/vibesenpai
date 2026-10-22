@@ -3,7 +3,7 @@
 > **Status: a literature survey, not a backlog.** This was the project's design catalogue until
 > 2026-10-19, when it was measured. It is preserved because the research is sound and re-deriving it
 > would be expensive — but **it must not be built from directly.** Read
-> [dimensions.md](dimensions.md) for what the product actually detects.
+> [dimensions.md](../dimensions.md) for what the product actually detects.
 
 ## Why this is no longer the plan
 
