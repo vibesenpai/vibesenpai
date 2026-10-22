@@ -315,3 +315,88 @@ The harness's labelled-failure well is **exhausted by `edit_retry`**: Edit and
 Write are 998 of roughly 1,400 tool refusals and both are covered. There is no
 second `edit_retry` waiting in the failure data. Further structural detectors
 will be small; the next real gain is the semantic tier.
+
+---
+
+## The judge campaign, 2026-10-21/22 — what died, what was wrongly buried
+
+Four days of measurement, ~$14, and the two entries that were written during it
+were **both wrong**. They are corrected here rather than quietly dropped,
+because the way they went wrong is the most useful thing the campaign produced.
+
+### Correction 1: the rubric change did not fail. It is worth +11 points.
+
+An earlier entry recorded "the rubric widening" as buried — recall down, false
+positives up 13 → 19. That was measured on 60 of 246 available sessions, against
+a baseline that had been edited mid-experiment. On the **full** labelled set:
+
+```
+                   session        episode        claim     false-pos
+  old rubric       104/232  45%   151/437  35%   96/557 17%     -
+  new rubric       129/232  56%   196/437  45%  119/557 21%   123
+  + two-stage      165/232  71%   290/437  66%  175/557 31%   149
+```
+
+**+11 session recall for the rubric, +15 more for two-stage, +26 together.**
+Precision barely moved: true catches per false alarm went 1.05 → 1.11, so the
+wider net cost nothing it was feared to cost.
+
+The retraction is **scoped**, because the code had already settled this in a way
+the entry did not notice. `83b7cda` re-adopted two of the three widened tests:
+
+```
+  constraint_violation   WIDE, live    source restriction dropped
+  misread_intent         WIDE, live    correction requirement dropped
+  overreach              NARROW        push-back requirement KEPT
+```
+
+So the gain came from **dropping the source restriction** — a constraint stated
+in a skill file, a slash command or a project instruction file now counts, where
+before only a developer prompt did. The push-back clause the original entry
+defended is still in force for `overreach`, and nothing here contradicts it.
+
+### Correction 2: there is no 16-point variance band. That was my own edit.
+
+An entry reported three runs of "identical code" at 52%, 66% and 67% and
+concluded that judge recall swings 16 points on sampling alone. A later
+"correction" blamed the sample size.
+
+Both are wrong. **`src/judge.ts` was rewritten at 19:49:16, during the
+experiment.** Each scoring run is a fresh node process that imports the file at
+startup, so run 1 read the old rubric and runs 2–3 read the new one. Three
+independent signals agree: `other` findings appear only in runs 2–3, finding
+volume jumps 77 → 108/104, and `overreach` quadruples exactly as its rubric
+gains a disambiguator.
+
+**True same-code variance is run 2 against run 3: 66% vs 67%. About one point.**
+The judge is far more stable than that entry claimed, and single-run comparisons
+are correspondingly more trustworthy — provided the code holds still.
+
+### What this leaves behind, and it is mechanical rather than a resolution
+
+Three methodological failures in one campaign, all the same shape — *the thing
+being measured did not hold still*:
+
+```
+  1. shipped the response contract and the rubric together, so one masked
+     the other and two mistakes cancelling read as a neutral result
+  2. edited src/judge.ts during a variance experiment
+  3. sampled 60 of 246 sessions across a dozen runs, because an early cost
+     decision picked 60 and nobody revisited it
+```
+
+Two of the three were caught by the user asking a question, not by the care of
+whoever was running them. So:
+
+- **`noUnusedLocals` and `noUnusedParameters` are on.** Their absence is why two
+  dead functions sat in `src/judge.ts` with 60 lines of docstring through the
+  whole campaign.
+- **Scoring reads the whole labelled set.** Sampling it was never a decision.
+- **A deterministic re-score from a cached run has zero variance**, and is how
+  any change to scoring or derivation should be measured. It is why the
+  quote-anchor fix (16% → 20% claim-level) is the one result from that week that
+  needs no error bar.
+
+Still open and recorded so it is not re-discovered: **`overreach` scores 1/38,
+1/38 and 2/38** across three arms and two models. Established as broken rather
+than untuned. Retiring a dimension is a product decision, so it stays for now.
