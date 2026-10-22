@@ -153,8 +153,7 @@ report
   --until <date>     YYYY-MM-DD
   --project <name>   accepted, not yet applied (needs M2a findings)
 
-Not yet implemented (see PLAN.md): fix, explain, claude-md, eval, trends,
-and the ambient statusline.
+Not yet implemented: explain, claude-md, eval, trends.
 `;
 
 function cmdScan(a: Argv): number {
@@ -331,9 +330,26 @@ function cmdDoctor(a: Argv): number {
       }
     }
   }
-  console.log('  network    no network calls during analysis');
-  console.log('             the only network access is the opt-in model download, which is');
-  console.log('             setup rather than analysis — hooks can never trigger it');
+  // ── Say what is true, including the part that is awkward ─────────────────
+  //
+  // This printed "no network calls during analysis" and had done since before
+  // the judge existed. The judge sends session content to a model, so the
+  // guarantee was false for anyone who had turned it on — and this is the
+  // screen a careful user reads precisely to check that claim.
+  //
+  // CLAUDE.md's "The judge may send session content, and only on these terms"
+  // is the authority; this mirrors it rather than restating it loosely.
+  const judgeOn = readJudgeState(config.archive).settings.enabled;
+  console.log(`  network    ${judgeOn ? 'the judge is ON and sends session content' : 'no network calls, with one opt-in exception'}`);
+  if (judgeOn) {
+    console.log('             redacted transcript text leaves this machine when the judge');
+    console.log('             runs. It is off by default and you turned it on.');
+    console.log('             turn it off:  agentsensei judge --disable --apply');
+  } else {
+    console.log('             the judge would send redacted session content to a model, and');
+    console.log('             it is OFF. Nothing else reaches the network during analysis;');
+    console.log('             the model download is setup, and hooks cannot trigger it.');
+  }
   console.log('');
   for (const l of harnessTtlStatus(home)) console.log(l);
   return 0;

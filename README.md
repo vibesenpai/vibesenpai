@@ -162,8 +162,8 @@ commands and the `SessionStart` / `Stop` / `PreCompact` / `SessionEnd` hooks fro
 ours: the never-touch-your-config rule is satisfied structurally.
 
 The manifest's `userConfig` (verified as a real plugin.json field, used by mem0) prompts at install
-for the handful of settings worth asking up front — store location override, and whether the ambient
-statusline is wanted at all. Nothing sensitive, nothing required.
+for the handful of settings worth asking up front — a store location override, and whether semantic
+analysis is wanted at all. Nothing sensitive, nothing required.
 
 ### 2. First session after install — the onboarding moment
 
@@ -201,23 +201,20 @@ required and no CLI invocation.
   No trend yet — deltas appear from your next run onward.
 
   CLAUDE.md · 740 words, over the ~500-word ceiling
-    6 rules never violated in 34 sessions · 1 violated weekly       /agentsensei:claude-md
+    6 rules never violated in 34 sessions · 1 violated weekly       (not built yet)
 
   ── optional ─────────────────────────────────────────────────────
-
-  Statusline · you have none configured. A one-line nudge after chunks of work.
-  This needs a settings.json write — shown before writing.          [add it?]
 
   Semantic analysis · not installed. /agentsensei:setup-models      (270 MB)
 ```
 
-The statusline is asked **here and nowhere else**, because it is the one thing requiring a
-`settings.json` write and this is the moment the user has just seen what the tool does. Semantic analysis was already offered at install, so `setup` only reminds anyone who deferred — it
+Semantic analysis was already offered at install, so `setup` only reminds anyone who deferred — it
 never re-asks.
 
-**Statusline is the one thing the plugin cannot do for itself** — verified: no official plugin ships
-one, because it is a `settings.json` field rather than a plugin capability. So it requires a consented
-write, and `/agentsensei:setup` is where that consent is asked.
+**There is no statusline.** It was built, worked, and was removed (`DECISIONS.md` D58,
+`GRAVEYARD.md`): a permanent row of screen for one rarely-changing line, and `systemMessage` at
+`SessionStart` reaches the user without reaching the model, which was the only thing the statusline
+was buying. Nothing here writes to `settings.json` any more.
 
 ### 4. Daily use — entirely in the harness
 
@@ -225,10 +222,17 @@ write, and `/agentsensei:setup` is where that consent is asked.
 /agentsensei:now           what happened in this session
 /agentsensei:fix 2         evidence + what you can apply
 /agentsensei:report 7d     the week
+
+not built yet — design, not a promise:
 /agentsensei:claude-md     which of your rules are dead weight
 /agentsensei:why 2         the exact turns, verbatim
 /agentsensei:setup-models  the semantic-analysis download, if deferred at install
 ```
+
+The three above the line dispatch in `src/cli.ts` today (`now`, `report`,
+`fix`, plus `scan`, `doctor`, `config`, `skeleton`, `standing`, `judge`,
+`install`, `uninstall`). The three below are described here because the shape
+is decided, not because they exist — `src/cli.ts --help` says the same.
 
 Plus the ambient surface, which needs no command at all:
 
@@ -238,7 +242,7 @@ Plus the ambient surface, which needs no command at all:
   Run /agentsensei:now to view more details.
 
 [later, after a commit lands]
-  ⌁ 3 edits refused then retried · +1 more   ← statusline only. never interrupts.
+  ⌁ 3 edits refused then retried · +1 more   ← at session start. never interrupts.
 ```
 
 ### `fix` in the harness, which is where it gets good
@@ -274,7 +278,7 @@ findings:
 ```
 npx agentsensei                 see where you stand (rules only, no download)
 agentsensei fix 2 --guard       prints the hook JSON for consent
-agentsensei init                the non-plugin path: offers hooks + statusline, asks for each
+agentsensei init                the non-plugin path: offers hooks, asks for each
 agentsensei models install      explicit download (same as :setup-models)
 agentsensei doctor              harnesses, models, paths, retention warning
 ```

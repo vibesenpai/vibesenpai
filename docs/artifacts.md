@@ -247,7 +247,7 @@ option for a tool whose first principle is evidence.
   `agentsensei fix [--prompt | --guard | --claude-md]`.
 - **`agentsensei fix` is the product's point, not a convenience.** It returns the finding, its
   evidence, and the available artifacts. For `--prompt` it prints text ready to paste or to drop in
-  via `/sensei:fix`. For `--guard` it prints the exact hook JSON **for consent, never silently
+  via `/agentsensei:fix`. For `--guard` it prints the exact hook JSON **for consent, never silently
   written.** For `--claude-md` it prints a diff, budget-checked. If no artifact exists it says so and
   states the cost instead of inventing a tip.
 

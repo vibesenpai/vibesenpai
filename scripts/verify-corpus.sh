@@ -44,7 +44,11 @@ jqlike() { node -e "
 # a shallow fetch rather than a full clone plus checkout.
 fetch_pinned() {
   local dest="$1" repo="$2" sha="$3" path="$DIR/$dest"
-  if [ -d "$path/.git" ]; then
+  # `-d .git` is not enough to know a clone is usable. macOS /tmp cleanup gutted
+  # these at midnight and left the directories standing, so the check passed,
+  # `rev-parse` died with "not a git repository", and the script still exited 0
+  # — a baseline guard reporting success without having run. Validate the repo.
+  if git -C "$path" rev-parse --git-dir >/dev/null 2>&1; then
     local at
     at="$(git -C "$path" rev-parse HEAD)"
     if [ "$at" = "$sha" ]; then
@@ -55,6 +59,9 @@ fetch_pinned() {
     # starts describing a corpus nobody validated.
     echo "  $dest at $at, re-checking out pinned $sha"
   else
+    # Start clean: a half-removed clone cannot be repaired by `git init` over
+    # the top of it, which is how the corruption above survived a re-run.
+    [ -e "$path" ] && rm -rf "$path"
     echo "  fetching $repo @ $sha"
     git init -q "$path"
     git -C "$path" remote add origin "https://github.com/$repo.git"
