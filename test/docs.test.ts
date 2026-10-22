@@ -29,6 +29,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { leadSegments } from '../src/render.ts';
 import { JUDGE_DIMENSIONS } from '../src/judge.ts';
 import { detectorsFor } from '../src/detect/index.ts';
 
@@ -280,6 +281,43 @@ describe('documented output samples match the shape the code produces', () => {
   // documented line to match a line the code can still produce.
   const shape = (line: string): string =>
     line.replace(/\d[\d,.]*/g, 'N').replace(/[ \t]+/g, ' ').trim();
+
+  it('every documented lead line is one the code can produce', () => {
+    // The lead changed twice in one sitting, and both times the README, the
+    // site index and `what-it-is.md` kept the old wording — including an
+    // overclaim the code had already been fixed to avoid. The `SESSION COST`
+    // guard below did not cover these blocks because they contain only the
+    // lead.
+    //
+    // Generated from `leadSegments` rather than hard-coded, so the shapes
+    // cannot drift from the function that writes them.
+    const canonical = new Set(
+      [
+        { ruleCount: 4, judgedCount: 19, total: 23, wasted: 11_000, editCount: 2460 },
+        { ruleCount: 4, judgedCount: 0, total: 4, wasted: 11_000, editCount: 2460 },
+        { ruleCount: 0, judgedCount: 19, total: 19, wasted: 0, editCount: 2460 },
+        { ruleCount: 4, judgedCount: 19, total: 23, wasted: 0, editCount: 2460 },
+        { ruleCount: 0, judgedCount: 0, total: 0, wasted: 0, editCount: 2460 },
+      ].map((f) => {
+        const seg = leadSegments(f);
+        return shape(`${seg.figure ?? ''}${seg.rest}`);
+      }),
+    );
+
+    // Any documented line that looks like a lead must be one of them.
+    const looksLikeLead = /^\s*(?:[\d,]+\+? tokens |[\d,]+ findings?\b|no findings across)/;
+    for (const file of [...userFacingDocs(), 'README.md']) {
+      for (const line of readFileSync(file, 'utf8').split('\n')) {
+        if (!looksLikeLead.test(line)) continue;
+        // Prose mentions of a figure are not output; only indented code is.
+        if (!line.startsWith('  ')) continue;
+        expect(
+          canonical,
+          `${file} shows a lead line the code cannot produce:\n  ${line.trim()}`,
+        ).toContain(shape(line));
+      }
+    }
+  });
 
   it('`now` still prints the lines the docs show', () => {
     // The lead moved — the finding count now comes *before* the session line —

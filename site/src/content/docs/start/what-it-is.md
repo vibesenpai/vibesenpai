@@ -7,7 +7,7 @@ description: What your coding agent's mistakes cost you, in tokens — and an ho
 turns where effort was wasted, and tells you what that cost in tokens.
 
 ```
-  11,000+ tokens written and discarded · 23 findings
+  11,000+ tokens discarded on 4 findings · 19 more flagged by a model
     18 sessions · 2,460 edits
 ```
 

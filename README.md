@@ -16,7 +16,7 @@ reply, it worked.
 finds those moments, prices them, and quotes the turns back to you:
 
 ```
-  11,000+ tokens written and discarded · 23 findings
+  11,000+ tokens discarded on 4 findings · 19 more flagged by a model
     18 sessions · 2,460 edits
 ```
 
