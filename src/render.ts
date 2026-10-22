@@ -561,8 +561,49 @@ export function renderCompaction(stats: SessionStats): string[] {
  * silently showing stale findings beside live rule ones would imply a currency
  * they do not have.
  */
+/**
+ * The first sentence, or a clean truncation when there isn't one.
+ *
+ * The judge's label stage writes in its own register, at length:
+ *
+ *     The anchoring phrase is the agent's own claim that commit `591dbb9`
+ *     stopped the judge discarding the extraction record, when the code
+ *     showed the fields were never populated, so the success claim was false.
+ *
+ * Useful provenance, poor reading — and "anchoring phrase" is internal
+ * vocabulary leaking into user output. Clamping is deliberately a **render**
+ * fix: changing the rubric would invalidate the measured 165/232 and require
+ * re-scoring the whole labelled set.
+ */
+export function firstSentence(text: string, max: number): string {
+  const t = dejargon(text).trim();
+  const stop = t.search(/[.!?](\s|$)/);
+  const one = stop > 0 ? t.slice(0, stop + 1) : t;
+  return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Strip the judge's own scaffolding from prose meant for a user.
+ *
+ * The label stage sometimes opens with `The anchoring phrase is …` — 2 of 19
+ * findings on this machine, so a minority pattern rather than a systematic one.
+ * "Anchoring phrase" is internal vocabulary, and the phrase it names is now
+ * displayed above the sentence anyway, so the preamble is both jargon and
+ * redundant.
+ *
+ * A render-time strip rather than a rubric change, for the same reason as the
+ * clamp: the rubric is measured, and editing it invalidates 165/232.
+ */
+function dejargon(text: string): string {
+  const stripped = text.replace(
+    /^\s*the (?:anchoring|quoted|anchor) phrase is (?:the )?/i,
+    '',
+  );
+  return stripped === text ? text : stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
 export function renderJudged(
-  findings: { dimension: string; turns: number[]; why: string }[],
+  findings: { dimension: string; turns: number[]; why: string; quote?: string }[],
   unjudgedTurns: number,
   eta?: string,
 ): string[] {
@@ -573,7 +614,14 @@ export function renderJudged(
     out.push(
       `${INDENT.repeat(2)}${bold(f.dimension)}  ${dim(`turn${f.turns.length === 1 ? '' : 's'} ${f.turns.join(', ')}`)}`,
     );
-    for (const l of wrapText(f.why, 62)) out.push(`${INDENT.repeat(3)}${dim(l)}`);
+    // The quote first, because it is the evidence — what was actually said at
+    // that turn. The model's reasoning is a gloss on it and reads as one.
+    if (f.quote !== undefined && f.quote.trim() !== '') {
+      for (const l of wrapText(`"${firstSentence(f.quote, 160)}"`, 62)) {
+        out.push(`${INDENT.repeat(3)}${yellow(l)}`);
+      }
+    }
+    for (const l of wrapText(firstSentence(f.why, 240), 62)) out.push(`${INDENT.repeat(3)}${dim(l)}`);
   }
   if (findings.length === 0) out.push(`${INDENT.repeat(2)}${dim('nothing so far')}`);
   if (unjudgedTurns > 0) {
@@ -608,6 +656,72 @@ function wrapText(text: string, width: number): string[] {
 }
 
 /**
+ * The numbers the lead is built from, shared by every surface.
+ *
+ * Data rather than text, because the terminal wants ANSI and the report wants
+ * markup — but if each computed its own totals they would drift, and they did:
+ * `standing` said 23 findings while the report said 22, one summing
+ * occurrences and the other counting grouped findings.
+ */
+export type LeadFacts = {
+  /** Occurrences, not groups: what a user means by "how many times". */
+  ruleCount: number;
+  judgedCount: number;
+  total: number;
+  /** Tokens written and discarded. **Rule tier only** — see `leadSegments`. */
+  wasted: number;
+  editCount: number;
+};
+
+export function leadFacts(
+  findings: Finding[],
+  judgedCount: number,
+  editCount: number,
+  events: Event[],
+): LeadFacts {
+  const ruleCount = findings.reduce((n, f) => n + f.occurrences, 0);
+  return {
+    ruleCount,
+    judgedCount,
+    total: ruleCount + judgedCount,
+    wasted: findings.reduce(
+      (n, f) => n + costFor(events, { dimension: f.dimension, subject: f.subject }).written,
+      0,
+    ),
+    editCount,
+  };
+}
+
+/**
+ * The lead, as plain segments the caller styles.
+ *
+ * **The price belongs to the rule tier, and the line has to say so.** This read
+ * `11,000+ tokens written and discarded · 23 findings`, which invites exactly
+ * one reading: that twenty-three findings cost eleven thousand tokens. Nineteen
+ * of them were judge findings with no price at all — `costFor` handles
+ * `edit_retry` and `redundant_call` and nothing else. Attributing the figure is
+ * the same keep-the-tiers-distinct rule as everywhere else, applied to the one
+ * line everybody reads.
+ */
+export function leadSegments(f: LeadFacts): { figure?: string; rest: string } {
+  if (f.total === 0) {
+    return {
+      rest:
+        f.editCount === 0
+          ? 'nothing to analyse — this session made no edits'
+          : `no findings across ${f.editCount} edits`,
+    };
+  }
+  const n = (c: number): string => `${c} finding${c === 1 ? '' : 's'}`;
+  const also = f.judgedCount > 0 ? ` · ${f.judgedCount} more flagged by a model` : '';
+  if (f.wasted > 0) {
+    return { figure: `${approx(f.wasted)} tokens`, rest: ` discarded on ${n(f.ruleCount)}${also}` };
+  }
+  if (f.ruleCount === 0) return { figure: n(f.judgedCount), rest: ' flagged by a model' };
+  return { figure: n(f.total), rest: ` across ${f.editCount} edits` };
+}
+
+/**
  * The first line, which is the whole pitch in one sentence.
  *
  * A ladder, not a formula, because `costFor` prices only `edit_retry` and
@@ -628,27 +742,8 @@ function leadLine(
   d: Denominators,
   events: Event[],
 ): string {
-  // Occurrences, matching `standing` and the HTML report. Counting grouped
-  // findings here made the same session report a different number depending on
-  // which surface you read it from.
-  const total = findings.reduce((n, f) => n + f.occurrences, 0) + judgedCount;
-  if (total === 0) {
-    // A blank result must not read as "we did not look", and the denominator is
-    // what makes the difference legible: nothing found across 155 edits is a
-    // real statement; nothing found across 0 is not.
-    return d.editCount === 0
-      ? 'nothing to analyse — this session made no edits'
-      : `no findings across ${d.editCount} edits`;
-  }
-
-  const wasted = findings.reduce(
-    (n, f) => n + costFor(events, { dimension: f.dimension, subject: f.subject }).written,
-    0,
-  );
-  const count = `${total} finding${total === 1 ? '' : 's'}`;
-  return wasted > 0
-    ? `${bold(`${approx(wasted)} tokens`)} written and discarded ${dim('·')} ${count}`
-    : `${bold(count)} across ${d.editCount} edits`;
+  const seg = leadSegments(leadFacts(findings, judgedCount, d.editCount, events));
+  return seg.figure === undefined ? seg.rest : `${bold(seg.figure)}${seg.rest}`;
 }
 
 export function render(input: RenderInput): string {

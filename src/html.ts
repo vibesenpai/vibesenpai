@@ -33,7 +33,7 @@
 
 import { approx } from './cost.ts';
 import { describeCoverage, segmentByDepth } from './report.ts';
-import { CORPUS, shortenPath } from './render.ts';
+import { CORPUS, firstSentence, leadSegments, shortenPath } from './render.ts';
 import type { FindingView, JudgedView, ReportData, SessionView } from './gather.ts';
 
 /** The only way a value reaches the page. */
@@ -229,22 +229,14 @@ ${quote}
 </div>`);
 }
 
-/**
- * The first sentence, or a clean truncation if there isn't one.
- *
- * Used on model-written prose, which runs long and buries its point in a
- * subordinate clause.
- */
-function firstSentence(text: string, max: number): string {
-  const t = text.trim();
-  const stop = t.search(/[.!?](\s|$)/);
-  const one = stop > 0 ? t.slice(0, stop + 1) : t;
-  return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`;
-}
 
 function sessionBlock(s: SessionView): string {
   const dur = duration(s.firstTs, s.lastTs);
-  const n = s.findings.length + s.judged.length;
+  // Occurrences, like the header. Counting groups here meant a session summary
+  // could read "2 findings" inside a report whose header counted 4 — the same
+  // grouped-versus-occurrence split that had `standing` and the report
+  // disagreeing by exactly the grouping factor.
+  const n = s.findings.reduce((m, f) => m + f.occurrences, 0) + s.judged.length;
   const wasted = s.cost.written > 0 ? approx(s.cost.written) : '';
 
   const head = [
@@ -424,15 +416,22 @@ ${r.prompt === undefined ? '' : `<p class="note">adopting this changes the sessi
   // nothing. The product name was the <h1> and the news was a muted subtitle
   // underneath it; a reader does not need to be told which tool made the page
   // they opened.
-  const wastedTotal = d.sessions.reduce((n, s) => n + s.cost.written, 0);
+  const ruleCount = d.sessions.reduce(
+    (n, s) => n + s.findings.reduce((m, f) => m + f.occurrences, 0),
+    0,
+  );
+  const judgedCount = d.sessions.reduce((n, s) => n + s.judged.length, 0);
+  const seg = leadSegments({
+    ruleCount,
+    judgedCount,
+    total,
+    wasted: d.sessions.reduce((n, s) => n + s.cost.written, 0),
+    editCount: d.standing.edits,
+  });
   const lead =
-    total === 0
-      ? `no findings across ${esc(String(d.standing.edits))} edits`
-      : wastedTotal > 0
-      ? `${esc(approx(wastedTotal))} tokens written and discarded <span class="mute">· ${esc(
-          String(total),
-        )} finding${total === 1 ? '' : 's'}</span>`
-      : `${esc(String(total))} finding${total === 1 ? '' : 's'}`;
+    seg.figure === undefined
+      ? esc(seg.rest)
+      : `${esc(seg.figure)}<span class="mute">${esc(seg.rest)}</span>`;
 
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">

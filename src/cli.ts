@@ -11,12 +11,7 @@
 import { homedir } from 'node:os';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { bold, dim } from './style.ts';
-import { approx } from './cost.ts';
 
-/** `1 finding` / `4 findings`. The `(s)` form reads as an unfinished sentence. */
-function plural(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`;
-}
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { resolveConfig, type Layer } from './config.ts';
@@ -37,7 +32,7 @@ import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
 import { detectorsFor, runDetectors, unknownDimensions } from './detect/index.ts';
-import { render as renderFindings } from './render.ts';
+import { leadSegments, render as renderFindings } from './render.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
 import {
@@ -853,19 +848,19 @@ async function cmdStanding(a: Argv): Promise<number> {
   // Same ladder as `now` and the report: what it cost, then a count, then a
   // plain statement. `standing · computed <timestamp>` as the first line told
   // a reader when we last ran, which is the least interesting fact available.
-  const wasted = Object.values(s.wastedTokens).reduce((n, w) => n + w.written, 0);
-  const judgedTotal = tallyByDimension(readJudgeState(config.archive)).reduce(
+  const ruleCount = s.dimensions.reduce((n, d) => n + d.occurrences, 0);
+  const judgedCount = tallyByDimension(readJudgeState(config.archive)).reduce(
     (n, j) => n + j.count,
     0,
   );
-  const found = s.dimensions.reduce((n, d) => n + d.occurrences, 0) + judgedTotal;
-  console.log(
-    found === 0
-      ? `no findings across ${s.edits} edits in ${plural(s.sessions, 'session')}`
-      : wasted > 0
-        ? `${bold(`${approx(wasted)} tokens`)} written and discarded ${dim('·')} ${plural(found, 'finding')}`
-        : `${bold(plural(found, 'finding'))} across ${s.edits} edits`,
-  );
+  const seg = leadSegments({
+    ruleCount,
+    judgedCount,
+    total: ruleCount + judgedCount,
+    wasted: Object.values(s.wastedTokens).reduce((n, w) => n + w.written, 0),
+    editCount: s.edits,
+  });
+  console.log(seg.figure === undefined ? seg.rest : `${bold(seg.figure)}${seg.rest}`);
   console.log(dim(`  ${s.sessions} session(s) · ${s.edits} edits · computed ${computedAtLocal(s)}`));
   if (s.unreadable > 0) {
     // Stated, never dropped: a standing that quietly covered fewer sessions
@@ -1203,9 +1198,30 @@ async function cmdReport(a: Argv): Promise<number> {
     console.log(`  note: --project ${f['project']} is accepted but not yet applied`);
   }
 
+  // The same lead as every other surface. This opened with the date range,
+  // which is scope rather than news.
+  const reportRule = data.sessions.reduce(
+    (n, sv) => n + sv.findings.reduce((m, f) => m + f.occurrences, 0),
+    0,
+  );
+  const reportJudged = data.sessions.reduce((n, sv) => n + sv.judged.length, 0);
+  const reportLead = leadSegments({
+    ruleCount: reportRule,
+    judgedCount: reportJudged,
+    total: reportRule + reportJudged,
+    wasted: data.sessions.reduce((n, sv) => n + sv.cost.written, 0),
+    editCount: data.standing.edits,
+  });
   console.log(
-    `report · ${data.range.from.toISOString().slice(0, 10)} → ` +
-      `${data.range.to.toISOString().slice(0, 10)}`,
+    reportLead.figure === undefined
+      ? reportLead.rest
+      : `${bold(reportLead.figure)}${reportLead.rest}`,
+  );
+  console.log(
+    dim(
+      `  report · ${data.range.from.toISOString().slice(0, 10)} → ` +
+        `${data.range.to.toISOString().slice(0, 10)}`,
+    ),
   );
 
   // Coverage from the sessions' own timestamps, not a catalog record of when we
@@ -1233,7 +1249,10 @@ async function cmdReport(a: Argv): Promise<number> {
   // Both tiers, matching what the page itself now counts. These two numbers
   // disagreeing is what made the discrepancy invisible: the CLI said 3 while
   // the store held 19.
-  const total = data.sessions.reduce((n, s) => n + s.findings.length + s.judged.length, 0);
+  const total = data.sessions.reduce(
+    (n, s) => n + s.findings.reduce((m, f) => m + f.occurrences, 0) + s.judged.length,
+    0,
+  );
   console.log(`\nfindings · ${data.sessions.length} session(s) analysed`);
   if (data.unreadable > 0) {
     console.log(`  ${data.unreadable} discovered session(s) could not be read`);
@@ -1324,7 +1343,10 @@ function writeHtmlReport(data: ReportData, archive: string, f: Argv['flags']): n
   // Both tiers, matching what the page itself now counts. These two numbers
   // disagreeing is what made the discrepancy invisible: the CLI said 3 while
   // the store held 19.
-  const total = data.sessions.reduce((n, s) => n + s.findings.length + s.judged.length, 0);
+  const total = data.sessions.reduce(
+    (n, s) => n + s.findings.reduce((m, f) => m + f.occurrences, 0) + s.judged.length,
+    0,
+  );
   console.log(
     `wrote ${path}\n` +
       `  ${data.sessions.length} session(s) · ${total} finding(s) · ` +

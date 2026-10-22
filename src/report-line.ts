@@ -25,6 +25,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { approx } from './cost.ts';
 import { basename, join } from 'node:path';
 import type { Standing } from './standing.ts';
 import { CORPUS, shortenPath } from './render.ts';
@@ -204,9 +205,25 @@ export function reportBlock(
 ): string {
   if (s === undefined) return '';
 
-  // `report` rather than the bare tool name: the header has to say what this
-  // *is*, not only who is talking.
-  const head = `agentsensei report · your last ${s.sessions} session${s.sessions === 1 ? '' : 's'}`;
+  // The tool names itself here, unlike the CLI surfaces: this block is injected
+  // into a session the user did not ask for it in, so "who is talking" is real
+  // information. But the *news* goes in the same line rather than three lines
+  // below it, so the header earns its place.
+  //
+  // The price is attributed to the tier that produced it. `wastedTokens` is the
+  // rule tier; judge findings have no price, and a bare "N findings" next to a
+  // token figure invites the reading that all of them cost it.
+  const wasted = Object.values(s.wastedTokens).reduce((n, w) => n + w.written, 0);
+  const ruleCount = s.dimensions.reduce((n, d) => n + d.occurrences, 0);
+  const judgedTotal = judged.reduce((n, j) => n + j.count, 0);
+  const headline =
+    wasted > 0
+      ? ` · ${approx(wasted)} tokens discarded on ${ruleCount} finding${ruleCount === 1 ? '' : 's'}`
+      : ruleCount + judgedTotal > 0
+        ? ` · ${ruleCount + judgedTotal} finding${ruleCount + judgedTotal === 1 ? '' : 's'}`
+        : '';
+  const head =
+    `agentsensei · your last ${s.sessions} session${s.sessions === 1 ? '' : 's'}${headline}`;
   const lines: string[] = [];
 
   for (const d of s.dimensions.slice(0, MAX_DIMENSIONS)) {
@@ -221,7 +238,6 @@ export function reportBlock(
 
   // One line, not a list. This block is terse by design — two dimensions and a
   // reason tally — and five judge dimensions spelled out would swamp it.
-  const judgedTotal = judged.reduce((n, j) => n + j.count, 0);
   if (judgedTotal > 0) {
     const names = judged
       .slice()
