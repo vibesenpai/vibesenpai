@@ -28,7 +28,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
-import { buildSession, parseResponse, renderPacket, type JudgePacketSession } from '../src/judge.ts';
+import { buildSession, parseExtract, parseLabels, parseResponse, renderExtract, renderLabel, renderPacket, type JudgeEpisode, type JudgePacketSession } from '../src/judge.ts';
 import { JUDGE_CWD_MARKER } from '../src/read.ts';
 import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from '../src/gold.ts';
 import { redact } from '../src/redact.ts';
@@ -81,6 +81,12 @@ async function main(): Promise<void> {
   // pipeline examined and found nothing in, every finding is a false-positive
   // candidate. Recall alone cannot say whether we are better or merely noisier.
   const negativesMode = process.argv.includes('--negatives');
+  // `--two-stage` runs extract-then-label. `--extract-only` runs stage A and
+  // assigns no real dimension, which isolates EXTRACTION: the session- and
+  // episode-level numbers are dimension-agnostic, so they are meaningful
+  // without stage B having run at all. That separation is the whole point.
+  const twoStage = process.argv.includes('--two-stage');
+  const extractOnly = process.argv.includes('--extract-only');
   let files: Map<string, string>;
   if (negativesMode) {
     const mapping = process.env['AGENTSENSEI_GOLD_MAPPING'] ?? '/tmp/cam-check/data/core/session_mapping.json';
@@ -94,7 +100,8 @@ async function main(): Promise<void> {
   }
   const shas = [...files.keys()].slice(0, limit);
 
-  console.log(`gold · ${episodes.length} swe episodes · ${files.size} sessions held · judging ${shas.length} · ${model}\n`);
+  const mode = extractOnly ? 'extract-only (stage A)' : twoStage ? 'two-stage' : 'single-pass';
+  console.log(`gold · ${episodes.length} swe episodes · ${files.size} sessions held · judging ${shas.length} · ${model} · ${mode}\n`);
 
   // Parse once: the packet and the quote alignment both need the events.
   const packets: JudgePacketSession[] = [];
@@ -142,7 +149,7 @@ async function main(): Promise<void> {
   const dropped: Record<string, number> = {};
   for (const [i, batch] of batches.entries()) {
     process.stdout.write(`  batch ${i + 1}/${batches.length} (${batch.length} sessions) … `);
-    const text = renderPacket(batch);
+    const text = twoStage || extractOnly ? renderExtract(batch) : renderPacket(batch);
     // The same gate the runner enforces. A scoring harness that sent what the
     // product refuses to send would be measuring a different system.
     if (redact(text).text !== text) {
@@ -154,6 +161,48 @@ async function main(): Promise<void> {
       console.log('call failed');
       continue;
     }
+
+    if (twoStage || extractOnly) {
+      const ex = parseExtract(reply, batch);
+      for (const d of ex.dropped) dropped[d.reason] = (dropped[d.reason] ?? 0) + d.count;
+      if (ex.episodes.length === 0) {
+        console.log('0 episodes');
+        continue;
+      }
+      if (extractOnly) {
+        // A placeholder dimension, never reported. Only the dimension-agnostic
+        // session and episode numbers mean anything in this mode, and the
+        // output says so.
+        found.push(
+          ...ex.episodes.map((e) => ({
+            sessionId: e.sessionId,
+            dimension: 'constraint_violation' as const,
+            turns: e.evidence.flatMap((v) => v.turns),
+            quote: e.evidence[0]?.quote ?? '',
+          })),
+        );
+        console.log(`${ex.episodes.length} episode(s), unlabelled`);
+        continue;
+      }
+      const labelReply = callModel(renderLabel(ex.episodes), model);
+      if (labelReply === undefined) {
+        console.log(`${ex.episodes.length} episode(s), LABEL CALL FAILED`);
+        continue;
+      }
+      const lb = parseLabels(labelReply, ex.episodes);
+      for (const d of lb.dropped) dropped[d.reason] = (dropped[d.reason] ?? 0) + d.count;
+      found.push(
+        ...lb.findings.map((f) => ({
+          sessionId: f.sessionId,
+          dimension: f.dimension,
+          turns: f.turns,
+          quote: f.quote,
+        })),
+      );
+      console.log(`${ex.episodes.length} episode(s) -> ${lb.findings.length} labelled`);
+      continue;
+    }
+
     const r = parseResponse(reply, batch);
     for (const d of r.dropped) dropped[d.reason] = (dropped[d.reason] ?? 0) + d.count;
     // The quote is cached too, so a change to turn derivation can be re-scored
@@ -211,7 +260,10 @@ async function main(): Promise<void> {
   // they differ only in the denominator and whether the LABEL must match.
   console.log(`  SESSION-level  (any dimension) : ${s.sessionLevel.caught}/${s.sessionLevel.withEpisode}   ${pct(s.sessionLevel.recall)}   <- headline`);
   console.log(`  episode-level  (any dimension) : ${s.episodeLevel.caught}/${s.episodeLevel.total}   ${pct(s.episodeLevel.recall)}`);
-  console.log(`  claim-level    (exact dimension): ${s.matched}/${s.inScope}   ${pct(s.recall)}`);
+  console.log(
+    `  claim-level    (exact dimension): ${s.matched}/${s.inScope}   ${pct(s.recall)}` +
+      (extractOnly ? '   <- MEANINGLESS in extract-only mode, the dimension is a placeholder' : ''),
+  );
   console.log('');
   console.log(`  right dimension, wrong place: ${s.rightDimensionWrongPlace}`);
   console.log(`  unmatched findings       : ${s.unmatched}  — read these; they are not automatically wrong`);
