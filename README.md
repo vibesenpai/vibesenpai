@@ -124,16 +124,20 @@ agentsensei now
 ```
 
 ```
-  session 46b591a1 · 3728 events · 2072 edits · 2d1h
+  no findings across 2260 edits
 
-  no findings across 2072 edits
+  session 46b591a1 · 4617 events · 2260 edits · 2d5h
 
   SESSION COST
-    1.1M out · 4.1M re-ingested · ratio 3.7 (corpus median 17.9)
-    heaviest at turns 1617, 2800, 2775 — 41% of it
+    1.3M out · 4.9M re-ingested · ratio 3.7 (corpus median 17.9)
+    heaviest at turns 1617, 2800, 2775 — 35% of it
 
   CONTEXT
-    compacted 4× — dropped 1.8M tokens of context
+    compacted 6× — dropped 2.7M tokens of context
+      turn    5   968k → 67k
+      turn 2042   967k → 63k
+      turn 3851   967k → 61k
+      3 without reported sizes
 ```
 
 `no findings` is a clean bill of health, not a broken tool. That distinction is

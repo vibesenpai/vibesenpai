@@ -281,6 +281,58 @@ describe('documented output samples match the shape the code produces', () => {
   const shape = (line: string): string =>
     line.replace(/\d[\d,.]*/g, 'N').replace(/[ \t]+/g, ' ').trim();
 
+  it('`now` still prints the lines the docs show', () => {
+    // The lead moved — the finding count now comes *before* the session line —
+    // and both the README and the site carried the old order until this was
+    // extended to cover `now`. Shape only: the counts in the sample belong to
+    // one machine and drift harmlessly.
+    const archive = mkdtempSync(join(tmpdir(), 'as-nowshape-'));
+    let real: string;
+    try {
+      real = execFileSync(
+        process.execPath,
+        ['--experimental-strip-types', 'src/cli.ts', 'now'],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, AGENTSENSEI_ARCHIVE: archive, NO_COLOR: '1' },
+        },
+      );
+    } catch {
+      // No transcripts on this machine — nothing to compare against, and a
+      // contributor without sessions must not see a red test for it.
+      return;
+    }
+    const produced = new Set(real.split('\n').map(shape).filter((l) => l !== ''));
+
+    for (const file of ['README.md', 'site/src/content/docs/start/first-finding.md']) {
+      const doc = readFileSync(file, 'utf8');
+      // Fenced blocks only. Anchoring on the text instead ran past the fence
+      // and compared the surrounding prose, which is not output and never
+      // matches.
+      const fences = [...doc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+      const block = fences.find((f) => f.includes('SESSION COST'));
+      if (block === undefined) continue;
+      const docLines = block.split('\n').map(shape).filter((l) => l !== '');
+      const drifted = docLines.filter((l) => !produced.has(l));
+      expect(
+        drifted,
+        `${file} shows \`now\` lines it no longer prints:\n  ${drifted.join('\n  ')}`,
+      ).toEqual([]);
+
+      // Order too, not just membership. Comparing sets alone let the sample
+      // keep the *old* lead order — session line above the finding count —
+      // while every individual line still existed, which is precisely the
+      // drift this change introduced.
+      const realLines = real.split('\n').map(shape).filter((l) => l !== '');
+      const positions = docLines.map((l) => realLines.indexOf(l));
+      const ordered = positions.every((p, i) => i === 0 || p >= (positions[i - 1] as number));
+      expect(
+        ordered,
+        `${file} shows \`now\` output in an order it no longer prints`,
+      ).toBe(true);
+    }
+  });
+
   it('`judge --status` still prints the lines the docs show', () => {
     const archive = mkdtempSync(join(tmpdir(), 'as-docshape-'));
     const env = { ...process.env, AGENTSENSEI_ARCHIVE: archive, NO_COLOR: '1' };
