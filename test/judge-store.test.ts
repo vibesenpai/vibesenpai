@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -35,8 +35,74 @@ describe('settings', () => {
   it('falls back to a fresh state rather than throwing on a bad file', () => {
     // A corrupt store must not stop a session starting — Principle Zero.
     const dir = archive();
-    writeJudgeState(dir, { ...emptyState(), v: 99 } as never);
-    expect(readJudgeState(dir).settings.enabled).toBe(false);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'judge.json'), '{ this is not json');
+    const back = readJudgeState(dir);
+    expect(back.settings.enabled).toBe(false);
+    expect(back.findings).toEqual([]);
+  });
+
+  // ── A version bump must not cost the user anything ─────────────────────
+  //
+  // The previous code returned `emptyState()` on any version mismatch, which
+  // would have turned the judge OFF for a user who had explicitly enabled it,
+  // and wiped the ledger so every session was re-judged and re-billed from
+  // byte 0. Both are things this project would refuse to do on purpose, so it
+  // must not do them by accident either.
+
+  it('keeps consent and the ledger across a version bump', () => {
+    const dir = archive();
+    const old = {
+      v: 1,
+      settings: { enabled: true, model: 'haiku', cadence: 50, maxBatchTokens: 60_000 },
+      ledger: { 'session-a': 412_000, 'session-b': 9_100 },
+      findings: [],
+      usage: { calls: 7, inputTokens: 900_000, outputTokens: 40_000 },
+    };
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'judge.json'), JSON.stringify(old));
+
+    const back = readJudgeState(dir);
+    expect(back.settings.enabled).toBe(true);
+    expect(back.ledger).toEqual({ 'session-a': 412_000, 'session-b': 9_100 });
+    expect(back.usage.inputTokens).toBe(900_000);
+    expect(back.v).toBe(2);
+  });
+
+  it('keeps a v1 finding that is still anchorable, and drops one that is not', () => {
+    const dir = archive();
+    const old = {
+      v: 1,
+      settings: { enabled: true },
+      ledger: {},
+      // The first has no `name`/`description` — v1 never had them — but it can
+      // still be rendered and pointed at, so discarding it would be a loss for
+      // a cosmetic reason.
+      findings: [
+        { sessionId: 's1', dimension: 'constraint_violation', turns: [42], quote: 'no new deps', why: 'added one', at: 'x' },
+        { sessionId: 's2', dimension: 'misread_intent', why: 'no anchor at all' },
+      ],
+      usage: { calls: 1, inputTokens: 10, outputTokens: 2 },
+    };
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'judge.json'), JSON.stringify(old));
+
+    const back = readJudgeState(dir);
+    expect(back.findings).toHaveLength(1);
+    expect(back.findings[0]?.sessionId).toBe('s1');
+    expect(back.settings.enabled).toBe(true);
+  });
+
+  it('does not overwrite the state of a NEWER version of the tool', () => {
+    const dir = archive();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'judge.json'), JSON.stringify({
+      v: 99, settings: { enabled: true }, ledger: { s: 5 }, findings: [],
+      usage: { calls: 0, inputTokens: 0, outputTokens: 0 },
+    }));
+    const back = readJudgeState(dir);
+    expect(back.settings.enabled).toBe(true);
+    expect(back.ledger).toEqual({ s: 5 });
   });
 });
 

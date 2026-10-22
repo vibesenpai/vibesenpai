@@ -20,7 +20,13 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JudgeDimension } from './judge.ts';
 
-const VERSION = 1;
+/**
+ * v2 added the extraction record fields (`name`, `description`, `alignmentGoal`,
+ * `otherDescriptor`, per-quote `context`).
+ *
+ * **A bump must never discard the file.** See `readJudgeState`.
+ */
+const VERSION = 2;
 
 export type JudgeSettings = {
   enabled: boolean;
@@ -92,19 +98,66 @@ function pathFor(archive: string): string {
   return join(archive, 'judge.json');
 }
 
-/** Read it, or a fresh one. A corrupt file must not stop a session starting. */
+/**
+ * Read it, or a fresh one. A corrupt file must not stop a session starting.
+ *
+ * ── Why a version bump migrates instead of resetting ───────────────────────
+ *
+ * This used to be `if (raw.v !== VERSION) return emptyState()`, which on any
+ * schema change would have done two things nobody would have chosen:
+ *
+ * 1. **Silently revoked consent.** `enabled` defaults to false, so a user who
+ *    had explicitly run `judge --enable --apply` would find the judge off, with
+ *    nothing said. The whole point of the flag at the top of this file is that
+ *    turning it on is a deliberate act; turning it off must be one too.
+ * 2. **Spent their money again.** Wiping `ledger` re-judges every session from
+ *    byte 0. On this machine that is a few hundred thousand tokens for findings
+ *    already paid for once.
+ *
+ * So the two fields a user cannot recreate — their consent and what they have
+ * already paid for — are carried across unconditionally, and only `findings`
+ * are dropped when their shape is no longer readable. A finding is cheap to
+ * re-derive; a ledger entry is not, and consent is not ours to reset.
+ *
+ * A file from the future (`v` greater than ours) is left alone the same way: we
+ * keep its settings and ledger and drop findings we cannot parse, rather than
+ * overwriting a newer tool's state.
+ */
 export function readJudgeState(archive: string): JudgeState {
   try {
     const raw = JSON.parse(readFileSync(pathFor(archive), 'utf8')) as Partial<JudgeState>;
-    if (raw.v !== VERSION) return emptyState();
-    return {
+    const state = {
       ...emptyState(),
       ...raw,
+      v: VERSION,
       settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
+      ledger: { ...(raw.ledger ?? {}) },
+      usage: { ...emptyState().usage, ...(raw.usage ?? {}) },
+      findings: Array.isArray(raw.findings) ? raw.findings.filter(isReadableFinding) : [],
     } as JudgeState;
+    return state;
   } catch {
     return emptyState();
   }
+}
+
+/**
+ * The fields every version has had, and which `renderJudged` needs.
+ *
+ * Deliberately minimal: a v1 finding has no `name` or `description`, and
+ * dropping it for that would discard sound findings over a cosmetic absence.
+ * What cannot be rendered is what cannot be *anchored* — no session, no turns,
+ * no quote.
+ */
+function isReadableFinding(f: unknown): boolean {
+  if (typeof f !== 'object' || f === null) return false;
+  const r = f as Record<string, unknown>;
+  return (
+    typeof r['sessionId'] === 'string' &&
+    typeof r['dimension'] === 'string' &&
+    Array.isArray(r['turns']) &&
+    typeof r['quote'] === 'string'
+  );
 }
 
 /** Temp-then-rename, so a crash cannot leave half a ledger. */
