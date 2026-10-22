@@ -10,6 +10,7 @@
 
 import { homedir } from 'node:os';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dim } from './style.ts';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { resolveConfig, type Layer } from './config.ts';
@@ -23,7 +24,7 @@ import { gatherReport, type ReportData } from './gather.ts';
 import {
   BYTES_PER_TURN, findingsFor, readJudgeState, writeJudgeState,
 } from './judge-store.ts';
-import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
+import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, JUDGE_SECONDS_PER_CALL, renderExtract } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
 import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
@@ -120,7 +121,8 @@ Usage
   agentsensei report             retrospective over a date range
   agentsensei standing          what your history says (the baseline)
   agentsensei fix               one evidence-backed change to try
-  agentsensei install           add the hooks + statusline (prints first)
+  agentsensei judge             the opt-in model pass — OFF by default
+  agentsensei install           add the hooks (prints the change first)
   agentsensei uninstall         take them back out
 
 Options
@@ -725,11 +727,14 @@ function cmdInstall(a: Argv): number {
     { detached: true, stdio: 'ignore' },
   );
   child.unref();
+  // This promised a statusline that was deleted (DECISIONS D58), and said
+  // "sit tight" for something that finishes in under a second — measured at
+  // 0.64s across 231 sessions. Say what actually happens instead.
   console.log(
-    '\nagentsensei has started reading your existing transcripts and will report\n' +
-      'back shortly — sit tight. Nothing is copied; they are read in place.\n' +
-      '  `agentsensei standing` shows the result, and the statusline will pick it\n' +
-      '  up on its own at the next response boundary.',
+    '\nagentsensei is reading your existing transcripts now. Nothing is copied;\n' +
+      'they are read in place, and it takes about a second.\n' +
+      '  `agentsensei standing` shows what it found, and a short summary appears\n' +
+      '  at the start of your next session.',
   );
   return 0;
 }
@@ -903,10 +908,80 @@ function cmdUninstall(a: Argv): number {
  * The shape is `install`'s, because the risk is the same shape: a background
  * process acting on someone's behalf while they are not looking.
  */
+/**
+ * Seconds as something a person can plan around.
+ *
+ * Deliberately coarse. "about 4 minutes" is honest about an estimate built from
+ * a per-call average; "4m 12s" would imply a precision the number does not
+ * have.
+ */
+function humanDuration(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)} seconds`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'}`;
+  const hours = seconds / 3600;
+  return `${hours.toFixed(hours < 10 ? 1 : 0)} hours`;
+}
+
 function cmdJudge(a: Argv): number {
   const { config } = configFromFlags(a);
   const state = readJudgeState(config.archive);
   const f = a.flags;
+
+  // ── `--status`: the judge is the only slow thing, so it is the only thing
+  //    that needs a progress surface ──────────────────────────────────────
+  //
+  // Measured before building this: `scan` is 0.22s on 231 sessions and
+  // `standing --refresh` is 0.64s. The local pipeline does not need a spinner
+  // and this project holds a rule against surfaces that cost attention without
+  // carrying information.
+  //
+  // The judge is different — model calls, minutes, and it runs detached, so
+  // until now there was no way to tell "still working" from "finished and found
+  // nothing". No new state was needed: the ledger already records how far each
+  // session has been judged, so pending work is a subtraction.
+  if (f['status'] === true) {
+    const judged: string[] = [];
+    const pending: string[] = [];
+    for (const source of discoverTranscripts(config.sources)) {
+      const id = basename(source, '.jsonl');
+      let size: number;
+      try {
+        size = statSync(source).size;
+      } catch {
+        continue;
+      }
+      ((state.ledger[id] ?? 0) >= size ? judged : pending).push(id);
+    }
+    // Two calls per batch, and a batch holds however many sessions fit the
+    // ceiling — so this is a ceiling on the estimate, not a point prediction.
+    const seconds = pending.length * 2 * JUDGE_SECONDS_PER_CALL;
+
+    console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
+    console.log('');
+    console.log(`  judged     ${judged.length} session(s) · ${state.findings.length} finding(s)`);
+    if (pending.length === 0) {
+      console.log('  pending    nothing — every session is up to date');
+      console.log('');
+      console.log(`  ${dim('`no findings` from `now` or `report` means a clean bill of health,')}`);
+      console.log(`  ${dim('not an unfinished pass.')}`);
+    } else {
+      console.log(
+        `  pending    ${pending.length} session(s) · about ${humanDuration(seconds)} at ~${JUDGE_SECONDS_PER_CALL}s per call`,
+      );
+      console.log('');
+      console.log(`  ${dim(state.settings.enabled ? 'runs detached after your next turn ends.' : 'nothing will run until you enable it.')}`);
+    }
+    if (state.usage.calls > 0) {
+      console.log('');
+      console.log(
+        `  spent      ${state.usage.calls} call(s) · ${state.usage.inputTokens.toLocaleString()} in · ` +
+          `${state.usage.outputTokens.toLocaleString()} out`,
+      );
+      console.log(`  ${dim('tokens, not dollars — a price depends on your plan and tier.')}`);
+    }
+    return 0;
+  }
 
   if (f['disable'] === true) {
     if (f['apply'] !== true) {

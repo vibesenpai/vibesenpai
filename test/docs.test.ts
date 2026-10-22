@@ -143,3 +143,21 @@ describe('no session residue in published prose', () => {
     }
   });
 });
+
+describe('the one command that sends data off the machine is discoverable', () => {
+  it('names `judge` in --help', () => {
+    // `judge` was dispatched but absent from USAGE. The only command that sends
+    // session content to a model was invisible to `--help`, which is the
+    // opposite of how an opt-in should work.
+    const usage = readFileSync('src/cli.ts', 'utf8');
+    const block = /^Usage$([\s\S]*?)^$/m.exec(usage)?.[1] ?? usage;
+    expect(block).toMatch(/agentsensei judge/);
+  });
+
+  it('does not advertise the statusline, which was removed', () => {
+    // USAGE said `install  add the hooks + statusline`. The statusline was
+    // built, worked, and was deliberately deleted (DECISIONS D58). Advertising
+    // it invites someone to look for a feature that is gone.
+    expect(readFileSync('src/cli.ts', 'utf8')).not.toMatch(/hooks \+ statusline/);
+  });
+});

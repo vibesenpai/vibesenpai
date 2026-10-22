@@ -1,0 +1,9 @@
+{
+  "name": "agentsensei",
+  "version": "0.1.0",
+  "description": "Find the turns where you and your coding agent wasted effort — with the evidence, from your own sessions, on your own machine.",
+  "author": "agentsensei contributors",
+  "homepage": "https://github.com/crozzfire/agentsensei#readme",
+  "license": "MIT",
+  "keywords": ["observability", "local-first", "developer-tools", "agent-evaluation"]
+}
