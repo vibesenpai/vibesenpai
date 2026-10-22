@@ -11,6 +11,8 @@ import {
   buildSession, parseExtract, parseLabels, renderExtract, renderLabel,
   type JudgeEpisode, type JudgePacketSession,
 } from '../src/judge.ts';
+import { wouldLeak } from '../src/model.ts';
+import { redact } from '../src/redact.ts';
 import type { Event } from '../src/types.ts';
 
 let seq = 0;
@@ -295,5 +297,29 @@ describe('stage B — labelling a record', () => {
       [episode()],
     );
     expect(r.dropped.map((d) => d.reason)).toContain('dimension not in the rubric');
+  });
+});
+
+describe('wouldLeak — the gate that stops a send', () => {
+  it('refuses a packet redaction would still change', () => {
+    // 50% of corpus sessions carry secret-class content at packet fidelity,
+    // and tool output is where they concentrate. This is asserted rather than
+    // warned because the packet leaves the machine, and a warning in a
+    // detached process is a thing nobody reads.
+    expect(wouldLeak('export TOKEN=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789')).toBe(true);
+  });
+
+  it('passes a packet the builder produced, which is already clean', () => {
+    const text = renderExtract([session()]);
+    expect(wouldLeak(text)).toBe(false);
+  });
+
+  it('is not satisfied by idempotence, which is weaker', () => {
+    // `isIdempotent` returns true for text redaction would still change — the
+    // distinction this project got wrong once. The gate asks whether redaction
+    // changes the text AT ALL, not whether redacting twice differs from once.
+    const dirty = 'ssh user:hunter2@example.com and /Users/someone/x';
+    expect(wouldLeak(dirty)).toBe(true);
+    expect(wouldLeak(redact(dirty).text)).toBe(false);
   });
 });

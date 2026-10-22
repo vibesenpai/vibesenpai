@@ -23,48 +23,32 @@
  * `scripts/judge.ts`, and the reason this is affordable at all.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
 import { buildSession, estimateTokens, parseExtract, parseLabels, renderExtract, renderLabel, type JudgePacketSession } from '../src/judge.ts';
-import { JUDGE_CWD_MARKER } from '../src/read.ts';
+import { callModel, wouldLeak } from '../src/model.ts';
 import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from '../src/gold.ts';
-import { redact } from '../src/redact.ts';
 import type { Event } from '../src/types.ts';
 
 const GOLD_JSON = process.env['AGENTSENSEI_GOLD'] ?? '/tmp/cam-check/misalignments.json';
 const SESSION_DIRS = (process.env['AGENTSENSEI_GOLD_SESSIONS'] ?? '').split(',').filter(Boolean);
 const BATCH_TOKENS = 55_000;
 
-function callModel(packet: string, model: string): string | undefined {
-  const cwd = join(tmpdir(), JUDGE_CWD_MARKER);
-  mkdirSync(cwd, { recursive: true, mode: 0o700 });
-  try {
-    const out = execFileSync(
-      'claude',
-      ['-p', packet, '--output-format', 'json', '--allowed-tools', '', '--model', model],
-      {
-        cwd,
-        encoding: 'utf8',
-        timeout: 300_000,
-        maxBuffer: 64 * 1024 * 1024,
-        stdio: ['ignore', 'pipe', 'ignore'],
-        env: { ...process.env, AGENTSENSEI_DISABLE: '1' },
-      },
-    );
-    const r = JSON.parse(out) as { is_error?: boolean; result?: string; usage?: Record<string, number> };
-    if (r.is_error === true || typeof r.result !== 'string') return undefined;
-    const u = r.usage ?? {};
-    spent.input += (u['cache_creation_input_tokens'] ?? 0) + (u['cache_read_input_tokens'] ?? 0) + (u['input_tokens'] ?? 0);
-    spent.output += u['output_tokens'] ?? 0;
-    spent.usd += (r as { total_cost_usd?: number }).total_cost_usd ?? 0;
-    spent.calls++;
-    return r.result;
-  } catch {
-    return undefined;
-  }
+/**
+ * One call, through the shared caller, accumulating what the run spent.
+ *
+ * `total_cost_usd` is the harness's own figure and is reported **here only** —
+ * a measurement script may state what an experiment consumed; the product
+ * reports tokens, because on a subscription a dollar figure is notional.
+ */
+function call(packet: string, model: string): string | undefined {
+  const r = callModel(packet, model);
+  if (r === undefined) return undefined;
+  spent.input += r.inputTokens;
+  spent.output += r.outputTokens;
+  spent.usd += r.usd;
+  spent.calls++;
+  return r.reply;
 }
 
 // `total_cost_usd` comes back from the harness itself, so it is measured
@@ -157,11 +141,11 @@ async function main(): Promise<void> {
     const text = renderExtract(batch);
     // The same gate the runner enforces. A scoring harness that sent what the
     // product refuses to send would be measuring a different system.
-    if (redact(text).text !== text) {
+    if (wouldLeak(text)) {
       console.log('REFUSED by the redaction gate');
       continue;
     }
-    const reply = callModel(text, model);
+    const reply = call(text, model);
     if (reply === undefined) {
       console.log('call failed');
       continue;
@@ -189,7 +173,7 @@ async function main(): Promise<void> {
         console.log(`${ex.episodes.length} episode(s), unlabelled`);
         continue;
       }
-      const labelReply = callModel(renderLabel(ex.episodes), model);
+      const labelReply = call(renderLabel(ex.episodes), model);
       if (labelReply === undefined) {
         console.log(`${ex.episodes.length} episode(s), LABEL CALL FAILED`);
         continue;

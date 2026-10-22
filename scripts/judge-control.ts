@@ -32,13 +32,9 @@
  *   node --experimental-strip-types scripts/judge-control.ts [model]
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 
 import { buildSession, parseExtract, parseLabels, renderExtract, renderLabel, type JudgeDimension } from '../src/judge.ts';
-import { JUDGE_CWD_MARKER } from '../src/read.ts';
+import { callModel } from '../src/model.ts';
 import type { Event } from '../src/types.ts';
 
 type Control = { sessionId: string; expect: JudgeDimension | null; turns: Partial<Event>[] };
@@ -173,21 +169,14 @@ export function controlSessions(): ReturnType<typeof buildSession>[] {
   });
 }
 
-/** One model call. The control exercises the same path the product does. */
+/** One call, through the same caller the product uses. */
 function call(packet: string, model: string): string {
-  const cwd = join(tmpdir(), JUDGE_CWD_MARKER);
-  mkdirSync(cwd, { recursive: true, mode: 0o700 });
-  const out = execFileSync(
-    'claude',
-    ['-p', packet, '--output-format', 'json', '--allowed-tools', '', '--model', model],
-    { cwd, encoding: 'utf8', timeout: 180_000, maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, AGENTSENSEI_DISABLE: '1' } },
-  );
-  const reply = JSON.parse(out) as { is_error?: boolean; result?: string };
-  if (reply.is_error === true || typeof reply.result !== 'string') {
+  const r = callModel(packet, model, { timeoutMs: 180_000, maxBufferBytes: 32 * 1024 * 1024 });
+  if (r === undefined) {
     console.error('the model call failed');
     process.exit(1);
   }
-  return reply.result;
+  return r.reply;
 }
 
 async function main(): Promise<void> {

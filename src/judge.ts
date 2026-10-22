@@ -54,7 +54,7 @@
  * function is load-bearing; see `test/judge.test.ts`.
  */
 
-import { buildPacket, renderSession, turnsForQuote, type SessionPacket } from './packet.ts';
+import { type SessionPacket, buildPacket, isHarnessNoise, renderSession, turnsForQuote } from './packet.ts';
 import type { Event } from './types.ts';
 
 /** What a judged finding may claim. Deliberately narrow. */
@@ -247,18 +247,6 @@ export const JUDGE_OVERHEAD_TOKENS = 26_384;
  */
 export function estimateTokens(packet: string): number {
   return Math.round((packet.length / 4) * 1.9);
-}
-
-/**
- * A `user` record the harness wrote, not something the developer said.
- *
- * Task notifications arrive as user turns and are long — one filled 600
- * characters of preamble with a tool-use id. Asking a judge what the developer
- * wanted, and then quoting the harness at it, wastes the budget and invites a
- * finding about a constraint nobody set.
- */
-function isHarnessNoise(text: string): boolean {
-  return /^<(?:task-notification|command-message|command-name|local-command)/.test(text);
 }
 
 export function buildSession(

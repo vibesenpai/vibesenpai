@@ -161,3 +161,33 @@ describe('the redaction gate refuses rather than redacts', () => {
     expect(redact(text).text).toBe(text);
   });
 });
+
+describe('the preamble and the turns agree on what the developer said', () => {
+  it('keeps a slash command in the preamble, not just in the turns', () => {
+    // There were two `isHarnessNoise` functions with one name and different
+    // behaviour: `packet.ts` deliberately kept `<command-name>` while
+    // `judge.ts` still filtered it. So a slash command survived into the turn
+    // body and was stripped from the preamble that claims to list "what the
+    // developer asked for, in order" — the one place it most needed to be. One
+    // gold episode's entire evidence is a `<command-name>` record.
+    const events = [
+      { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt' },
+      { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'assistant_msg' },
+    ];
+    const full = new Map<number, string>([
+      [1, '<command-name>/gsd:discuss-phase</command-name> <command-args>23</command-args>'],
+      [2, 'Let me look at the API client extraction.'],
+    ]);
+    const s = buildSession('s1', events as never, full);
+
+    expect(s.prompts.map((p) => p.text).join('\n')).toContain('/gsd:discuss-phase');
+    expect(renderExtract([s])).toContain('/gsd:discuss-phase');
+  });
+
+  it('still keeps a harness task notification out of both', () => {
+    const events = [{ uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt' }];
+    const full = new Map<number, string>([[1, '<task-notification>done</task-notification>']]);
+    const s = buildSession('s1', events as never, full);
+    expect(s.prompts).toEqual([]);
+  });
+});

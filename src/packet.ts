@@ -152,8 +152,16 @@ export type PacketTurn = {
  *
  * `command-message` stays filtered — it is the harness echoing the command back
  * — as do `task-notification` and `local-command`, which no developer typed.
+ * Task notifications also arrive as user turns and are long: one filled 600
+ * characters of preamble with a tool-use id.
+ *
+ * **Exported because `judge.ts` had its own copy that disagreed**, still
+ * filtering `command-name`. So a slash command survived into the turn body and
+ * was stripped from the preamble that claims to list "what the developer asked
+ * for, in order" — the one place it most needed to appear. Two functions with
+ * one name and different behaviour is how that goes unnoticed.
  */
-function isHarnessNoise(text: string): boolean {
+export function isHarnessNoise(text: string): boolean {
   return /^<(?:task-notification|command-message|local-command)/.test(text);
 }
 

@@ -36,15 +36,13 @@
  * discovered sessions to 12.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readFileSync, statSync } from 'node:fs';
+import { basename } from 'node:path';
 import { recordFailure, recordSuccess, isTripped, readBreaker } from '../src/breaker.ts';
-import { redact } from '../src/redact.ts';
+import { callModel, wouldLeak } from '../src/model.ts';
 import { resolveConfig } from '../src/config.ts';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
-import { discoverTranscripts, JUDGE_CWD_MARKER } from '../src/read.ts';
+import { discoverTranscripts } from '../src/read.ts';
 
 import {
   buildSession, estimateTokens, openFailuresBefore, parseExtract, parseLabels, renderExtract, renderLabel,
@@ -72,58 +70,12 @@ const TIMEOUT_MS = 180_000;
  * The offending text is never logged, only the fact and the sessions.
  */
 function refuseIfUnredacted(packet: string, sessionIds: string[]): boolean {
-  if (redact(packet).text === packet) return false;
+  if (!wouldLeak(packet)) return false;
   recordFailure(
     resolveConfig().config.archive,
     `judge packet failed the redaction gate (${sessionIds.length} session(s)); nothing sent`,
   );
   return true;
-}
-
-/** Where the child runs. The marker is what keeps its transcript out of ours. */
-function judgeCwd(): string {
-  const dir = join(tmpdir(), JUDGE_CWD_MARKER);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return dir;
-}
-
-/** One model call. Returns the raw reply and what it cost, or undefined. */
-function callModel(
-  packet: string,
-  model: string,
-): { reply: string; inputTokens: number; outputTokens: number } | undefined {
-  try {
-    const out = execFileSync(
-      'claude',
-      ['-p', packet, '--output-format', 'json', '--allowed-tools', '', '--model', model],
-      {
-        cwd: judgeCwd(),
-        encoding: 'utf8',
-        timeout: TIMEOUT_MS,
-        maxBuffer: 32 * 1024 * 1024,
-        env: { ...process.env, AGENTSENSEI_DISABLE: '1' },
-      },
-    );
-    const parsed = JSON.parse(out) as {
-      is_error?: boolean;
-      result?: string;
-      usage?: Record<string, number>;
-    };
-    // `is_error`, never `subtype`: a not-logged-in reply sets `is_error: true`
-    // while `subtype` still reads "success".
-    if (parsed.is_error === true || typeof parsed.result !== 'string') return undefined;
-    const u = parsed.usage ?? {};
-    return {
-      reply: parsed.result,
-      inputTokens:
-        (u['cache_creation_input_tokens'] ?? 0) +
-        (u['cache_read_input_tokens'] ?? 0) +
-        (u['input_tokens'] ?? 0),
-      outputTokens: u['output_tokens'] ?? 0,
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 /** The carry for a session already judged up to `offset` bytes. */
@@ -266,7 +218,7 @@ async function main(): Promise<void> {
   const extractPacket = renderExtract(batch);
   if (refuseIfUnredacted(extractPacket, batch.map((b) => b.sessionId))) return;
 
-  const extracted = callModel(extractPacket, state.settings.model);
+  const extracted = callModel(extractPacket, state.settings.model, { timeoutMs: TIMEOUT_MS, maxBufferBytes: 32 * 1024 * 1024 });
   if (extracted === undefined) {
     recordFailure(config.archive, 'judge extract call failed');
     return;
@@ -304,7 +256,7 @@ async function main(): Promise<void> {
   const labelPacket = renderLabel(episodes);
   if (refuseIfUnredacted(labelPacket, batch.map((b) => b.sessionId))) return;
 
-  const labelled = callModel(labelPacket, state.settings.model);
+  const labelled = callModel(labelPacket, state.settings.model, { timeoutMs: TIMEOUT_MS, maxBufferBytes: 32 * 1024 * 1024 });
   if (labelled === undefined) {
     // Stage A is already paid for and its episodes are real. Losing them to a
     // stage-B failure would mean paying twice for the same reading.
