@@ -1,0 +1,60 @@
+---
+title: agentsensei
+description: Find the turns where you and your coding agent wasted effort — with the evidence, from your own sessions, on your own machine.
+template: splash
+hero:
+  tagline: Find the turns where you and your coding agent wasted effort — with the evidence, from your own sessions, on your own machine.
+  actions:
+    - text: Start here
+      link: /agentsensei/start/what-it-is/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/crozzfire/agentsensei
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+You have hundreds of hours of agent transcripts sitting on your disk. Somewhere
+in them, your agent edited a file it had not read, said tests passed when they
+had not, or did the thing you told it not to do twenty turns earlier.
+
+`agentsensei` reads those transcripts, finds those moments, quotes them back to
+you, and tells you what — if anything — actually fixes them.
+
+```
+  one thing to try  inaccurate_self_report  [VERIFY]
+  ────────────────────────────────────────────────────────────────────
+
+  measured   5 times across your sessions, at turns 1050–3493
+             "Did you check the corpus?"
+  because    Whether the tests pass is not a matter of opinion, so
+             it is worth checking rather than trusting. Running the
+             command settles it; reading the summary does not.
+
+  ▸ a Stop hook that runs the check instead of trusting the claim
+      { "hooks": { "Stop": [{ "hooks": [{ "type": "command",
+          "command": "<your test command> || { echo 'not passing' >&2; exit 2; }" }] }] } }
+
+      nothing is written — this is yours to apply.
+```
+
+<CardGrid>
+  <Card title="It finds real things" icon="approve-check">
+    The one fully-measured detector fires on **380 of 1,139 real sessions**,
+    927 instances, **0 false positives** hand-verified.
+  </Card>
+  <Card title="Nothing leaves your machine" icon="seti:lock">
+    Until you opt in. `scan` prints `copied nothing` and means it.
+    [What leaves →](/agentsensei/trust/egress/)
+  </Card>
+  <Card title="One thing at a time" icon="list-format">
+    Not a dashboard. One change worth making, or a plain statement that no fix
+    exists. [Why →](/agentsensei/fixes/kinds/)
+  </Card>
+  <Card title="We publish our misses" icon="error">
+    Ten detectors built, measured, deleted — with the numbers.
+    [The graveyard →](/agentsensei/work/graveyard/)
+  </Card>
+</CardGrid>

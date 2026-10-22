@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  corpus:
+    # The gate that catches real regressions: it re-runs the parser and
+    # detectors over pinned public transcripts and fails if any published count
+    # drifts. It fetches two small MIT-licensed corpora itself, so it needs
+    # network but no credentials.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:corpus
+
+  package:
+    # `npm pack` shipped a manifest referencing a LICENSE that did not exist,
+    # and omitted the scripts/ that `agentsensei install` wires hooks to. This
+    # asserts the tarball is whole.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: the tarball contains what the manifest promises
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const files = require("/tmp/pack.json")[0].files.map(f => f.path);
+            const need = ["LICENSE", "NOTICE", "dist/cli.js", ".claude-plugin/plugin.json"];
+            const missing = need.filter(n => !files.includes(n));
+            if (!files.some(f => f.startsWith("scripts/"))) missing.push("scripts/");
+            if (!files.some(f => f.startsWith("commands/"))) missing.push("commands/");
+            if (missing.length) { console.error("missing from tarball: " + missing.join(", ")); process.exit(1); }
+            console.log("tarball is whole: " + files.length + " files");
+          '
+      - name: the built CLI runs
+        run: node dist/cli.js help > /dev/null

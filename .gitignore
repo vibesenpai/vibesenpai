@@ -6,3 +6,9 @@ coverage/
 .env
 .env.*
 /tmp/
+
+# Docs site build artifacts — the site is a dev-only workspace and is never
+# shipped in the npm package.
+site/node_modules/
+site/dist/
+site/.astro/
