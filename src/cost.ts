@@ -211,9 +211,23 @@ export function costFor(
       // every finding would print the session-wide total — and the subject is
       // built the same way the detector builds it.
       if (q.subject !== undefined && subjectOf(first) !== q.subject) continue;
-      // All but the first: the first call did the work.
+      // ── Honour the reason too, which this branch did not ─────────────────
+      //
+      // The `edit_retry` branch above filters on `q.reason`; this one ignored
+      // it, and `standing.ts` prices once per **(dimension, reason)** pair. So
+      // any `redundant_call` finding that carried a reason was priced at the
+      // whole-dimension total and the user saw a figure several times larger
+      // than the finding printed beside it.
+      //
+      // `label()` attaches a reason to any finding whose anchors carry a
+      // harness message, so this is not reserved to `edit_retry` by
+      // construction — it only looked that way because `reasonOf`'s vocabulary
+      // comes from edit refusals. A cost module whose whole justification is
+      // "report the measured unit" must not silently report a different one.
       for (const call of g.calls.slice(1)) {
-        total = add(total, costOfCall(call as Event, resultFor(sorted, call as Event), sorted));
+        const result = resultFor(sorted, call as Event);
+        if (q.reason !== undefined && reasonOf?.(result as Event) !== q.reason) continue;
+        total = add(total, costOfCall(call as Event, result, sorted));
       }
     }
     return total;

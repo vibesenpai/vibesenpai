@@ -217,3 +217,25 @@ describe('approx', () => {
     expect(approx(0)).toBe('0');
   });
 });
+
+describe('costFor honours `reason` on EVERY dimension, not just edit_retry', () => {
+  it('prices only the repeats whose result carries the asked-for reason', () => {
+    // `standing.ts` prices once per (dimension, reason) pair. The `edit_retry`
+    // branch filtered on reason; the `redundant_call` branch ignored it, so a
+    // redundant_call finding carrying a reason was priced at the whole
+    // dimension — several times larger than the finding printed beside it.
+    //
+    // `label()` attaches a reason to any finding whose anchors carry a harness
+    // message, so this was never reserved to edit_retry by construction.
+    const events = repeatedCalls();
+    expect(costFor(events, { dimension: 'redundant_call' }).received).toBe(2000);
+    // A reason nothing carries must price at zero, not at the total.
+    expect(
+      costFor(events, { dimension: 'redundant_call', reason: 'string-not-found' }, () => undefined).received,
+    ).toBe(0);
+    // And a reason everything carries must price the same as no filter at all.
+    expect(
+      costFor(events, { dimension: 'redundant_call', reason: 'stale-read' }, () => 'stale-read' as never).received,
+    ).toBe(2000);
+  });
+});
