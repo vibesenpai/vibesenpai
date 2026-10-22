@@ -146,7 +146,7 @@ describe('fix — a judge finding outranks a rule finding when it has a mechanis
     expect(r?.dimension).toBe('constraint_violation');
     expect(r?.kind).toBe('VERIFY');
     expect(r?.config?.snippet).toMatch(/"Stop"/);
-    expect(r?.config?.costs).toMatch(/refuse to end a turn/);
+    expect(r?.config?.costs).toMatch(/stop a turn from finishing/);
     // The weaker option is still offered, underneath.
     expect(r?.prompt).toBeDefined();
   });
@@ -161,8 +161,9 @@ describe('fix — a judge finding outranks a rule finding when it has a mechanis
     const r = recommend(base(), judged('misread_intent'));
     expect(r?.kind).toBe('CONFIG');
     expect(r?.config?.what).toMatch(/plan mode/);
-    // Honest about the cost of asking more, which the research measures.
-    expect(r?.config?.costs).toMatch(/over-asking/);
+    // Honest about the cost, in words a user can act on rather than a citation.
+    expect(r?.config?.costs).toMatch(/slower/i);
+    expect(r?.config?.costs).toMatch(/in the way for anything obvious/);
   });
 
   it('reports `other` and surfaces the descriptors, which is what it is for', () => {
@@ -277,5 +278,35 @@ describe('fix — two non-actions, and which one is worth printing', () => {
       { sessionId: 's3', dimension: 'constraint_violation', turns: [99], why: 'x', at: 'now' },
     ] as never;
     expect(recommend(base(), mixed)?.kind).toBe('VERIFY');
+  });
+});
+
+describe('fix — the output explains itself without citing papers at the user', () => {
+  it('keeps research figures out of every user-facing string', () => {
+    // The evidence belongs in `docs/artifacts.md` and in the code comments,
+    // where it justifies the design to whoever maintains it. A user reading a
+    // finding about their own session does not need a literature review, and
+    // "+0.066 pts across 753 rules" is a sentence that informs nobody who did
+    // not already know what it meant.
+    const judged = [{ sessionId: 's1', dimension: 'constraint_violation', turns: [9], why: 'x', at: 'now' }] as never;
+    const everything = [
+      renderFix(recommend(base(), judged), 'core'),
+      renderFix(recommend(base(), [{ sessionId: 's1', dimension: 'misread_intent', turns: [9], why: 'x', at: 'now' }] as never), 'core'),
+      renderFix(recommend(base(), [{ sessionId: 's1', dimension: 'inaccurate_self_report', turns: [9], why: 'x', at: 'now' }] as never), 'core'),
+      renderFix(recommend(base({ reasons: { 'not-read-first': 9 } })), 'core'),
+      renderFix(recommend(base({ reasons: { 'string-not-found': 9 } })), 'core'),
+    ].join('\n');
+
+    for (const jargon of ['+0.066', '88.3%', '67.0%', '69.4%', '70.8%', '31.8%', '10.5%', '753 rules', '66.7%']) {
+      expect(everything).not.toContain(jargon);
+    }
+    // And no bare percentage anywhere, which is the general form of the problem.
+    expect(everything).not.toMatch(/\d+\.\d+%/);
+  });
+
+  it('still says WHY, in terms of what it means for the user', () => {
+    const r = recommend(base(), [{ sessionId: 's1', dimension: 'constraint_violation', turns: [9], why: 'x', at: 'now' }] as never);
+    expect(r?.because).toMatch(/checked by Claude Code itself/);
+    expect(r?.because).not.toMatch(/\d+%/);
   });
 });

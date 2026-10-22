@@ -206,8 +206,8 @@ const REPORT_ONLY = new Set(['redundant_call', 'other']);
 
 /** A `Stop` hook is the one mechanism that sees every write surface. */
 const STOP_HOOK_COSTS =
-  'A Stop hook can refuse to end a turn. Claude Code caps consecutive ' +
-  'continuations at 8, and `stop_hook_active` is how a script avoids looping.';
+  'This can stop a turn from finishing and send the agent back to work. ' +
+  'Claude Code will not let that repeat more than 8 times in a row.';
 
 type DimensionFix = {
   kind: ArtifactKind;
@@ -230,10 +230,15 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
       'For the rest of this session, before any edit or command: check it ' +
       'against every constraint stated earlier in this conversation, and say ' +
       'which one you checked against.',
+    // The evidence for this wording lives in `docs/artifacts.md` and the
+    // header above. It is deliberately NOT in the output: a user reading a
+    // finding about their own session does not need a literature review, and
+    // "+0.066 pts across 753 rules" is a sentence that informs nobody who did
+    // not already know what it meant.
     because:
-      'Enforced by Claude Code rather than by the model. A prose rule moves ' +
-      'compliance +0.066 pts across 753 rules; executable checks measure 88.3% ' +
-      'against 67.0% for prompting alone.',
+      'A hook is checked by Claude Code itself, so it holds whether or not the ' +
+      'model remembers. Asking in a prompt only works while it is paying ' +
+      'attention.',
   },
   overreach: {
     kind: 'GUARD',
@@ -247,9 +252,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
       'For the rest of this session: do only what was asked. If you think ' +
       'something adjacent needs doing, say so and wait rather than doing it.',
     because:
-      'Scope cannot be checked semantically, only against the diff — and ' +
-      '`Edit`/`Write` deny rules miss writes made from Bash, which a Stop hook ' +
-      'catches. Plan mode is the one first-party approval gate.',
+      'Nothing can tell "too much" from "just enough" by reading the request — ' +
+      'but the list of changed files is checkable. Blocking the tools is not ' +
+      'enough on its own, because a shell command can write files too.',
   },
   inaccurate_self_report: {
     kind: 'VERIFY',
@@ -267,9 +272,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
       'For the rest of this session: do not report work as done or passing ' +
       'unless a command in this session shows it. Quote the output.',
     because:
-      'A claim about its own work is the one thing a transcript cannot settle ' +
-      'and a command can. The Stop hook input carries both the last message ' +
-      'and the transcript path, so the claim is checkable.',
+      'Whether the tests pass is not a matter of opinion, so it is worth ' +
+      'checking rather than trusting. Running the command settles it; reading ' +
+      'the summary does not.',
   },
   misread_intent: {
     kind: 'CONFIG',
@@ -277,17 +282,16 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
       what: 'plan mode, so the reading gets agreed before the work starts',
       snippet: 'shift+tab to cycle into plan mode, or `claude --permission-mode plan`',
       costs:
-        'An approval step on every task is slower, and the research measures a ' +
-        'real cost to over-asking as well as to under-asking.',
+        'Slower, because you approve a plan before work starts. Worth it for ' +
+        'anything ambiguous, and in the way for anything obvious.',
     },
     prompt:
       'For the rest of this session: before acting on anything ambiguous, ' +
       'state the reading you are acting on in one line and wait.',
     because:
-      'There is no gate for "did you understand me". Clarification recovers ' +
-      'nearly all the ground lost to an underspecified request (69.4% against ' +
-      '70.8% with the full issue), and the harness itself moves how often an ' +
-      'agent asks — 31.8% against 10.5% across scaffolds.',
+      'Nothing can check whether it understood you — that is the one thing ' +
+      'only you can confirm. Agreeing the plan first recovers almost ' +
+      'everything a vague request costs.',
   },
 };
 
@@ -579,8 +583,10 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
   } else if (r.prompt !== undefined && !memoryAllowed()) {
     // Say why there is no rule, rather than silently omitting it.
     for (const l of wrap(
-      `No CLAUDE.md line: yours is already past ${MEMORY_WORD_BUDGET} words, and past that point ` +
-        'a prose rule measures at +0.066 pts while the file itself starts costing more than it returns.',
+      `Not suggesting a CLAUDE.md line — yours is already over ${MEMORY_WORD_BUDGET} words. ` +
+        'Past that, extra rules tend to get skipped, and the file itself takes up room ' +
+        'the agent could use for your actual work. Removing a stale rule helps more than ' +
+        'adding another.',
       60,
     )) {
       lines.push(`      ${dim(l)}`);
