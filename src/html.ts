@@ -303,7 +303,14 @@ function sessionBlock(s: SessionView): string {
 }
 
 export function renderHtml(d: ReportData): string {
-  const total = d.sessions.reduce((a, s) => a + s.findings.length + s.judged.length, 0);
+  // Occurrences, not grouped findings. `standing` counts the same way, and
+  // these two numbers disagreeing by exactly the grouping factor is the kind
+  // of discrepancy a reader notices and cannot explain. A user asking "how
+  // many things did it find" means times-it-happened.
+  const total = d.sessions.reduce(
+    (a, s) => a + s.findings.reduce((n, f) => n + f.occurrences, 0) + s.judged.length,
+    0,
+  );
   const span = (() => {
     const first = d.sessions.map((s) => s.firstTs).filter((t): t is string => t !== undefined);
     if (first.length === 0) return `${iso(d.range.from)} → ${iso(d.range.to)}`;
@@ -412,16 +419,31 @@ ${r.prompt === undefined ? '' : `<p class="note">adopting this changes the sessi
       ? `<p class="note">${esc(String(d.unreadable))} discovered session(s) could not be read</p>`
       : '';
 
+  // The headline, by the same ladder the terminal uses: priced waste if there
+  // is any, a finding count if not, and a plain statement when there is
+  // nothing. The product name was the <h1> and the news was a muted subtitle
+  // underneath it; a reader does not need to be told which tool made the page
+  // they opened.
+  const wastedTotal = d.sessions.reduce((n, s) => n + s.cost.written, 0);
+  const lead =
+    total === 0
+      ? `no findings across ${esc(String(d.standing.edits))} edits`
+      : wastedTotal > 0
+      ? `${esc(approx(wastedTotal))} tokens written and discarded <span class="mute">· ${esc(
+          String(total),
+        )} finding${total === 1 ? '' : 's'}</span>`
+      : `${esc(String(total))} finding${total === 1 ? '' : 's'}`;
+
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>agentsensei report</title>
 <style>${STYLE}</style></head>
 <body><main>
-<h1>agentsensei</h1>
+<h1>${raw(lead)}</h1>
 <p class="sub">${esc(String(d.sessions.length))} session${d.sessions.length === 1 ? '' : 's'} · ${esc(
     span,
-  )} · ${esc(String(total))} finding${total === 1 ? '' : 's'}</p>
+  )}</p>
 
 <h2>what was found</h2>
 ${rollup}${judgedTable}
@@ -435,6 +457,7 @@ ${oneThing}
 ${d.sessions.map(sessionBlock).join('')}
 
 <footer>
+<strong>agentsensei</strong> ·
 generated ${esc(localStamp(d.generatedAt))} ·
 preset ${esc(d.preset)}${d.muted.length > 0 ? ` · muted ${esc(d.muted.join(', '))}` : ''} ·
 figures are lower bounds; see <code>src/cost.ts</code>

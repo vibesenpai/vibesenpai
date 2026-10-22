@@ -10,7 +10,13 @@
 
 import { homedir } from 'node:os';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { dim } from './style.ts';
+import { bold, dim } from './style.ts';
+import { approx } from './cost.ts';
+
+/** `1 finding` / `4 findings`. The `(s)` form reads as an unfinished sentence. */
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { resolveConfig, type Layer } from './config.ts';
@@ -473,12 +479,6 @@ async function cmdNow(a: Argv): Promise<number> {
     console.error(`no transcript found under: ${config.sources.join(', ')}`);
     return 1;
   }
-  if (current.via === 'latest') {
-    // Named, not assumed. A wrong guess must be visible rather than producing
-    // authoritative-looking output about somebody else's session.
-    console.log(`(guessed the most recently written transcript — override with --session)`);
-  }
-
   a.flags['live'] = true;
 
   // Live by definition: the interesting turns are the ones since the last scan,
@@ -518,6 +518,15 @@ async function cmdNow(a: Argv): Promise<number> {
     // Unreadable size is not worth failing over; the lag line is simply absent.
   }
 
+  // Named, not assumed: a wrong guess must be visible rather than producing
+  // authoritative-looking output about somebody else's session. Printed *after*
+  // the findings, though — it qualifies which session this was, and as the
+  // first line it pushed the actual news down the screen.
+  const guessNote =
+    current.via === 'latest'
+      ? `  ${dim('(guessed the most recently written transcript — override with --session)')}`
+      : '';
+
   process.stdout.write(
     renderFindings({
       findings: res.findings,
@@ -541,6 +550,7 @@ async function cmdNow(a: Argv): Promise<number> {
       ...(config.mute.length > 0 ? { muted: config.mute } : {}),
     }),
   );
+  if (guessNote !== '') console.log(guessNote);
 
   for (const [dim, n] of Object.entries(res.failures)) {
     // Never swallowed: a silent zero would read as "nothing found".
@@ -840,8 +850,23 @@ async function cmdStanding(a: Argv): Promise<number> {
     return 0;
   }
 
-  console.log(`standing · computed ${computedAtLocal(s)}`);
-  console.log(`  ${s.sessions} session(s) · ${s.edits} edits`);
+  // Same ladder as `now` and the report: what it cost, then a count, then a
+  // plain statement. `standing · computed <timestamp>` as the first line told
+  // a reader when we last ran, which is the least interesting fact available.
+  const wasted = Object.values(s.wastedTokens).reduce((n, w) => n + w.written, 0);
+  const judgedTotal = tallyByDimension(readJudgeState(config.archive)).reduce(
+    (n, j) => n + j.count,
+    0,
+  );
+  const found = s.dimensions.reduce((n, d) => n + d.occurrences, 0) + judgedTotal;
+  console.log(
+    found === 0
+      ? `no findings across ${s.edits} edits in ${plural(s.sessions, 'session')}`
+      : wasted > 0
+        ? `${bold(`${approx(wasted)} tokens`)} written and discarded ${dim('·')} ${plural(found, 'finding')}`
+        : `${bold(plural(found, 'finding'))} across ${s.edits} edits`,
+  );
+  console.log(dim(`  ${s.sessions} session(s) · ${s.edits} edits · computed ${computedAtLocal(s)}`));
   if (s.unreadable > 0) {
     // Stated, never dropped: a standing that quietly covered fewer sessions
     // than it claims is the implied-coverage problem depth labelling prevents.

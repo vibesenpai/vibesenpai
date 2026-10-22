@@ -338,3 +338,60 @@ describe('render — model findings are kept visibly apart', () => {
     expect(renderJudged([], 5).join('\n')).toContain('nothing so far');
   });
 });
+
+describe('the lead line', () => {
+  // The first line is the whole pitch, so it has rules.
+  const d = (over = {}) => ({
+    turnCount: 10, editCount: 2260, toolCallCount: 50, failedCallCount: 0,
+    unclassifiedTouchCount: 0,
+    tokens: { input: 0, output: 1000, cacheRead: 0, cacheCreation: 5000 },
+    ...over,
+  });
+
+  it('states what was found before naming the session', () => {
+    // It used to open with `session 46b591a1 · 4362 events · 2259 edits` — an
+    // identifier and two counts, with the news several lines below.
+    const out = render({
+      findings: [], denominators: d(), sessionId: 'abcdef1234', events: [],
+      judged: { findings: [{ dimension: 'misread_intent', turns: [12], why: 'x' }], unjudgedTurns: 0 },
+    });
+    const body = out.split('\n').filter((l) => l.trim() !== '');
+    expect(body[0]).toContain('1 finding');
+    expect(body[0]).not.toContain('abcdef12');
+    expect(body.findIndex((l) => l.includes('abcdef12'))).toBeGreaterThan(0);
+  });
+
+  it('counts both tiers in the lead', () => {
+    const out = render({
+      findings: [], denominators: d(), sessionId: 'abcdef1234', events: [],
+      judged: {
+        findings: [
+          { dimension: 'misread_intent', turns: [12], why: 'x' },
+          { dimension: 'overreach', turns: [14], why: 'y' },
+        ],
+        unjudgedTurns: 0,
+      },
+    });
+    expect(out).toContain('2 findings');
+    expect(out).not.toMatch(/no findings across/);
+  });
+
+  it('still says nothing was found when neither tier fired', () => {
+    // Rung 3 of the ladder. A clean bill of health must stay legible as one —
+    // `PLAN.md:21` — and the denominator is what makes it a real statement.
+    const out = render({
+      findings: [], denominators: d(), sessionId: 'abcdef1234', events: [],
+    });
+    expect(out).toContain('no findings across 2260 edits');
+  });
+
+  it('uses real plurals, never the "(s)" form', () => {
+    // A headline reading `1 finding(s)` looks like an unfinished sentence.
+    const out = render({
+      findings: [], denominators: d(), sessionId: 'abcdef1234', events: [],
+      judged: { findings: [{ dimension: 'overreach', turns: [1], why: 'y' }], unjudgedTurns: 0 },
+    });
+    expect(out.split('\n')[1]).toContain('1 finding');
+    expect(out.split('\n')[1]).not.toContain('finding(s)');
+  });
+});

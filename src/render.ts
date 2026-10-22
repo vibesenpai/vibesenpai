@@ -607,16 +607,67 @@ function wrapText(text: string, width: number): string[] {
   return out;
 }
 
+/**
+ * The first line, which is the whole pitch in one sentence.
+ *
+ * A ladder, not a formula, because `costFor` prices only `edit_retry` and
+ * `redundant_call` — and `edit_retry` fires on 33.4% of sessions, so roughly
+ * two sessions in three have no priced waste to lead with. Pricing the judge
+ * dimensions would mean charging every downstream token to one finding, which
+ * overstates badly, so the ladder degrades instead of inventing a number:
+ *
+ *   1. priced waste    "11,000 tokens written and discarded · 4 findings"
+ *   2. findings only   "4 findings across 2,260 edits"
+ *   3. nothing         "no findings across 2,260 edits"
+ *
+ * Rungs 2 and 3 must not read as failures of rung 1.
+ */
+function leadLine(
+  findings: Finding[],
+  judgedCount: number,
+  d: Denominators,
+  events: Event[],
+): string {
+  // Occurrences, matching `standing` and the HTML report. Counting grouped
+  // findings here made the same session report a different number depending on
+  // which surface you read it from.
+  const total = findings.reduce((n, f) => n + f.occurrences, 0) + judgedCount;
+  if (total === 0) {
+    // A blank result must not read as "we did not look", and the denominator is
+    // what makes the difference legible: nothing found across 155 edits is a
+    // real statement; nothing found across 0 is not.
+    return d.editCount === 0
+      ? 'nothing to analyse — this session made no edits'
+      : `no findings across ${d.editCount} edits`;
+  }
+
+  const wasted = findings.reduce(
+    (n, f) => n + costFor(events, { dimension: f.dimension, subject: f.subject }).written,
+    0,
+  );
+  const count = `${total} finding${total === 1 ? '' : 's'}`;
+  return wasted > 0
+    ? `${bold(`${approx(wasted)} tokens`)} written and discarded ${dim('·')} ${count}`
+    : `${bold(count)} across ${d.editCount} edits`;
+}
+
 export function render(input: RenderInput): string {
   const { findings, denominators: d } = input;
   const lines: string[] = [];
   const byUuid = new Map(input.events.map((e) => [e.uuid, e]));
 
+  const judgedCount = input.judged?.findings.length ?? 0;
+
+  // The lead first, then who we are talking about. This was the other way
+  // round: a reader's first line was `session 46b591a1 · 4362 events`, an
+  // identifier and two counts, with the actual news several lines below.
+  lines.push('', `${INDENT}${leadLine(findings, judgedCount, d, input.events)}`, '');
+
   const facts = [`${input.events.length} events`, `${d.editCount} edits`];
   const span = spanOf(input.events);
   const dur = durationOf(span.first, span.last);
   if (dur !== undefined) facts.push(dur);
-  lines.push('', `${INDENT}session ${input.sessionId.slice(0, 8)} · ${facts.join(' · ')}`, '');
+  lines.push(`${INDENT}${dim(`session ${input.sessionId.slice(0, 8)} · ${facts.join(' · ')}`)}`, '');
 
   // ── Both tiers, or the "nothing found" line is a lie ────────────────────
   //
@@ -631,20 +682,9 @@ export function render(input: RenderInput): string {
   //
   // A reader sees that and concludes the tool is broken, which is worse than
   // either tier being wrong.
-  const judgedCount = input.judged?.findings.length ?? 0;
-  if (findings.length === 0 && judgedCount === 0) {
-    // Said plainly. A blank result must not read as "we did not look", and the
-    // denominator is what makes the difference legible: nothing found across
-    // 155 edits is a real statement; nothing found across 0 is not.
-    lines.push(
-      d.editCount === 0
-        ? `${INDENT}nothing to analyse — this session made no edits`
-        : `${INDENT}no findings across ${d.editCount} edits`,
-      '',
-    );
-  } else {
-    for (const f of findings) lines.push(...renderFinding(f, byUuid, input.events));
-  }
+  // The nothing-found case is already stated by the lead; this only renders
+  // the findings themselves when there are any.
+  for (const f of findings) lines.push(...renderFinding(f, byUuid, input.events));
 
   const stats = sessionStats(input.events);
   const cost = renderCost(d, stats);
