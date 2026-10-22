@@ -6,7 +6,7 @@ description: How to set up, what the rules are, and what is reproducible without
 ```bash
 git clone https://github.com/crozzfire/agentsensei && cd agentsensei
 npm install
-npm test                 # 525 tests, no network
+npm test                 # the whole suite, no network
 npm run cli -- now       # against your own sessions
 ```
 

@@ -74,8 +74,15 @@ thing you never notice in the moment and that costs real tokens.
 
 ## Quickstart
 
+**Not published yet.** Clone is the only install that works today — `npm
+install -g agentsensei` and `/plugin install agentsensei` are both built and
+tested, and both start working the day this is published. Saying so is cheaper
+than an `E404` on your first command.
+
 ```bash
-npm install -g agentsensei      # or: git clone && npm install
+git clone https://github.com/crozzfire/agentsensei && cd agentsensei
+npm install && npm run build
+npm link                        # puts `agentsensei` on your PATH
 
 agentsensei scan                # index your transcripts — copies nothing
 agentsensei standing --refresh  # compute findings across your history
@@ -249,7 +256,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Briefly:
 ```bash
 git clone https://github.com/crozzfire/agentsensei && cd agentsensei
 npm install
-npm test                  # 519 tests, no network
+npm test                  # the whole suite, no network
 npm run cli -- now        # run against your own sessions
 ```
 

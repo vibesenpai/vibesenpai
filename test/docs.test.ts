@@ -161,3 +161,32 @@ describe('the one command that sends data off the machine is discoverable', () =
     expect(readFileSync('src/cli.ts', 'utf8')).not.toMatch(/hooks \+ statusline/);
   });
 });
+
+describe('the docs do not promise an install that does not exist', () => {
+  // The README's first quickstart line was `npm install -g agentsensei`, which
+  // fails with E404 — the package is not published. That is the same class of
+  // error as the fictional dimensions this file was written to catch: the
+  // difference between "we built this" and "you can run this".
+  //
+  // This guard does not forbid documenting the published install. It requires
+  // that wherever a doc shows one, the page also says it is not available yet.
+  const UNPUBLISHED = [/npm i(?:nstall)? -g agentsensei/, /\/plugin install agentsensei/];
+
+  for (const file of ['README.md', 'site/src/content/docs/start/install.md']) {
+    it(`${file} marks the unpublished installs as unavailable`, () => {
+      const text = readFileSync(file, 'utf8');
+      const shown = UNPUBLISHED.filter((re) => re.test(text));
+      if (shown.length === 0) return;
+      // Any wording will do; what matters is that the page says so somewhere.
+      expect(text).toMatch(/not published yet|not on npm|not yet reachable|once published/i);
+    });
+  }
+
+  it('no doc states a test count, which rots on every commit', () => {
+    // `README:252` said "519 tests" while the suite had 525. The count is not
+    // the useful part of that line — "no network" is.
+    for (const file of ['README.md', 'CONTRIBUTING.md']) {
+      expect(readFileSync(file, 'utf8')).not.toMatch(/\b\d{3,} tests\b/);
+    }
+  });
+});

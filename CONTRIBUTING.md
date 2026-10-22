@@ -3,7 +3,7 @@
 ```bash
 git clone https://github.com/crozzfire/agentsensei && cd agentsensei
 npm install
-npm test                 # 525 tests, no network
+npm test                 # the whole suite, no network
 npm run cli -- now       # run it against your own sessions
 ```
 

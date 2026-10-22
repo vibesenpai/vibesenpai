@@ -90,6 +90,6 @@ particular number is not reproducible by a casual reader, and saying "every
 number here is reproducible" would be false.
 
 What *is* reproducible without any download:
-`npm test` (525 tests, no network) and `npm run verify:corpus`, which fetches
+`npm test` (the whole suite, no network) and `npm run verify:corpus`, which fetches
 two small MIT-licensed transcript corpora and fails if any published count
 drifts.

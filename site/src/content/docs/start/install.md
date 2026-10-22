@@ -3,6 +3,13 @@ title: Install
 description: Two ways in — as a Claude Code plugin, or as a CLI.
 ---
 
+:::caution[Not published yet]
+`agentsensei` is not on npm or the plugin marketplace yet, so the first two
+sections below describe installs that are **built and tested but not yet
+reachable** — they start working the day this is published. Until then,
+[from source](#from-source) is the one that works.
+:::
+
 ## As a Claude Code plugin
 
 ```
@@ -45,7 +52,7 @@ there is no long indexing phase to wait through.
 ```bash
 git clone https://github.com/crozzfire/agentsensei && cd agentsensei
 npm install
-npm run cli -- now
+npm run cli -- now       # or: npm run build && npm link, for `agentsensei` on PATH
 ```
 
 Node 22.13 or later. Zero runtime dependencies — `npm install` is pulling test
