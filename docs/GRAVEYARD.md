@@ -77,3 +77,59 @@ baseline is therefore partly an artifact of suppression dosage rather than a
 stable property of the judge, and every conclusion drawn from a single run at a
 single dosage inherits that instability. Any future rubric work needs a variance
 estimate across runs before a 9-episode difference is called a result.
+
+---
+
+## The measurement itself, measured (2026-10-21)
+
+Not a buried detector — a buried **method**. Every single-run comparison in this
+project before this date is unreliable, and this entry exists so nobody repeats
+the mistake by trusting a number in an older commit message.
+
+### Three runs of identical code
+
+Same 60 gold sessions, same Haiku model, same prompt, no code change between
+them. 35 calls each, zero failures, zero gate refusals:
+
+```
+           run1  run2  run3    spread    mean
+  session    52%   66%   67%     16 pts     61%
+  episode    36%   47%   50%     13 pts     44%
+  claim      15%   19%   21%      6 pts     18%
+```
+
+**16 points of spread on the headline metric, from sampling alone.**
+
+### What it invalidates
+
+Four conclusions drawn earlier the same day, each from a single run:
+
+| conclusion | measured as | with the band known |
+|---|---|---|
+| widening the rubric is neutral | 60% -> 60% | unknown; both inside 52-67% |
+| the per-session verdict costs 17 points | 60% -> 43% | 43% is below the band, so probably real, but not 17 |
+| lighter suppression wording did not help | 43% -> 41% | indistinguishable |
+| Sonnet is worse than Haiku | 27 vs 18 claims | **holds** — claim-level spread is only 6 points |
+
+The anchor fix survives untouched because it was re-scored **from cache**: same
+findings, no model call, so 16% -> 20% claim-level is arithmetic rather than
+sampling.
+
+### The awkward part
+
+**Claim-level is the most stable metric (6 points) and the least
+product-relevant. Session-level is the right unit for a tool that surfaces one
+thing to try, and the least stable (16 points).** There is no version of this
+where the number we care about is the number we can measure cheaply.
+
+### The rule this leaves behind
+
+- **No conclusion from a single run.** Three runs minimum per arm, and a change
+  must move the *mean* by more than ~8 points at session level to be a result.
+- At ~$0.60 a run that is ~$1.80 per arm, so a two-arm hypothesis costs ~$3.60.
+  Budget it before designing the experiment, not after.
+- Prefer claim-level during development (2.5x more stable, 2.5x sharper per
+  dollar) and confirm at session level before shipping.
+- A deterministic re-score from a cached run costs nothing and has no variance.
+  Prefer it wherever the change is to scoring or derivation rather than to the
+  prompt.
