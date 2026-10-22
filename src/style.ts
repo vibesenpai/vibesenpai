@@ -34,10 +34,6 @@ const ON = ((): boolean => {
   return process.stdout.isTTY === true;
 })();
 
-export function colorEnabled(): boolean {
-  return ON;
-}
-
 const wrap = (open: string) => (s: string): string => (ON ? `\u001b[${open}m${s}\u001b[0m` : s);
 
 /** The figure itself — the thing a reader should see first. */

@@ -38,7 +38,6 @@
 import { createHash } from 'node:crypto';
 import { stamp } from './schema.ts';
 import type {
-  ArtifactKind,
   Confidence,
   Finding,
   Method,
@@ -66,7 +65,6 @@ export type Candidate = {
   method: Method;
   polarity: Polarity;
   requiresOutcome: boolean;
-  artifacts?: ArtifactKind[];
   outcome?: Outcome;
 };
 
@@ -144,7 +142,6 @@ export function materialise(input: MaterialiseInput): Finding {
     requiresOutcome: c.requiresOutcome,
     ...(c.outcome !== undefined ? { outcome: c.outcome } : {}),
     polarity: c.polarity,
-    artifacts: c.artifacts ?? [],
     firstSeen: now,
     lastSeen: now,
     surfaced: false,

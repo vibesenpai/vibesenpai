@@ -9,7 +9,7 @@
  */
 
 import { homedir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import type { Preset } from './types.ts';
 
@@ -82,29 +82,6 @@ function asPreset(v: unknown): Preset | undefined {
     : undefined;
 }
 
-/**
- * Directories we would rather not put our store inside.
- *
- * This used to be load-bearing, when the archive held raw transcripts. It no
- * longer does — we copy nothing — so this is ordinary hygiene: the catalog still
- * records absolute paths, and findings still hold redacted excerpts, neither of
- * which belongs in someone's cloud drive by accident.
- */
-const SYNC_ROOT_MARKERS = [
-  join('Library', 'Mobile Documents'), // iCloud Drive
-  'Dropbox',
-  'Google Drive',
-  'OneDrive',
-  join('Library', 'CloudStorage'),
-];
-
-export function isInsideSyncRoot(path: string, home = homedir()): boolean {
-  const abs = resolve(path);
-  return SYNC_ROOT_MARKERS.some((m) => {
-    const marker = join(home, m);
-    return abs === marker || abs.startsWith(marker + sep);
-  });
-}
 
 function xdg(env: NodeJS.ProcessEnv, key: string, fallback: string, home: string): string {
   const v = env[key];

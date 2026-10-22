@@ -314,8 +314,6 @@ export type Outcome = 'converged' | 'reverted' | 'abandoned' | 'unknown';
  *  more `user_correction` is not a failure; correcting the agent is healthy. */
 export type Polarity = 'lower-is-better' | 'higher-is-better' | 'neutral';
 
-export type ArtifactKind = 'prompt' | 'guard' | 'rule';
-
 /**
  * What a rate divides by. Deltas are computed on rates, never raw counts: ten
  * sessions this period against ten last period are not comparable if the
@@ -376,7 +374,6 @@ export type Finding = Versioned<'finding'> & {
   polarity: Polarity;
 
   /** May be empty — report-only findings are a first-class answer. */
-  artifacts: ArtifactKind[];
 
   /**
    * What the harness said went wrong, by reason, with a count each.
@@ -474,26 +471,3 @@ export type Skeleton = Versioned<'skeleton'> & {
 // Backends — defined now with exactly one null implementation, so the semantic
 // tier plugs in later without touching detectors.
 // ─────────────────────────────────────────────────────────────────────────────
-
-export type BackendVerdict = {
-  label: string;
-  confidence: number;
-  evidence: string;
-};
-
-export interface Backend {
-  readonly name: string;
-  readonly version: string;
-  available(): Promise<boolean>;
-  classify(window: Skeleton, labels: string[]): Promise<BackendVerdict>;
-}
-
-/** The only backend that exists until M5. Everything degrades to rules. */
-export const nullBackend: Backend = {
-  name: 'null',
-  version: '0',
-  available: async () => false,
-  classify: async () => {
-    throw new Error('no backend available');
-  },
-};

@@ -10,16 +10,11 @@ import {
   type TranscriptParser,
 } from './registry.ts';
 
-export {
-  ParserRegistry,
-  detectHarness,
-  detectVersion,
-  type Harness,
-  type MatchLevel,
-  type ParseResult,
-  type Provenance,
-  type TranscriptParser,
-} from './registry.ts';
+// The re-export block that was here listed eight names so callers would have
+// "one import site". Nothing ever used it: every consumer imports `parse`,
+// `registry` or `claudeCode2_1` from here, and the two that want registry
+// internals (`test/registry.test.ts`, `src/catalog.ts`) reach into
+// `./registry.ts` directly. A convenience nobody took is just surface.
 
 /**
  * Claude Code 2.1.x.

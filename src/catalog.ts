@@ -36,8 +36,8 @@ import {
   writeFileSync,
   chmodSync,
 } from 'node:fs';
-import { basename, join, relative } from 'node:path';
-import { SCHEMA, checkVersion, stamp, type Versioned } from './schema.ts';
+import { basename, join } from 'node:path';
+import { checkVersion, stamp, type Versioned } from './schema.ts';
 // The byte reader lives in read.ts, which owns reading and imports nothing from
 // here — one implementation, and no cycle.
 import { readRange } from './read.ts';
@@ -352,8 +352,6 @@ export function readCatalog(dir: string): Catalog | undefined {
   }
 }
 
-export const CATALOG_SCHEMA_VERSION = SCHEMA.catalog;
-
 export function describeCatalog(dir: string): {
   sessions: number;
   gone: number;
@@ -392,10 +390,4 @@ export function describeCatalog(dir: string): {
     ...(dataTo !== undefined ? { dataTo } : {}),
     spans,
   };
-}
-
-/** For diagnostics: a source path relative to home, when it is under it. */
-export function relativeSource(entry: CatalogEntry, home: string): string {
-  const rel = relative(home, entry.source);
-  return rel.startsWith('..') ? entry.source : `~/${rel}`;
 }

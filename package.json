@@ -10,9 +10,6 @@
   "bin": {
     "agentsensei": "./dist/cli.js"
   },
-  "exports": {
-    ".": "./dist/index.js"
-  },
   "files": [
     "dist",
     "README.md",

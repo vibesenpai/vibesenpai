@@ -306,14 +306,3 @@ export function turnsForQuote(p: SessionPacket, quote: string): number[] {
   }
   return hits.sort((a, b) => a - b);
 }
-
-/**
- * The first turn a quote came from, or `undefined`.
- *
- * Kept for callers that want a single anchor. **The quote must still be present
- * in the rendered packet** — that check belongs to the caller and is what stops
- * a quote matching text truncation removed from view.
- */
-export function turnForQuote(p: SessionPacket, quote: string): number | undefined {
-  return turnsForQuote(p, quote)[0];
-}

@@ -226,14 +226,6 @@ export function redact(text: string, opts: RedactOptions = {}): RedactResult {
 }
 
 /**
- * Convenience for the common case. Named so that a caller storing text cannot
- * plausibly claim they did not know redaction was required.
- */
-export function redactForStorage(text: string, opts?: RedactOptions): string {
-  return redact(text, opts).text;
-}
-
-/**
  * Idempotence check, used in tests and assertable in CI.
  *
  * Redacting twice must equal redacting once. If it does not, a replacement

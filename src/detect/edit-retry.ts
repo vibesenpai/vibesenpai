@@ -190,7 +190,6 @@ export function editRetry(): Detector {
         method: 'RULE' as const,
         polarity: 'lower-is-better' as const,
         requiresOutcome: false,
-        artifacts: [],
       }));
     },
   };

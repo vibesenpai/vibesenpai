@@ -330,7 +330,6 @@ export function redundantCall(opts: RedundantCallOptions = {}): Detector {
           method: 'RULE+T',
           polarity: 'lower-is-better',
           requiresOutcome: false,
-          artifacts: [],
         });
       }
 

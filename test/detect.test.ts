@@ -273,7 +273,6 @@ const perSpan = (over: Partial<Detector> = {}): Detector =>
           method: 'RULE' as const,
           polarity: 'neutral' as const,
           requiresOutcome: false,
-          artifacts: [],
         },
       ];
     },
@@ -390,7 +389,6 @@ describe('occurrences counts instances, not cited turns', () => {
           method: 'RULE' as const,
           polarity: 'neutral' as const,
           requiresOutcome: false,
-          artifacts: [],
         },
       ],
     });

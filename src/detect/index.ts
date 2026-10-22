@@ -33,7 +33,7 @@
  */
 
 import { collect, type Candidate } from '../finding.ts';
-import { buildWindows, threadsOf, type SkeletonOptions, type Window } from '../skeleton.ts';
+import { buildWindows, threadsOf, type SkeletonOptions } from '../skeleton.ts';
 import type { Event, Finding, Preset } from '../types.ts';
 import type { Detector, DetectorContext, SessionFacts } from './types.ts';
 import { editEvidenceOf } from '../edits.ts';
@@ -42,9 +42,12 @@ import { editRetry } from './edit-retry.ts';
 import { redundantCall } from './redundant-call.ts';
 import { reasonOf } from './labels.ts';
 
-export type { Detector, DetectorContext, SessionFacts } from './types.ts';
-// Re-exported so existing callers and tests keep one import site.
-export { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../edits.ts';
+export type { Detector } from './types.ts';
+// Only what callers actually take from here. `DetectorContext`, `SessionFacts`,
+// `READ_TOOLS` and `EditEvidence` were re-exported "so callers keep one import
+// site" and nothing ever used that site — the consumers import them from
+// `./types.ts` and `../edits.ts` directly.
+export { EDIT_TOOLS, editEvidenceOf } from '../edits.ts';
 
 /**
  * All detectors.
@@ -339,20 +342,4 @@ function label(f: Finding, events: Event[]): Finding {
     reasons[r] = (reasons[r] ?? 0) + 1;
   }
   return Object.keys(reasons).length === 0 ? f : { ...f, reasons };
-}
-
-/**
- * The window a finding's evidence lives in, for `explain`.
- *
- * A thread- or session-scoped finding has no window of its own, but the user
- * still needs to see the turns it is about. The rule: the window containing the
- * finding's **first anchor** — the turn the finding is actually about, rather
- * than wherever its supporting evidence happens to start.
- *
- * **Currently unused.** `explain` does not exist yet; this is the agreed answer
- * to "which skeleton does it show", written down now so the decision is not
- * re-made later. Nothing calls it, which is deliberate rather than an oversight.
- */
-export function windowForAnchor(windows: Window[], anchorUuid: string): Window | undefined {
-  return windows.find((w) => w.events.some((e) => e.uuid === anchorUuid));
 }
