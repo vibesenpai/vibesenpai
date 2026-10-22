@@ -23,6 +23,7 @@
  * `scripts/judge.ts`, and the reason this is affordable at all.
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
 import { buildSession, estimateTokens, parseExtract, parseLabels, renderExtract, renderLabel, type JudgePacketSession } from '../src/judge.ts';
@@ -31,6 +32,17 @@ import { loadGold, loadNegatives, locateSessions, locateTurns, score, type Judge
 import type { Event } from '../src/types.ts';
 
 const GOLD_JSON = process.env['AGENTSENSEI_GOLD'] ?? '/tmp/cam-check/misalignments.json';
+
+/** The commit this ran against, and whether the tree was dirty. */
+function provenance(): { commit: string; dirty: boolean } {
+  try {
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim() !== '';
+    return { commit, dirty };
+  } catch {
+    return { commit: 'unknown', dirty: false };
+  }
+}
 const SESSION_DIRS = (process.env['AGENTSENSEI_GOLD_SESSIONS'] ?? '').split(',').filter(Boolean);
 const BATCH_TOKENS = 55_000;
 
@@ -56,7 +68,16 @@ function call(packet: string, model: string): string | undefined {
 const spent = { calls: 0, input: 0, output: 0, usd: 0 };
 
 async function main(): Promise<void> {
-  const limit = Number(process.argv[2] ?? '30');
+  // ── Default to everything ────────────────────────────────────────────────
+  //
+  // This defaulted to 30 and was called with 60 for about a dozen runs, which
+  // was 24% of the 246 sessions sitting on disk. Nobody chose that: an early
+  // cost decision picked a number and every later run inherited it, so the
+  // whole campaign ran at roughly twice the error bar it needed to.
+  //
+  // Sampling is now explicit. A deliberate subset is fine; an accidental one
+  // is how a dozen comparisons get made against the wrong denominator.
+  const limit = process.argv[2] === undefined ? Number.MAX_SAFE_INTEGER : Number(process.argv[2]);
   const model = process.argv[3] ?? 'haiku';
 
   const episodes = loadGold(GOLD_JSON);
@@ -198,6 +219,19 @@ async function main(): Promise<void> {
   const cache = process.env['AGENTSENSEI_GOLD_CACHE'];
   if (cache !== undefined) {
     writeFileSync(cache, JSON.stringify({
+      // ── Which code produced this ────────────────────────────────────────
+      //
+      // A three-run "variance" experiment was reported as 16 points of spread
+      // on identical code. `src/judge.ts` had been rewritten at 19:49:16,
+      // mid-experiment: run 1 read the old rubric and runs 2-3 the new one,
+      // and the difference was attributed to sampling. True same-code variance
+      // is about one point.
+      //
+      // The comparison was wrong for a whole day, a graveyard entry was
+      // committed from it, and a buried result that actually worked stayed
+      // buried. One `git rev-parse` would have made it self-evident, so it is
+      // recorded rather than remembered.
+      code: provenance(),
       found,
       sessions: packets.map((p) => p.sessionId),
       located: [...located],

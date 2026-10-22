@@ -19,12 +19,19 @@
  *
  * `Finding` identity is subject-based (`hash(dimension + project + subject)`),
  * never evidence extent, so the same finding surfacing from two windows merges
- * rather than duplicating. Overlap is therefore *safe* — but `occurrences`
- * would still double-count a turn seen twice until M2a's evidence-set merge
- * exists. Non-overlapping is the honest default until then: it can only cause a
- * missed pattern that straddles a boundary, and CLAUDE.md is explicit that
- * thresholds are tuned to miss rather than over-fire. `stride` is a parameter,
- * so revisiting this is a one-line change rather than a redesign.
+ * rather than duplicating.
+ *
+ * **The double-counting objection is resolved.** This used to say `occurrences`
+ * would double-count a turn seen twice "until M2a's evidence-set merge exists".
+ * It exists — see `src/finding.ts`: `occurrences` is the number of **distinct
+ * anchors**, so merging two windows that share a turn counts it once and the
+ * number describes the session rather than the slicing.
+ *
+ * Non-overlapping therefore remains the default on its own merits rather than
+ * as a workaround: it can only cause a missed pattern that straddles a
+ * boundary, and CLAUDE.md is explicit that thresholds are tuned to miss rather
+ * than over-fire. `stride` is a parameter, so lowering it is now genuinely safe
+ * — a one-line change, not a redesign.
  */
 
 import { executablePart } from './command.ts';

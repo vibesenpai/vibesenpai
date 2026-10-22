@@ -24,7 +24,9 @@
     "cli": "node --experimental-strip-types src/cli.ts",
     "verify:corpus": "bash scripts/verify-corpus.sh",
     "measure": "node --experimental-strip-types scripts/measure-dimensions.ts",
-    "pull:swechat": "node --experimental-strip-types scripts/pull-swechat.ts"
+    "pull:swechat": "node --experimental-strip-types scripts/pull-swechat.ts",
+    "gold": "node --experimental-strip-types scripts/gold-score.ts",
+    "judge:control": "node --experimental-strip-types scripts/judge-control.ts"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
