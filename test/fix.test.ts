@@ -8,7 +8,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { recommend, renderFix } from '../src/fix.ts';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { recommend, renderFix, memoryAllowed, MEMORY_WORD_BUDGET } from '../src/fix.ts';
 import type { Standing } from '../src/standing.ts';
 
 const base = (over: Partial<Standing> = {}): Standing => ({
@@ -27,7 +30,10 @@ const base = (over: Partial<Standing> = {}): Standing => ({
     },
   ],
   wastedTokens: {},
-  reasons: { 'not-read-first': 2, 'string-not-found': 2 },
+  // `string-not-found` dominates on purpose: `not-read-first` now returns a
+  // REPORT, because the harness already refuses an unread edit and a rule
+  // asking for it is ceremonial. These cases test the PROMPT path.
+  reasons: { 'string-not-found': 3, 'not-read-first': 1 },
   unreadable: 0,
   ...over,
 });
@@ -101,13 +107,73 @@ describe('fix — choosing what to recommend', () => {
   });
 
   it('picks the artifact from the reason, not the dimension', () => {
-    // `not-read-first` and `string-not-found` are both edit_retry and need
-    // different changes.
-    const readFirst = recommend(base({ reasons: { 'not-read-first': 9 } }))?.prompt;
-    const notFound = recommend(base({ reasons: { 'string-not-found': 9 } }))?.prompt;
-    expect(readFirst).not.toBe(notFound);
-    expect(readFirst).toMatch(/read a file before editing/i);
-    expect(notFound).toMatch(/re-read/i);
+    // Two `edit_retry` reasons that need different answers — and one of them
+    // needs no answer at all.
+    const notFound = recommend(base({ reasons: { 'string-not-found': 9 } }));
+    const stale = recommend(base({ reasons: { 'stale-read': 9 } }));
+    expect(notFound?.prompt).not.toBe(stale?.prompt);
+    expect(notFound?.prompt).toMatch(/re-read|context/i);
+  });
+
+  it('reports `not-read-first` instead of advising it, because the harness enforces it', () => {
+    // This was the DEFAULT recommendation: "read a file before editing it".
+    // The harness already refuses an edit to a path it has not read — which is
+    // *why* these were refused — so the rule describes behaviour that already
+    // complied. `docs/artifacts.md` measures that category at 66.7% of all
+    // rules and calls it ceremonial. Telling the user the harness has it
+    // covered is the useful answer.
+    const r = recommend(base({ reasons: { 'not-read-first': 9 } }));
+    expect(r?.kind).toBe('REPORT');
+    expect(r?.prompt).toBeUndefined();
+    expect(r?.memory).toBeUndefined();
+    expect(r?.because).toMatch(/already refuses/i);
+  });
+});
+
+describe('fix — a judge finding outranks a rule finding when it has a mechanism', () => {
+  const judged = (dimension: string, over: Record<string, unknown> = {}) => [{
+    sessionId: 's1', dimension, turns: [403], why: 'x', at: 'now',
+    quote: 'make sure you delete that prod.env from your memory',
+    name: 'Credentials File Left In Memory After Removal Request',
+    ...over,
+  }] as never;
+
+  it('offers a deterministic mechanism for a constraint violation, not an edit_retry rule', () => {
+    // The failure this fixes: on a machine whose judge had found two
+    // constraint_violations, `fix` reached past them to offer an 11,000-token
+    // edit_retry prose rule for something the harness already enforces.
+    const r = recommend(base(), judged('constraint_violation'));
+    expect(r?.dimension).toBe('constraint_violation');
+    expect(r?.kind).toBe('VERIFY');
+    expect(r?.config?.snippet).toMatch(/"Stop"/);
+    expect(r?.config?.costs).toMatch(/refuse to end a turn/);
+    // The weaker option is still offered, underneath.
+    expect(r?.prompt).toBeDefined();
+  });
+
+  it('points at an external pattern for a false completion claim', () => {
+    const r = recommend(base(), judged('inaccurate_self_report'));
+    expect(r?.kind).toBe('VERIFY');
+    expect(r?.external?.where).toMatch(/verify-gated-completion/);
+  });
+
+  it('ranks config above prompt for misread intent, where no gate exists', () => {
+    const r = recommend(base(), judged('misread_intent'));
+    expect(r?.kind).toBe('CONFIG');
+    expect(r?.config?.what).toMatch(/plan mode/);
+    // Honest about the cost of asking more, which the research measures.
+    expect(r?.config?.costs).toMatch(/over-asking/);
+  });
+
+  it('reports `other` and surfaces the descriptors, which is what it is for', () => {
+    const r = recommend(undefined, judged('other', { otherDescriptor: 'returned wrong command format' }));
+    expect(r?.kind).toBe('REPORT');
+    expect(r?.because).toMatch(/returned wrong command format/);
+  });
+
+  it('leaves a rule finding alone when the judge has nothing with a mechanism', () => {
+    const r = recommend(base(), judged('redundant_call'));
+    expect(r?.dimension).toBe('edit_retry');
   });
 });
 
@@ -152,5 +218,64 @@ describe('fix — what it renders', () => {
     for (const nag of ['warning', 'error', 'bad', 'wrong', 'failure', 'you should']) {
       expect(out, `must not contain "${nag}"`).not.toContain(nag);
     }
+  });
+});
+
+describe('fix — the CLAUDE.md budget, which was not checked at all', () => {
+  it('offers a rule when there is room', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'as-fix-budget-'));
+    writeFileSync(join(dir, 'CLAUDE.md'), 'a short file.');
+    expect(memoryAllowed(dir)).toBe(true);
+  });
+
+  it('refuses a rule once the file is past the measured ceiling', () => {
+    // `docs/artifacts.md`: well-performing files average 300-350 words, past
+    // 500 shows diminishing returns, and past 1,000 the correlation with
+    // performance goes NEGATIVE. `fix` used to append on every single run,
+    // which the same doc calls the mechanism of catastrophic remembering.
+    const dir = mkdtempSync(join(tmpdir(), 'as-fix-budget-'));
+    writeFileSync(join(dir, 'CLAUDE.md'), Array.from({ length: MEMORY_WORD_BUDGET + 50 }, () => 'word').join(' '));
+    expect(memoryAllowed(dir)).toBe(false);
+  });
+
+  it('treats a missing CLAUDE.md as room, not as a refusal', () => {
+    // The common case is a project with no CLAUDE.md at all. Refusing there
+    // would be exactly backwards.
+    expect(memoryAllowed(mkdtempSync(join(tmpdir(), 'as-fix-none-')))).toBe(true);
+  });
+});
+
+describe('fix — two non-actions, and which one is worth printing', () => {
+  const other = [
+    { sessionId: 's1', dimension: 'other', turns: [12], why: 'x', at: 'now', otherDescriptor: 'returned wrong command format' },
+    { sessionId: 's2', dimension: 'other', turns: [40], why: 'x', at: 'now', otherDescriptor: 'answered a different question' },
+  ] as never;
+
+  it('shows the `other` descriptors rather than a ceremonial edit_retry report', () => {
+    // The first version only reached the judged report when `Standing` was
+    // absent, which in practice never happens — so the descriptors were
+    // collected and never shown, which defeats the only reason the escape
+    // hatch exists.
+    const r = recommend(base({ reasons: { 'not-read-first': 9 } }), other);
+    expect(r?.dimension).toBe('other');
+    expect(r?.because).toMatch(/returned wrong command format/);
+    expect(r?.because).toMatch(/answered a different question/);
+  });
+
+  it('de-duplicates descriptors, so a repeated shape reads once', () => {
+    const dupes = [
+      { sessionId: 's1', dimension: 'other', turns: [1], why: 'x', at: 'now', otherDescriptor: 'same shape' },
+      { sessionId: 's2', dimension: 'other', turns: [2], why: 'x', at: 'now', otherDescriptor: 'same shape' },
+    ] as never;
+    const r = recommend(undefined, dupes);
+    expect(r?.because.match(/same shape/g)).toHaveLength(1);
+  });
+
+  it('still prefers a real mechanism over any report', () => {
+    const mixed = [
+      ...(other as unknown as Record<string, unknown>[]),
+      { sessionId: 's3', dimension: 'constraint_violation', turns: [99], why: 'x', at: 'now' },
+    ] as never;
+    expect(recommend(base(), mixed)?.kind).toBe('VERIFY');
   });
 });

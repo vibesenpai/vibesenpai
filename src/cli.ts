@@ -743,11 +743,15 @@ function cmdInstall(a: Argv): number {
 function cmdFix(a: Argv): number {
   const { config } = configFromFlags(a);
   const s = readStanding(config.archive);
-  if (s === undefined) {
+  // The judge's findings too, because `fix` reading only the rule detectors is
+  // how it came to recommend an `edit_retry` prose rule on a machine whose
+  // judge had found two constraint violations.
+  const judged = readJudgeState(config.archive).findings;
+  if (s === undefined && judged.length === 0) {
     console.log('no standing yet — run `standing --refresh`, or open a new session.');
     return 0;
   }
-  console.log(renderFix(recommend(s), config.preset, config.mute));
+  console.log(renderFix(recommend(s, judged), config.preset, config.mute));
   return 0;
 }
 
