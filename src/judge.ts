@@ -219,6 +219,37 @@ export function openFailuresBefore(events: Event[], before: number): JudgeCarry[
 export const PREAMBLE_PROMPT_MAX = 600;
 
 /**
+ * What one invocation costs before our packet is counted at all.
+ *
+ * **Measured over 98 calls**, as billed input minus rendered packet. It is the
+ * `claude -p` child loading its own system prompt, tools and skills — not ours,
+ * and not shrinkable from here. It appeared in the codebase as "~27,000" in
+ * seven places and "~29,000" in an eighth; one number, measured, in one place.
+ *
+ * It dwarfs the payload, which is the entire argument for batching sessions
+ * rather than sending one call each — and for two-stage paying it twice, which
+ * is the real cost of the split (195 calls against 98, $2.81 against $1.88).
+ */
+export const JUDGE_OVERHEAD_TOKENS = 26_384;
+
+/**
+ * Token estimate for a packet, used to decide what fits in a batch.
+ *
+ * `len / 4` is the usual rule of thumb and runs **~1.9x low** against what the
+ * harness actually bills, measured over real calls — so the correction lives
+ * here rather than in each caller's head.
+ *
+ * It was inline in three places (`cli.ts`, `scripts/judge.ts`,
+ * `scripts/gold-score.ts`) and the copies had already drifted into a real bug:
+ * two of them sized a batch with `renderPacket` and then sent `renderExtract`,
+ * a different and differently-sized string. Measure what you are about to
+ * send, through one function.
+ */
+export function estimateTokens(packet: string): number {
+  return Math.round((packet.length / 4) * 1.9);
+}
+
+/**
  * A `user` record the harness wrote, not something the developer said.
  *
  * Task notifications arrive as user turns and are long — one filled 600
@@ -257,70 +288,6 @@ export function buildSession(
   };
 }
 
-/**
- * The prompt sent to the model.
- *
- * Two instructions carry the project's rules into a place the type system
- * cannot reach: **cite turn numbers**, because a finding that cannot point at a
- * turn is not evidence and gets dropped on the way back; and **say nothing
- * rather than guess**, because the failure that killed three detectors here was
- * firing on weak signal, and a model will happily oblige if asked for findings.
- */
-export function renderPacket(sessions: JudgePacketSession[]): string {
-  const rubric = JUDGE_DIMENSIONS.map(
-    (d) => `  ${d} (${RUBRIC[d].prevalence} of real sessions) — ${RUBRIC[d].test}`,
-  ).join('\n');
-
-  const body = sessions
-    .map((s) => {
-      const prompts = s.prompts.map((p) => `  turn ${p.turn}: ${p.text}`).join('\n');
-      const carry = s.carry === undefined ? [] : [
-        '',
-        `Earlier in this session (${s.carry.turnsJudged} turns already reviewed, not shown):`,
-        ...(s.carry.openFailures.length === 0
-          ? ['  nothing was left failing']
-          : s.carry.openFailures.map((f) => `  turn ${f.turn}: ${f.what} failed and was not seen to succeed`)),
-        ...(s.carry.reported.length === 0
-          ? []
-          : [
-              '  already reported, do not report again:',
-              ...s.carry.reported.map((r) => `    ${r.dimension} at turns ${r.turns.join(', ')}`),
-            ]),
-        '  You may cite these turns ONLY for a claim made in the turns below.',
-      ];
-      return [
-        `=== SESSION ${s.sessionId} ===`,
-        '',
-        'What the developer asked for, in order:',
-        prompts === '' ? '  (none recorded)' : prompts,
-        ...carry,
-        '',
-        'Turns:',
-        renderSession(s.packet),
-      ].join('\n');
-    })
-    .join('\n\n');
-
-  return `You are reviewing transcripts of a developer working with a coding agent.
-Find places where the agent and the developer were misaligned.
-
-Dimensions, and nothing else:
-${rubric}
-
-Rules:
-- Every finding MUST include a \`quote\`: text copied **verbatim** from the turns
-  below. Do not paraphrase and do not write a turn number — the quote is how a
-  finding is located, and one that cannot be found is discarded.
-- Report only what the packet shows. You cannot see the codebase, the diffs, or
-  anything outside these turns. If a thing is plausible but not shown, omit it.
-- Most sessions contain nothing. An empty list is the correct answer far more
-  often than not, and is strongly preferred to a weak finding.
-
-Reply with JSON only, no prose:
-{"findings":[{"sessionId":"...","dimension":"...","quote":"exact text copied from a turn","why":"one sentence"}]}
-
-${body}`;
-}
 
 /**
  * What stage A extracts, before anything has been labelled.
@@ -379,11 +346,36 @@ export function renderExtract(sessions: JudgePacketSession[]): string {
   const body = sessions
     .map((s) => {
       const prompts = s.prompts.map((p) => `  turn ${p.turn}: ${p.text}`).join('\n');
+      // ── The carry, which this prompt forgot ──────────────────────────────
+      //
+      // `renderPacket` rendered it; `renderExtract` did not. So replacing the
+      // single-pass path silently dropped the thread between batches, which is
+      // the one thing a batched judge cannot reconstruct for itself. Measured
+      // on 400 corpus sessions at the default cadence: **18.9% of boundaries
+      // leave a tool failure open**, and a failure needs no retry to
+      // contradict a later claim of success — the `inaccurate_self_report`
+      // trigger exactly. A judge that cannot see the failure cannot see the
+      // contradiction.
+      const carry = s.carry === undefined ? [] : [
+        '',
+        `Earlier in this session (${s.carry.turnsJudged} turns already reviewed, not shown):`,
+        ...(s.carry.openFailures.length === 0
+          ? ['  nothing was left failing']
+          : s.carry.openFailures.map((f) => `  turn ${f.turn}: ${f.what} failed and was not seen to succeed`)),
+        ...(s.carry.reported.length === 0
+          ? []
+          : [
+              '  already reported, do not report it again:',
+              ...s.carry.reported.map((r) => `    ${r.dimension} at turns ${r.turns.join(', ')}`),
+            ]),
+        '  You may cite these turns ONLY for an episode shown in the turns below.',
+      ];
       return [
         `=== SESSION ${s.sessionId} ===`,
         '',
         'What the developer asked for, in order:',
         prompts === '' ? '  (none recorded)' : prompts,
+        ...carry,
         '',
         'Turns:',
         renderSession(s.packet),
@@ -493,105 +485,6 @@ export type ParseResult = {
   dropped: { reason: string; count: number }[];
 };
 
-/**
- * Parse a response, discarding anything that cannot be stood behind.
- *
- * **Every rejection here is a finding the model wanted to make.** That is the
- * point: a judge is a detector whose author cannot be code-reviewed, so the
- * gate is on the way out. Unknown dimensions, turns the packet never contained,
- * and sessions not in the batch are all hallucination shapes, and dropping them
- * silently would hide exactly the failure mode that killed three rule detectors.
- */
-/** The same normalisation both sides of the presence check must use. */
-function flatten(quote: string): string {
-  return quote.replace(/\s+/g, ' ').trim().slice(0, 60);
-}
-
-export function parseResponse(raw: string, sessions: JudgePacketSession[]): ParseResult {
-  const byId = new Map(sessions.map((s) => [s.sessionId, s]));
-  const drops = new Map<string, number>();
-  const drop = (reason: string): void => {
-    drops.set(reason, (drops.get(reason) ?? 0) + 1);
-  };
-
-  // Bare JSON is asked for; a fenced block is the common near-miss.
-  const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(raw);
-  const text = (fence?.[1] ?? raw).trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { findings: [], dropped: [{ reason: 'response was not JSON', count: 1 }] };
-  }
-
-  const list = (parsed as { findings?: unknown })?.findings;
-  if (!Array.isArray(list)) {
-    return { findings: [], dropped: [{ reason: 'no findings array', count: 1 }] };
-  }
-
-  const findings: JudgeFinding[] = [];
-  for (const item of list) {
-    const f = item as { sessionId?: unknown; dimension?: unknown; quote?: unknown; why?: unknown };
-
-    const session = typeof f.sessionId === 'string' ? byId.get(f.sessionId) : undefined;
-    if (session === undefined) {
-      drop('session not in this batch');
-      continue;
-    }
-    if (typeof f.dimension !== 'string' || !JUDGE_DIMENSIONS.includes(f.dimension as JudgeDimension)) {
-      drop('dimension not in the rubric');
-      continue;
-    }
-    if (typeof f.quote !== 'string' || f.quote.trim() === '') {
-      drop('no quote given');
-      continue;
-    }
-    if (typeof f.why !== 'string' || f.why.trim() === '') {
-      drop('no reason given');
-      continue;
-    }
-
-    // ── The model quotes; we derive the turn ────────────────────────────────
-    //
-    // It never counts, so it cannot miscount — the failure mode behind four
-    // "hallucinations" whose reasoning was sound. And a fabricated quote is
-    // simply not found, where a fabricated number can pass by coincidence and
-    // attach itself to the wrong claim.
-    //
-    // **Two checks, in this order, and the order matters.** `turnsForQuote`
-    // searches each turn's own untruncated text, which is what makes the anchor
-    // immune to truncation — but it would also match text the cut removed from
-    // view, which the model cannot have quoted. So presence in the RENDERED
-    // packet is asserted first and the turn is resolved second.
-    if (!renderSession(session.packet).replace(/\s+/g, ' ').includes(flatten(f.quote))) {
-      drop('quote is not in the packet');
-      continue;
-    }
-    const turns = turnsForQuote(session.packet, f.quote);
-    if (turns.length === 0) {
-      drop('quote is not in the packet');
-      continue;
-    }
-
-    findings.push({
-      sessionId: session.sessionId,
-      dimension: f.dimension as JudgeDimension,
-      turns,
-      quote: f.quote.trim(),
-      why: f.why.trim(),
-    });
-  }
-
-  return {
-    findings,
-    dropped: [...drops].map(([reason, count]) => ({ reason, count })),
-  };
-}
-
-
-// ───────────────────────────────────────────────────────────────────────────
-// The two-stage parsers
 // ───────────────────────────────────────────────────────────────────────────
 
 export type ExtractResult = {

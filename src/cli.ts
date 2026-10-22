@@ -23,7 +23,7 @@ import { gatherReport, type ReportData } from './gather.ts';
 import {
   BYTES_PER_TURN, findingsFor, readJudgeState, writeJudgeState,
 } from './judge-store.ts';
-import { buildSession, renderPacket } from './judge.ts';
+import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
 import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
@@ -918,15 +918,19 @@ function cmdJudge(a: Argv): number {
     }
   }
 
-  const packetTokens = sessions.length === 0 ? 0 : Math.round((renderPacket(sessions).length / 4) * 1.9);
+  const packetTokens = sessions.length === 0 ? 0 : estimateTokens(renderExtract(sessions));
 
   console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
   console.log('');
   console.log('  what one pass would send');
-  console.log(`    ${sessions.length} session(s) · ~${packetTokens.toLocaleString()} tokens of packet`);
-  // The invocation overhead is the dominant term and is not ours to shrink:
-  // it is Claude Code loading its system prompt, tools and skills.
-  console.log('    ~27,000 tokens of invocation overhead, whatever we send');
+  console.log(`    stage 1  ${sessions.length} session(s) · ~${packetTokens.toLocaleString()} tokens of transcript`);
+  // Stage 2 reads the records stage 1 produced, not the transcripts, so its
+  // packet is small — but it is a separate invocation and pays the overhead
+  // again. Measured: 195 calls where single-pass ran 98.
+  console.log('    stage 2  the episodes stage 1 found · a few hundred tokens each');
+  // The invocation overhead is the dominant term, is paid TWICE, and is not
+  // ours to shrink: it is Claude Code loading its own system prompt and tools.
+  console.log(`    ${JUDGE_OVERHEAD_TOKENS.toLocaleString()} tokens of invocation overhead per stage, whatever we send`);
   console.log('    output is roughly 98% thinking — measured, not estimated');
   console.log('');
   console.log(`  cadence  every ~${state.settings.cadence} turns of new transcript`);

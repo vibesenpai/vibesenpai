@@ -37,7 +37,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { buildSession, parseResponse, renderPacket, type JudgeDimension } from '../src/judge.ts';
+import { buildSession, parseExtract, parseLabels, renderExtract, renderLabel, type JudgeDimension } from '../src/judge.ts';
 import { JUDGE_CWD_MARKER } from '../src/read.ts';
 import type { Event } from '../src/types.ts';
 
@@ -49,6 +49,27 @@ type Control = { sessionId: string; expect: JudgeDimension | null; turns: Partia
  * A control that needs careful reading tests the reader, not the judge. These
  * ask only "can it detect at all", which is the question a silent result
  * cannot answer on its own.
+ *
+ * ── There is deliberately no `other` control ───────────────────────────────
+ *
+ * `other` ships — the escape hatch, their S8 — and two attempts at a control
+ * for it both failed, informatively:
+ *
+ *   "developer asks about X, agent asks back about Y"
+ *      -> judged `misread_intent`, and the judge was right: that IS "the agent
+ *         misinterpreted what the developer wanted"
+ *   "developer asks for a shell command, agent returns a JSON object"
+ *      -> judged `constraint_violation`, also right under the current wording:
+ *         a format asked for literally is an instruction stated literally
+ *
+ * So the four cover more than expected. A control whose expected answer the
+ * judge can defensibly dispute is not a control — it is a gate that goes red
+ * forever and teaches everyone to ignore the gate.
+ *
+ * `other` is therefore for shapes nobody has thought of, which is what it was
+ * for. It fired 11 times across 319 labelled-clean sessions, so it is
+ * reachable; it is just not constructible to order. Its **descriptors** are the
+ * thing to read, and `JudgeFinding.otherDescriptor` now persists them.
  */
 export const CONTROLS: Control[] = [
   {
@@ -152,14 +173,10 @@ export function controlSessions(): ReturnType<typeof buildSession>[] {
   });
 }
 
-async function main(): Promise<void> {
-  const model = process.argv[2] ?? 'haiku';
-  const sessions = controlSessions();
-  const packet = renderPacket(sessions);
-
+/** One model call. The control exercises the same path the product does. */
+function call(packet: string, model: string): string {
   const cwd = join(tmpdir(), JUDGE_CWD_MARKER);
   mkdirSync(cwd, { recursive: true, mode: 0o700 });
-
   const out = execFileSync(
     'claude',
     ['-p', packet, '--output-format', 'json', '--allowed-tools', '', '--model', model],
@@ -170,12 +187,34 @@ async function main(): Promise<void> {
     console.error('the model call failed');
     process.exit(1);
   }
+  return reply.result;
+}
 
-  const { findings, dropped } = parseResponse(reply.result, sessions);
+async function main(): Promise<void> {
+  const model = process.argv[2] ?? 'haiku';
+  const sessions = controlSessions();
+
+  // ── Two stages, because that is what ships ───────────────────────────────
+  //
+  // This control existed to catch a prompt change going too far, and until now
+  // it exercised `renderPacket`/`parseResponse` — the single-pass path the
+  // product no longer uses. A gate guarding a path nobody runs is not a gate.
+  const extracted = parseExtract(call(renderExtract(sessions), model), sessions);
+  const dropped = [...extracted.dropped];
+  const findings =
+    extracted.episodes.length === 0
+      ? []
+      : (() => {
+          const r = parseLabels(call(renderLabel(extracted.episodes), model), extracted.episodes);
+          dropped.push(...r.dropped);
+          return r.findings;
+        })();
   const got = new Map(findings.map((f) => [f.sessionId, f.dimension]));
 
   let pass = 0;
-  console.log(`judge control · ${model} · ${findings.length} kept, ${dropped.length} dropped\n`);
+  console.log(
+    `judge control · ${model} · ${extracted.episodes.length} episode(s) -> ${findings.length} labelled, ${dropped.length} dropped\n`,
+  );
   for (const c of CONTROLS) {
     const g = got.get(c.sessionId);
     const ok = c.expect === null ? g === undefined : g === c.expect;

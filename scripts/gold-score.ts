@@ -28,7 +28,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
-import { buildSession, parseExtract, parseLabels, parseResponse, renderExtract, renderLabel, renderPacket, type JudgePacketSession } from '../src/judge.ts';
+import { buildSession, estimateTokens, parseExtract, parseLabels, renderExtract, renderLabel, type JudgePacketSession } from '../src/judge.ts';
 import { JUDGE_CWD_MARKER } from '../src/read.ts';
 import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from '../src/gold.ts';
 import { redact } from '../src/redact.ts';
@@ -81,11 +81,11 @@ async function main(): Promise<void> {
   // pipeline examined and found nothing in, every finding is a false-positive
   // candidate. Recall alone cannot say whether we are better or merely noisier.
   const negativesMode = process.argv.includes('--negatives');
-  // `--two-stage` runs extract-then-label. `--extract-only` runs stage A and
-  // assigns no real dimension, which isolates EXTRACTION: the session- and
-  // episode-level numbers are dimension-agnostic, so they are meaningful
-  // without stage B having run at all. That separation is the whole point.
-  const twoStage = process.argv.includes('--two-stage');
+  // Extract-then-label is the only path; `--extract-only` stops after stage A
+  // and assigns no real dimension, which isolates EXTRACTION. The session- and
+  // episode-level numbers are dimension-agnostic, so they mean something
+  // without stage B having run — which is how the two halves get measured
+  // separately rather than as one bundle.
   const extractOnly = process.argv.includes('--extract-only');
   let files: Map<string, string>;
   if (negativesMode) {
@@ -100,7 +100,7 @@ async function main(): Promise<void> {
   }
   const shas = [...files.keys()].slice(0, limit);
 
-  const mode = extractOnly ? 'extract-only (stage A)' : twoStage ? 'two-stage' : 'single-pass';
+  const mode = extractOnly ? 'extract-only (stage A)' : 'two-stage';
   console.log(`gold · ${episodes.length} swe episodes · ${files.size} sessions held · judging ${shas.length} · ${model} · ${mode}\n`);
 
   // Parse once: the packet and the quote alignment both need the events.
@@ -132,11 +132,16 @@ async function main(): Promise<void> {
 
   // Pack to the ceiling. Whole sessions only — a halved packet yields findings
   // about turns whose other half was never shown.
+  // Size a batch by the prompt that will actually be SENT. This measured
+  // `renderPacket` while the two-stage path sent `renderExtract` — a different,
+  // differently-sized string — so two-stage batches were composed against the
+  // wrong budget. Both arms used the same (wrong) function, so the 56%-vs-71%
+  // comparison stands; the call count does not.
   const batches: JudgePacketSession[][] = [];
   let current: JudgePacketSession[] = [];
   for (const p of packets) {
     const next = [...current, p];
-    if (current.length > 0 && Math.round((renderPacket(next).length / 4) * 1.9) > BATCH_TOKENS) {
+    if (current.length > 0 && estimateTokens(renderExtract(next)) > BATCH_TOKENS) {
       batches.push(current);
       current = [p];
     } else {
@@ -149,7 +154,7 @@ async function main(): Promise<void> {
   const dropped: Record<string, number> = {};
   for (const [i, batch] of batches.entries()) {
     process.stdout.write(`  batch ${i + 1}/${batches.length} (${batch.length} sessions) … `);
-    const text = twoStage || extractOnly ? renderExtract(batch) : renderPacket(batch);
+    const text = renderExtract(batch);
     // The same gate the runner enforces. A scoring harness that sent what the
     // product refuses to send would be measuring a different system.
     if (redact(text).text !== text) {
@@ -162,7 +167,7 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (twoStage || extractOnly) {
+    {
       const ex = parseExtract(reply, batch);
       for (const d of ex.dropped) dropped[d.reason] = (dropped[d.reason] ?? 0) + d.count;
       if (ex.episodes.length === 0) {
@@ -200,22 +205,7 @@ async function main(): Promise<void> {
         })),
       );
       console.log(`${ex.episodes.length} episode(s) -> ${lb.findings.length} labelled`);
-      continue;
     }
-
-    const r = parseResponse(reply, batch);
-    for (const d of r.dropped) dropped[d.reason] = (dropped[d.reason] ?? 0) + d.count;
-    // The quote is cached too, so a change to turn derivation can be re-scored
-    // without paying for the model again. Not caching it cost a full re-run.
-    found.push(
-      ...r.findings.map((f) => ({
-        sessionId: f.sessionId,
-        dimension: f.dimension,
-        turns: f.turns,
-        quote: f.quote,
-      })),
-    );
-    console.log(`${r.findings.length} kept`);
   }
 
   // Persisted so the scoring can be re-run without paying for the model again.

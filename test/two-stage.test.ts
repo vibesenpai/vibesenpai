@@ -143,6 +143,74 @@ describe('stage A — the guards that need no judgement', () => {
   });
 });
 
+describe('stage A — the carry between batches', () => {
+  it('tells the judge what was left failing earlier, and what is already reported', () => {
+    // `renderPacket` rendered the carry and `renderExtract` did not, so wiring
+    // two-stage into production silently dropped the thread between batches.
+    // 18.9% of boundaries leave a tool failure open, and a failure needs no
+    // retry to contradict a later claim of success.
+    const text = renderExtract([{
+      ...session(),
+      carry: {
+        openFailures: [{ turn: 12, what: 'pnpm test' }],
+        reported: [{ dimension: 'constraint_violation', turns: [9] }],
+        turnsJudged: 40,
+      },
+    }]);
+    expect(text).toMatch(/40 turns already reviewed/);
+    expect(text).toMatch(/turn 12: pnpm test failed and was not seen to succeed/);
+    expect(text).toMatch(/already reported, do not report it again/);
+    expect(text).toMatch(/constraint_violation at turns 9/);
+  });
+
+  it('says so plainly when nothing was left failing', () => {
+    const text = renderExtract([{
+      ...session(),
+      carry: { openFailures: [], reported: [], turnsJudged: 40 },
+    }]);
+    expect(text).toMatch(/nothing was left failing/);
+  });
+
+  it('omits the carry entirely on a first batch', () => {
+    expect(renderExtract([session()])).not.toMatch(/already reviewed/);
+  });
+});
+
+describe('stage A — malformed replies, which must not throw', () => {
+  it('survives prose instead of JSON', () => {
+    const r = parseExtract('I had a look and honestly it seems fine to me.', [session()]);
+    expect(r.episodes).toEqual([]);
+    expect(r.dropped).toEqual([{ reason: 'response was not JSON', count: 1 }]);
+  });
+
+  it('accepts a fenced block, the common near-miss', () => {
+    const r = parseExtract('```json\n' + extractReply([wellFormed]) + '\n```', [session()]);
+    expect(r.dropped).toEqual([]);
+    expect(r.episodes).toHaveLength(1);
+  });
+
+  it('counts a session id that was never sent', () => {
+    const r = parseExtract(extractReply([wellFormed], 'never-sent'), [session()]);
+    expect(r.dropped.map((d) => d.reason)).toContain('session not in the batch');
+  });
+
+  it('tolerates a quote the model reflowed', () => {
+    // Models rewrap. An exact comparison would fail on exactly the long quotes
+    // most worth having.
+    const r = parseExtract(
+      extractReply([{ ...wellFormed, evidence: [{ quote: 'I will add   left-pad\n  for this', context: 'reflowed' }] }]),
+      [session()],
+    );
+    expect(r.episodes).toHaveLength(1);
+    expect(r.episodes[0]?.evidence[0]?.turns).toEqual([2]);
+  });
+
+  it('rejects a reply with no sessions array', () => {
+    const r = parseExtract(JSON.stringify({ findings: [] }), [session()]);
+    expect(r.dropped).toEqual([{ reason: 'no sessions array', count: 1 }]);
+  });
+});
+
 describe('stage B — labelling a record', () => {
   it('reads records, not transcripts', () => {
     const text = renderLabel([episode()]);

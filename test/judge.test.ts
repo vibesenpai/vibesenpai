@@ -14,8 +14,8 @@ import { describe, expect, it } from 'vitest';
 import { redact } from '../src/redact.ts';
 import { buildPacket, renderSession } from '../src/packet.ts';
 import {
-  buildSession, CARRY_MAX_OPEN_FAILURES, JUDGE_DIMENSIONS, openFailuresBefore, parseResponse,
-  PREAMBLE_PROMPT_MAX, renderPacket, type JudgePacketSession,
+  buildSession, CARRY_MAX_OPEN_FAILURES, openFailuresBefore,
+  PREAMBLE_PROMPT_MAX, renderExtract, type JudgePacketSession,
 } from '../src/judge.ts';
 
 /** A packet whose turns really contain the text a finding must quote. */
@@ -40,106 +40,6 @@ const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => (
   },
   turns: [9, 10, 11, 12],
   ...over,
-});
-
-const reply = (findings: unknown[]): string => JSON.stringify({ findings });
-
-describe('parseResponse — what it refuses', () => {
-  it('drops a finding whose quote is not in the packet', () => {
-    // The shape of the first real hallucination — now unmissable, because a
-    // fabricated quote simply is not found.
-    const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'constraint_violation', quote: 'a sentence nobody ever wrote', why: 'plausible prose' }]),
-      [packet()],
-    );
-    expect(r.findings).toHaveLength(0);
-    expect(r.dropped[0]?.reason).toContain('quote is not in the packet');
-  });
-
-  it('drops a finding with no quote at all', () => {
-    const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'overreach', why: 'felt wrong' }]),
-      [packet()],
-    );
-    expect(r.findings).toHaveLength(0);
-    expect(r.dropped[0]?.reason).toContain('no quote');
-  });
-
-  it('drops a dimension outside the rubric', () => {
-    // The model cannot widen its own remit.
-    const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'code_smell', quote: 'pnpm add left-pad', why: 'x' }]),
-      [packet()],
-    );
-    expect(r.findings).toHaveLength(0);
-    expect(r.dropped[0]?.reason).toContain('rubric');
-  });
-
-  it('drops a session that was not in the batch', () => {
-    const r = parseResponse(
-      reply([{ sessionId: 'never-sent', dimension: 'overreach', quote: 'pnpm add left-pad', why: 'x' }]),
-      [packet()],
-    );
-    expect(r.findings).toHaveLength(0);
-  });
-
-  it('drops a finding with no reason', () => {
-    const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'overreach', quote: 'pnpm add left-pad', why: '  ' }]),
-      [packet()],
-    );
-    expect(r.findings).toHaveLength(0);
-  });
-
-  it('survives prose instead of JSON without throwing', () => {
-    const r = parseResponse('I had a look and everything seems fine!', [packet()]);
-    expect(r.findings).toHaveLength(0);
-    expect(r.dropped[0]?.reason).toContain('not JSON');
-  });
-
-  it('accepts a fenced block, the common near-miss', () => {
-    const r = parseResponse(
-      '```json\n' +
-        reply([{ sessionId: 's1', dimension: 'overreach', quote: 'pnpm add left-pad', why: 'ok' }]) +
-        '\n```',
-      [packet()],
-    );
-    expect(r.findings).toHaveLength(1);
-  });
-
-  it('refuses a quote too short to identify a turn', () => {
-    // A handful of characters could match anywhere. An anchor that ambiguous
-    // is not an anchor, so it fails rather than attaching to the first hit.
-    const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'overreach', quote: 'on it', why: 'ok' }]),
-      [packet()],
-    );
-    expect(r.findings).toHaveLength(0);
-  });
-
-  it('keeps a well-formed finding and DERIVES the turn from the quote', () => {
-    // The model never reports a number. It copies text; we locate it.
-    const r = parseResponse(
-      reply([
-        { sessionId: 's1', dimension: 'constraint_violation', quote: 'pnpm add left-pad', why: 'said no deps' },
-      ]),
-      [packet()],
-    );
-    expect(r.findings).toEqual([
-      // 12, not 10: the quote sits in the SECOND constituent of the merged
-      // turn. Collapsing to the block start cost 43 "wrong place" rows against
-      // the gold set, and looked like a judge failure.
-      { sessionId: 's1', dimension: 'constraint_violation', turns: [12], quote: 'pnpm add left-pad', why: 'said no deps' },
-    ]);
-  });
-
-  it('tolerates reflowed whitespace in a quote', () => {
-    const r = parseResponse(
-      reply([{ sessionId: 's1', dimension: 'overreach', quote: 'pnpm   add\n left-pad', why: 'x' }]),
-      [packet()],
-    );
-    expect(r.findings).toHaveLength(1);
-  });
 });
 
 describe('openFailuresBefore', () => {
@@ -174,57 +74,6 @@ describe('openFailuresBefore', () => {
       ev(i + 1, { turnType: 'tool_result', toolName: 'Bash', filePath: `/f${i}.ts`, isError: true }),
     );
     expect(openFailuresBefore(events as never, 1000).length).toBeLessThanOrEqual(CARRY_MAX_OPEN_FAILURES);
-  });
-});
-
-describe('the carry between batches', () => {
-  const withCarry = (): JudgePacketSession => ({
-    ...packet(),
-    carry: {
-      openFailures: [{ turn: 412, what: 'Bash pnpm test' }],
-      reported: [{ dimension: 'overreach', turns: [9] }],
-      turnsJudged: 420,
-    },
-  });
-
-  it('informs the judge, while the finding still quotes what was shown', () => {
-    // How S7 survives batching: the claim is in this batch, the failure it
-    // contradicts was batches ago. Measured: 18.9% of boundaries leave a
-    // failure open. The carry supplies that context — but the anchor is still
-    // text from the turns, so a finding can never rest on the summary alone.
-    const r = parseResponse(
-      reply([
-        { sessionId: 's1', dimension: 'inaccurate_self_report', quote: 'pnpm add left-pad', why: 'said tests pass' },
-      ]),
-      [withCarry()],
-    );
-    expect(r.findings).toHaveLength(1);
-    expect(r.findings[0]?.turns).toEqual([12]);
-  });
-
-  it('refuses a finding that quotes only the carry', () => {
-    // Quoting the summary rather than the transcript is the judge reporting
-    // what it was told rather than what it read.
-    const r = parseResponse(
-      reply([
-        { sessionId: 's1', dimension: 'inaccurate_self_report', quote: 'Bash pnpm test failed', why: 'x' },
-      ]),
-      [withCarry()],
-    );
-    expect(r.findings).toHaveLength(0);
-    expect(r.dropped[0]?.reason).toContain('quote is not in the packet');
-  });
-
-  it('tells the judge what is already reported, and what was left failing', () => {
-    const text = renderPacket([withCarry()]);
-    expect(text).toContain('420 turns already reviewed');
-    expect(text).toContain('turn 412');
-    expect(text).toContain('do not report again');
-  });
-
-  it('says so plainly when nothing was left failing', () => {
-    const clean = { ...packet(), carry: { openFailures: [], reported: [], turnsJudged: 50 } };
-    expect(renderPacket([clean])).toContain('nothing was left failing');
   });
 });
 
@@ -267,7 +116,7 @@ describe('the packet', () => {
     // prompts [1] [2] [3] while windows said `turn NNN`, and models cited the
     // bracket numbers. The reasoning was sometimes sound; the citation was
     // answering a question the packet asked badly.
-    const text = renderPacket([packet()]);
+    const text = renderExtract([packet()]);
     expect(text).toContain('turn 9:');
     expect(text).not.toMatch(/^\s*\[\d+\]/m);
   });
@@ -284,13 +133,9 @@ describe('the packet', () => {
     expect(s.prompts.map((p) => p.text)).toEqual(['real request']);
   });
 
-  it('tells the model to quote verbatim and to prefer saying nothing', () => {
-    const text = renderPacket([packet()]);
-    expect(text).toMatch(/MUST include a .quote./);
-    expect(text).toMatch(/do not write a turn number/);
-    expect(text).toMatch(/empty list is the correct answer/i);
-    for (const d of JUDGE_DIMENSIONS) expect(text).toContain(d);
-  });
+  // The prompt's own wording is asserted in test/two-stage.test.ts, where the
+  // stage-A assertion is the right way round: it must NOT offer a dimension.
+  // This block tests `buildSession`, which both stages share.
 });
 
 describe('the redaction gate refuses rather than redacts', () => {

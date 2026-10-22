@@ -21,8 +21,8 @@ import { join } from 'node:path';
 import type { JudgeDimension } from './judge.ts';
 
 /**
- * v2 added the extraction record fields (`name`, `description`, `alignmentGoal`,
- * `otherDescriptor`, per-quote `context`).
+ * v2 carries the extraction record — `quote`, `name`, `description`,
+ * `alignmentGoal`, `confidence`, `context`, `otherDescriptor`.
  *
  * **A bump must never discard the file.** See `readJudgeState`.
  */
@@ -61,6 +61,22 @@ export type JudgedFinding = {
   why: string;
   /** When it was judged, so a stale finding can be told from a fresh one. */
   at: string;
+
+  // ── v2: the extraction record ────────────────────────────────────────────
+  //
+  // The v2 bump was made for these and then they were never added, so the
+  // comment above `VERSION` described a schema that did not exist. They are
+  // here now. All optional, because a v1 finding on disk has none of them and
+  // `isReadableFinding` deliberately does not require them — a finding is worth
+  // keeping if it can be anchored, not if it is decorated.
+  quote?: string;
+  name?: string;
+  description?: string;
+  alignmentGoal?: 'instruction' | 'intention' | 'both';
+  confidence?: 'high' | 'medium' | 'low';
+  context?: string;
+  /** Present only on `other`. The whole point of the escape hatch. */
+  otherDescriptor?: string;
 };
 
 export type JudgeState = {
