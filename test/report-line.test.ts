@@ -187,3 +187,44 @@ describe('report — reason keys become English', () => {
     expect(dimensionLine({ dimension: 'edit_retry', occurrences: 2, sessions: 1, files: 0 })).toContain('2 edits were rejected');
   });
 });
+
+describe('the session-start block can see the model tier', () => {
+  // This block is the most-seen output in the tool — it opens every session —
+  // and it reported one tier of two. `Standing` is persisted state built by the
+  // detector accumulator, so it will never hold judge findings; they arrive as
+  // a tally the caller reads from the judge store.
+  const tally = [
+    { dimension: 'misread_intent', count: 5 },
+    { dimension: 'constraint_violation', count: 5 },
+    { dimension: 'other', count: 3 },
+  ];
+
+  it('reports the total and names the commonest dimensions', () => {
+    const out = reportBlock(base(), undefined, tally);
+    expect(out).toContain('13 flagged by a model');
+    expect(out).toContain('misread_intent');
+  });
+
+  it('keeps itself to one line, whatever the dimension count', () => {
+    // Five dimensions spelled out would swamp a block whose whole virtue is
+    // being short enough to read at the top of a session.
+    const out = reportBlock(base(), undefined, tally);
+    const judged = out.split('\n').filter((l) => l.includes('flagged by a model'));
+    expect(judged).toHaveLength(1);
+    expect(judged[0]).toContain('+1 more');
+  });
+
+  it('does not say "nothing to flag" when the judge found something', () => {
+    // The empty-standing path. Before, a session whose only findings were the
+    // judge's read as a clean bill of health.
+    const empty = { ...base(), dimensions: [], reasons: {} };
+    const out = reportBlock(empty, undefined, tally);
+    expect(out).not.toContain('nothing to flag');
+    expect(out).toContain('13 flagged by a model');
+  });
+
+  it('still says "nothing to flag" when both tiers are empty', () => {
+    const empty = { ...base(), dimensions: [], reasons: {} };
+    expect(reportBlock(empty, undefined, [])).toContain('nothing to flag');
+  });
+});

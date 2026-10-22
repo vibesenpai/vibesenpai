@@ -258,6 +258,18 @@ export function pendingWork(
   return { pending, judged, seconds: pending * 2 * JUDGE_SECONDS_PER_CALL };
 }
 
+/**
+ * Findings per dimension across the whole store.
+ *
+ * For the surfaces that summarise rather than list — the SessionStart block and
+ * the report rollup. Lives here so every caller counts the same way.
+ */
+export function tallyByDimension(state: JudgeState): { dimension: string; count: number }[] {
+  const by = new Map<string, number>();
+  for (const f of state.findings) by.set(f.dimension, (by.get(f.dimension) ?? 0) + 1);
+  return [...by].map(([dimension, count]) => ({ dimension, count }));
+}
+
 /** Findings for one session, newest first. */
 export function findingsFor(state: JudgeState, sessionId: string): JudgedFinding[] {
   return state.findings

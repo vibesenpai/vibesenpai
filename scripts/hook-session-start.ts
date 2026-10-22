@@ -28,6 +28,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { isTripped, readBreaker } from '../src/breaker.ts';
+import { readJudgeState, tallyByDimension } from '../src/judge-store.ts';
 import { resolveConfig } from '../src/config.ts';
 import { isFresh, markStarted, readStanding } from '../src/standing.ts';
 import { detailLine, reportBlock } from '../src/report-line.ts';
@@ -42,7 +43,11 @@ function main(): void {
   // degrading to stale is better than degrading to silent.
   // The hook knows where this checkout is, which is what lets the detail line
   // name a command that actually runs here.
-  const block = reportBlock(readStanding(config.archive), detailLine(join(import.meta.dirname, '..'), homedir()));
+  const block = reportBlock(
+    readStanding(config.archive),
+    detailLine(join(import.meta.dirname, '..'), homedir()),
+    tallyByDimension(readJudgeState(config.archive)),
+  );
   if (block !== '') process.stdout.write(JSON.stringify({ systemMessage: block }));
 
   if (isTripped(readBreaker(config.archive))) return;

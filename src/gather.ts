@@ -44,6 +44,7 @@ import { recommend, type Recommendation } from './fix.ts';
 import type { DateRange } from './report.ts';
 import { adviceFor, type Reason } from './detect/labels.ts';
 import type { Event, Finding } from './types.ts';
+import type { JudgedFinding } from './judge-store.ts';
 
 /** A finding, flattened to what a renderer needs and nothing more. */
 export type FindingView = {
@@ -60,12 +61,32 @@ export type FindingView = {
   hidden: number;
 };
 
+/**
+ * A judge finding, flattened for display.
+ *
+ * Kept in its own list rather than folded into `findings`, because the two
+ * tiers are not equally reliable and the display must never imply they are.
+ * A rule finding is `certain` — the harness itself refused the call. A judge
+ * finding is a model's reading of the conversation. They are counted together
+ * in the headline and shown apart.
+ */
+export type JudgedView = {
+  dimension: string;
+  turns: number[];
+  /** The model's reasoning. Renderers clamp it; it arrives whole. */
+  why: string;
+  /** The turn text the finding was anchored to, when the judge recorded one. */
+  quote?: string;
+};
+
 export type SessionView = {
   sessionId: string;
   project: string;
   firstTs?: string;
   lastTs?: string;
   findings: FindingView[];
+  /** The opt-in model tier. Empty when the judge is off or has not run. */
+  judged: JudgedView[];
   denominators: Denominators;
   stats: SessionStats;
   cost: Cost;
@@ -100,6 +121,17 @@ export type GatherOptions = {
   muted: string[];
   /** Narrow to one session. Already resolved — `lookupSession` owns that. */
   onlySessionId?: string;
+  /**
+   * Judge findings for a session, if the caller has them.
+   *
+   * Passed in rather than read here, so this module keeps doing no I/O. The
+   * archive path lives with the CLI; `findingsFor` in `judge-store.ts` is the
+   * implementation every caller should hand over.
+   *
+   * Omitting it is what every caller did implicitly until now, and the result
+   * was a report that could not see 19 of the 22 findings on this machine.
+   */
+  judgedFor?: (sessionId: string) => JudgedFinding[];
   evidenceMax?: number;
   now?: Date;
 };
@@ -204,11 +236,19 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
       hidden: Math.max(0, f.evidence.length - max),
     }));
 
+    const judged: JudgedView[] = (opts.judgedFor?.(sessionId) ?? []).map((j) => ({
+      dimension: j.dimension,
+      turns: j.turns,
+      why: j.why,
+      ...(j.quote !== undefined ? { quote: j.quote } : {}),
+    }));
+
     sessions.push({
       sessionId,
       project,
       ...span,
       findings,
+      judged,
       denominators: countDenominators(events),
       stats: sessionStats(events),
       cost: findings.reduce(
@@ -231,8 +271,9 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
   // Findings first, then recency. Strict chronology put three empty sessions
   // above the one with the evidence in it, which is the wrong thing to read
   // first in a report whose whole point is the findings.
+  const weight = (s: SessionView): number => s.findings.length + s.judged.length;
   sessions.sort(
-    (a, b) => b.findings.length - a.findings.length || (b.firstTs ?? '').localeCompare(a.firstTs ?? ''),
+    (a, b) => weight(b) - weight(a) || (b.firstTs ?? '').localeCompare(a.firstTs ?? ''),
   );
 
   // Over the **same** sessions as everything else, so the recommendation cannot

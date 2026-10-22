@@ -34,7 +34,7 @@
 import { approx } from './cost.ts';
 import { describeCoverage, segmentByDepth } from './report.ts';
 import { CORPUS, shortenPath } from './render.ts';
-import type { FindingView, ReportData, SessionView } from './gather.ts';
+import type { FindingView, JudgedView, ReportData, SessionView } from './gather.ts';
 
 /** The only way a value reaches the page. */
 export function esc(s: string): string {
@@ -203,9 +203,48 @@ ${more}
 </div>`);
 }
 
+/**
+ * One judge finding.
+ *
+ * Deliberately not styled like `findingBlock`. A rule finding is `certain` —
+ * the harness refused the call and said why. This is a model's reading, and
+ * the markup says so rather than letting the two blur together.
+ *
+ * The `why` is clamped to its first sentence. The judge's label stage writes
+ * in its own register ("The anchoring phrase is the agent's own claim that…"),
+ * which is useful provenance and poor reading. Clamping is a render-time fix
+ * on purpose: changing the rubric would invalidate the measured 165/232.
+ */
+function judgedBlock(j: JudgedView): string {
+  const turns = j.turns.length === 0
+    ? ''
+    : `<span class="mute">turn${j.turns.length === 1 ? '' : 's'} ${esc(j.turns.join(', '))}</span>`;
+  const quote = j.quote === undefined || j.quote === ''
+    ? ''
+    : `<p class="subj">“${esc(firstSentence(j.quote, 200))}”</p>`;
+  return raw(`<div class="finding">
+<p><span class="dim-name">${esc(j.dimension)}</span><span class="pill">flagged by a model</span> ${turns}</p>
+${quote}
+<p class="note">${esc(firstSentence(j.why, 240))}</p>
+</div>`);
+}
+
+/**
+ * The first sentence, or a clean truncation if there isn't one.
+ *
+ * Used on model-written prose, which runs long and buries its point in a
+ * subordinate clause.
+ */
+function firstSentence(text: string, max: number): string {
+  const t = text.trim();
+  const stop = t.search(/[.!?](\s|$)/);
+  const one = stop > 0 ? t.slice(0, stop + 1) : t;
+  return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`;
+}
+
 function sessionBlock(s: SessionView): string {
   const dur = duration(s.firstTs, s.lastTs);
-  const n = s.findings.length;
+  const n = s.findings.length + s.judged.length;
   const wasted = s.cost.written > 0 ? approx(s.cost.written) : '';
 
   const head = [
@@ -258,13 +297,13 @@ function sessionBlock(s: SessionView): string {
   const body =
     n === 0
       ? `<p class="note">no findings across ${esc(String(s.denominators.editCount))} edits</p>`
-      : s.findings.map(findingBlock).join('');
+      : s.findings.map(findingBlock).join('') + s.judged.map(judgedBlock).join('');
 
   return raw(`<details><summary>${head}</summary><div>${cost}${context}${body}</div></details>`);
 }
 
 export function renderHtml(d: ReportData): string {
-  const total = d.sessions.reduce((a, s) => a + s.findings.length, 0);
+  const total = d.sessions.reduce((a, s) => a + s.findings.length + s.judged.length, 0);
   const span = (() => {
     const first = d.sessions.map((s) => s.firstTs).filter((t): t is string => t !== undefined);
     if (first.length === 0) return `${iso(d.range.from)} → ${iso(d.range.to)}`;
@@ -274,12 +313,36 @@ export function renderHtml(d: ReportData): string {
     return `${lo.slice(0, 10)} → ${hi.slice(0, 10)}`;
   })();
 
-  // ── rollup ────────────────────────────────────────────────────────────────
+  // ── what was found ────────────────────────────────────────────────────────
+  //
+  // `standing.dimensions` is the rule tier only, so this said "no findings"
+  // over a report that listed nineteen of them. Both tiers decide the empty
+  // branch; each keeps its own table, because `certain` and "a model read it
+  // that way" are not the same claim.
+  const judgedTally = new Map<string, number>();
+  for (const sv of d.sessions) {
+    for (const j of sv.judged) judgedTally.set(j.dimension, (judgedTally.get(j.dimension) ?? 0) + 1);
+  }
+  const judgedTable =
+    judgedTally.size === 0
+      ? ''
+      : raw(`<div class="panel"><p class="note">flagged by a model</p><div class="scroll"><table>
+<thead><tr><th>dimension</th><th class="n">findings</th></tr></thead>
+<tbody>${[...judgedTally]
+          .sort((a, b) => b[1] - a[1])
+          .map(
+            ([dim, n]) =>
+              `<tr><td class="dim-name">${esc(dim)}</td><td class="n fig">${esc(String(n))}</td></tr>`,
+          )
+          .join('')}</tbody></table></div></div>`);
+
   const rollup =
-    d.standing.dimensions.length === 0
+    d.standing.dimensions.length === 0 && judgedTally.size === 0
       ? `<div class="panel"><p class="note">no findings across ${esc(
           String(d.standing.edits),
         )} edits in ${esc(String(d.standing.sessions))} session(s)</p></div>`
+      : d.standing.dimensions.length === 0
+      ? ''
       : raw(`<div class="panel"><div class="scroll"><table>
 <thead><tr><th>dimension</th><th class="n">times</th><th class="n">sessions</th>
 <th class="n">tokens discarded</th><th>recurs most in</th></tr></thead>
@@ -360,8 +423,8 @@ ${r.prompt === undefined ? '' : `<p class="note">adopting this changes the sessi
     span,
   )} · ${esc(String(total))} finding${total === 1 ? '' : 's'}</p>
 
-<h2>rollup</h2>
-${rollup}
+<h2>what was found</h2>
+${rollup}${judgedTable}
 ${unreadable}
 
 <h2>coverage</h2>

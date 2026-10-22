@@ -618,7 +618,21 @@ export function render(input: RenderInput): string {
   if (dur !== undefined) facts.push(dur);
   lines.push('', `${INDENT}session ${input.sessionId.slice(0, 8)} · ${facts.join(' · ')}`, '');
 
-  if (findings.length === 0) {
+  // ── Both tiers, or the "nothing found" line is a lie ────────────────────
+  //
+  // This branched on `findings.length` alone — the rule tier — while judge
+  // findings arrive via `input.judged` and render further down. The result was
+  // output that read:
+  //
+  //     no findings across 2259 edits
+  //     FLAGGED BY A MODEL
+  //       constraint_violation  turns 3630, 3633, 3771
+  //       …three more
+  //
+  // A reader sees that and concludes the tool is broken, which is worse than
+  // either tier being wrong.
+  const judgedCount = input.judged?.findings.length ?? 0;
+  if (findings.length === 0 && judgedCount === 0) {
     // Said plainly. A blank result must not read as "we did not look", and the
     // denominator is what makes the difference legible: nothing found across
     // 155 edits is a real statement; nothing found across 0 is not.

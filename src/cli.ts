@@ -23,7 +23,7 @@ import {
 import { gatherReport, type ReportData } from './gather.ts';
 import {
   BYTES_PER_TURN, findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL, pendingWork,
-  readJudgeState, writeJudgeState,
+  readJudgeState, tallyByDimension, writeJudgeState,
 } from './judge-store.ts';
 import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
@@ -279,7 +279,7 @@ function cmdDoctor(a: Argv): number {
     );
     // Exactly what a new session will show, so `doctor` answers "what will I
     // see" rather than only "is it alive".
-    const block = reportBlock(st, detailLine(repoRoot(), home));
+    const block = reportBlock(st, detailLine(repoRoot(), home), tallyByDimension(readJudgeState(config.archive)));
     if (block !== '') for (const l of block.split('\n')) console.log(`             ${l}`);
   }
   if (process.env['AGENTSENSEI_DISABLE'] === '1') {
@@ -879,7 +879,7 @@ async function cmdStanding(a: Argv): Promise<number> {
     );
   }
 
-  const block = reportBlock(s, detailLine(repoRoot(), homedir()));
+  const block = reportBlock(s, detailLine(repoRoot(), homedir()), tallyByDimension(readJudgeState(config.archive)));
   if (block !== '') {
     console.log('\n  a new session shows:');
     for (const l of block.split('\n')) console.log(`    ${l}`);
@@ -1156,6 +1156,10 @@ async function cmdReport(a: Argv): Promise<number> {
   const asked = ['last', 'since', 'until'].some((k) => typeof f[k] === 'string');
   const wantsAll = !asked && (f['html'] === true || typeof f['out'] === 'string' || only !== undefined);
 
+  // The judge's findings reach the report through here. Without it `report`
+  // and `report --html` could not see the model tier at all — the header said
+  // "3 findings" while the store held 19.
+  const judgeState = readJudgeState(config.archive);
   const data = await gatherReport({
     sources: config.sources,
     detectors,
@@ -1163,6 +1167,7 @@ async function cmdReport(a: Argv): Promise<number> {
     preset: config.preset,
     muted: config.mute,
     ...(only !== undefined ? { onlySessionId: only } : {}),
+    judgedFor: (id) => findingsFor(judgeState, id),
   });
 
   if (f['html'] === true || typeof f['out'] === 'string') {
@@ -1200,7 +1205,10 @@ async function cmdReport(a: Argv): Promise<number> {
     return 0;
   }
 
-  const total = data.sessions.reduce((n, s) => n + s.findings.length, 0);
+  // Both tiers, matching what the page itself now counts. These two numbers
+  // disagreeing is what made the discrepancy invisible: the CLI said 3 while
+  // the store held 19.
+  const total = data.sessions.reduce((n, s) => n + s.findings.length + s.judged.length, 0);
   console.log(`\nfindings · ${data.sessions.length} session(s) analysed`);
   if (data.unreadable > 0) {
     console.log(`  ${data.unreadable} discovered session(s) could not be read`);
@@ -1208,9 +1216,32 @@ async function cmdReport(a: Argv): Promise<number> {
   if (total === 0) {
     console.log('  none');
   } else {
-    console.log('  by dimension');
-    for (const dim of data.standing.dimensions) {
-      console.log(`    ${dim.dimension.padEnd(20)} ${dim.occurrences} occurrence(s)`);
+    // Width from the data, not a constant: `inaccurate_self_report` is 22
+    // characters and overflowed the fixed 20, so the column stopped lining up
+    // exactly when the model tier arrived.
+    const names = [
+      ...data.standing.dimensions.map((d) => d.dimension),
+      ...data.sessions.flatMap((s) => s.judged.map((j) => j.dimension)),
+    ];
+    const w = Math.max(1, ...names.map((n) => n.length));
+    if (data.standing.dimensions.length > 0) {
+      console.log('  by dimension');
+      for (const dim of data.standing.dimensions) {
+        console.log(`    ${dim.dimension.padEnd(w)}  ${dim.occurrences} occurrence(s)`);
+      }
+    }
+    // The model tier, under its own heading. `standing.dimensions` is built by
+    // the detector accumulator and will never contain these, which is why this
+    // breakdown listed `edit_retry` alone while the store held 19 findings.
+    const byDimension = new Map<string, number>();
+    for (const s of data.sessions) {
+      for (const j of s.judged) byDimension.set(j.dimension, (byDimension.get(j.dimension) ?? 0) + 1);
+    }
+    if (byDimension.size > 0) {
+      console.log('  flagged by a model');
+      for (const [dim, n] of [...byDimension].sort((a, b) => b[1] - a[1])) {
+        console.log(`    ${dim.padEnd(w)}  ${n} finding(s)`);
+      }
     }
   }
   if (config.mute.length > 0) console.log(`  muted: ${config.mute.join(', ')}`);
@@ -1265,7 +1296,10 @@ function writeHtmlReport(data: ReportData, archive: string, f: Argv['flags']): n
     return 1;
   }
 
-  const total = data.sessions.reduce((n, s) => n + s.findings.length, 0);
+  // Both tiers, matching what the page itself now counts. These two numbers
+  // disagreeing is what made the discrepancy invisible: the CLI said 3 while
+  // the store held 19.
+  const total = data.sessions.reduce((n, s) => n + s.findings.length + s.judged.length, 0);
   console.log(
     `wrote ${path}\n` +
       `  ${data.sessions.length} session(s) · ${total} finding(s) · ` +

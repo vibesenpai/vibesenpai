@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import { esc, renderHtml } from '../src/html.ts';
 import { redact } from '../src/redact.ts';
-import type { ReportData, SessionView } from '../src/gather.ts';
+import type { JudgedView, ReportData, SessionView } from '../src/gather.ts';
 
 const ZERO_COST = { written: 0, received: 0, carriedTurns: 0, carried: 0 };
 
@@ -21,6 +21,7 @@ function session(over: Partial<SessionView> = {}): SessionView {
     firstTs: '2026-10-01T10:00:00.000Z',
     lastTs: '2026-10-01T11:00:00.000Z',
     findings: [],
+    judged: [],
     denominators: {
       turnCount: 2,
       editCount: 5,
@@ -221,5 +222,59 @@ describe('gatherReport — the standing it builds equals the one computeStanding
       // gather covers a superset of sessions, so its figure cannot be smaller.
       expect((g as { written: number }).written).toBeGreaterThanOrEqual(v.written);
     }
+  });
+});
+
+describe('the report can see the model tier', () => {
+  // The regression this file exists to prevent from recurring.
+  //
+  // `src/html.ts`, `src/gather.ts` and `src/report-line.ts` had zero references
+  // to the judge between them. On a real machine that meant:
+  //
+  //     judge.json holds        19 findings
+  //     the report header       "16 sessions · 3 findings"
+  //
+  // The README pitches a model that reads conversation, and the report a reader
+  // would actually share could not see what it found.
+  const judged = (over: Partial<JudgedView> = {}): JudgedView => ({
+    dimension: 'constraint_violation',
+    turns: [3630, 3633],
+    why: 'The plan-mode tool result said not to edit files, and the agent edited them. A second sentence that must not appear.',
+    quote: 'DO NOT write or edit any files yet',
+    ...over,
+  });
+
+  it('counts judge findings in the header', () => {
+    const html = renderHtml(
+      data({ sessions: [session({ judged: [judged(), judged({ dimension: 'misread_intent' })] })] }),
+    );
+    expect(html).toMatch(/2 findings/);
+  });
+
+  it('renders the finding, its turns and its quote', () => {
+    const html = renderHtml(data({ sessions: [session({ judged: [judged()] })] }));
+    expect(html).toContain('constraint_violation');
+    expect(html).toContain('turns 3630, 3633');
+    expect(html).toContain('DO NOT write or edit any files yet');
+  });
+
+  it('marks the tier rather than letting it pass as a certain finding', () => {
+    // `certain` means the harness refused the call and said why. This is a
+    // model's reading. The markup must not let the two blur together.
+    const html = renderHtml(data({ sessions: [session({ judged: [judged()] })] }));
+    expect(html).toContain('flagged by a model');
+  });
+
+  it('clamps the model prose to its first sentence', () => {
+    // The judge's label stage writes in its own register, at length. Clamping
+    // is a render-time fix on purpose: changing the rubric would invalidate the
+    // measured 165/232 and require re-scoring the whole labelled set.
+    const html = renderHtml(data({ sessions: [session({ judged: [judged()] })] }));
+    expect(html).not.toContain('A second sentence that must not appear');
+  });
+
+  it('does not say "no findings" when the judge found some', () => {
+    const html = renderHtml(data({ sessions: [session({ findings: [], judged: [judged()] })] }));
+    expect(html).not.toMatch(/no findings across/);
   });
 });

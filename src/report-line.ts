@@ -187,7 +187,21 @@ export function fixLine(repoRoot: string, home: string, thisSession: boolean): s
  * an install, before the detached pass has finished. Silence is right there:
  * the pass is running and will have something next time.
  */
-export function reportBlock(s: Standing | undefined, detail?: string): string {
+/**
+ * A tally of the model tier, as `reportBlock` wants it.
+ *
+ * Passed in rather than read from `Standing`, because `Standing` is persisted
+ * state built by the detector accumulator and will never hold judge findings
+ * without a schema migration. This block was blind to them until now — the
+ * most-seen surface in the tool, reporting one tier of two.
+ */
+export type JudgedTally = { dimension: string; count: number }[];
+
+export function reportBlock(
+  s: Standing | undefined,
+  detail?: string,
+  judged: JudgedTally = [],
+): string {
   if (s === undefined) return '';
 
   // `report` rather than the bare tool name: the header has to say what this
@@ -205,6 +219,21 @@ export function reportBlock(s: Standing | undefined, detail?: string): string {
   // than the findings it explains.
   if (lines.length > 0) lines.push(...reasonLines(s.reasons));
 
+  // One line, not a list. This block is terse by design — two dimensions and a
+  // reason tally — and five judge dimensions spelled out would swamp it.
+  const judgedTotal = judged.reduce((n, j) => n + j.count, 0);
+  if (judgedTotal > 0) {
+    const names = judged
+      .slice()
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 2)
+      .map((j) => j.dimension);
+    const more = judged.length > names.length ? `, +${judged.length - names.length} more` : '';
+    lines.push(
+      `  ${judgedTotal} flagged by a model — ${names.join(', ')}${more}`,
+    );
+  }
+
   const hidden = s.dimensions.length - MAX_DIMENSIONS;
   if (hidden > 0) lines.push(`  …${hidden} more`);
 
@@ -213,7 +242,8 @@ export function reportBlock(s: Standing | undefined, detail?: string): string {
 
   if (lines.length === 0) {
     // Said in one line rather than omitted. Silence would read as broken, and
-    // inventing something to report would be worse than either.
+    // inventing something to report would be worse than either. Reached only
+    // when *both* tiers are empty — the judge tally above pushes a line.
     return `\n${head} · nothing to flag across ${s.edits} edits`;
   }
 
