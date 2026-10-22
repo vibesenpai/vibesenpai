@@ -323,3 +323,44 @@ describe('wouldLeak — the gate that stops a send', () => {
     expect(wouldLeak(redact(dirty).text)).toBe(false);
   });
 });
+
+describe('the extraction record survives into the finding', () => {
+  // This exists because the fields were added, silently reverted by a
+  // `git checkout` during unrelated work, and then COMMITTED with a message
+  // claiming they were there. The carry regression in the same batch was caught
+  // because a test failed; these had none, so 16 real findings lost their
+  // record and both `other` descriptors came back null. The descriptors are the
+  // only route to learning what dimension we are missing, so losing them
+  // quietly is the worst available outcome.
+  it('carries name, description, alignmentGoal, confidence and context', () => {
+    const r = parseLabels(
+      JSON.stringify({ labels: [{ record: 1, reasoning: 'the agent installed a dep', dimension: 'constraint_violation', other_descriptor: null }] }),
+      [episode()],
+    );
+    const f = r.findings[0];
+    expect(f?.name).toBe('Added A Dependency After Being Told Not To');
+    expect(f?.description).toMatch(/left-pad/);
+    expect(f?.alignmentGoal).toBe('instruction');
+    expect(f?.confidence).toBe('high');
+    expect(f?.context).toBe('the agent announcing the install');
+  });
+
+  it('carries otherDescriptor on an `other` finding, which is the whole point', () => {
+    const r = parseLabels(
+      JSON.stringify({ labels: [{ record: 1, reasoning: 'no dimension fits', dimension: 'other', other_descriptor: 'returned wrong command format' }] }),
+      [episode()],
+    );
+    expect(r.findings[0]?.otherDescriptor).toBe('returned wrong command format');
+  });
+
+  it('omits otherDescriptor rather than storing an empty one', () => {
+    // `exactOptionalPropertyTypes` is on, and an empty descriptor is the same
+    // as no descriptor — storing '' would make "did the hatch tell us
+    // anything" unanswerable.
+    const r = parseLabels(
+      JSON.stringify({ labels: [{ record: 1, reasoning: 'x', dimension: 'misread_intent' }] }),
+      [episode()],
+    );
+    expect(r.findings[0]).not.toHaveProperty('otherDescriptor');
+  });
+});

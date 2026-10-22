@@ -466,7 +466,42 @@ export type JudgeFinding = {
   turns: number[];
   /** What the model copied, kept so a reader can check the anchor. */
   quote: string;
+  /**
+   * One line: stage B's `reasoning`, the sentence naming the phrase that
+   * anchors the label. The terminal has 80 columns; the narrative does not fit.
+   */
   why: string;
+
+  // ── The extraction record ────────────────────────────────────────────────
+  //
+  // **This was added, reverted, and committed as if it were there.** A
+  // `git checkout -- src/judge.ts` during an unrelated struggle took every
+  // uncommitted change to this file with it. The carry regression in the same
+  // batch was caught because a test failed; these had no test, so they vanished
+  // silently and the commit message claimed otherwise. 16 real findings lost
+  // their record before anyone noticed.
+  //
+  // `otherDescriptor` is the one that matters most: `parseLabels` *requires* it
+  // for an `other` finding and then dropped it, so the escape hatch collected
+  // nothing. Reading accumulated descriptors is the only way the missing
+  // dimension gets discovered rather than invented.
+  //
+  // Optional because a v1 finding on disk has none of them, and
+  // `isReadableFinding` deliberately keeps a finding that can be anchored over
+  // one that is merely decorated.
+
+  /** Title Case noun phrase, free text — no taxonomy at extraction time. */
+  name?: string;
+  /** 3-6 sentences: intent, divergence, correction if visible, cost. */
+  description?: string;
+  /** Instruction, intention, or both — what the transcript can support. */
+  alignmentGoal?: 'instruction' | 'intention' | 'both';
+  /** The model's own confidence, used the way the paper uses it: to gate. */
+  confidence?: 'high' | 'medium' | 'low';
+  /** What the quote *shows*. The gate against quoting a rule as a breach. */
+  context?: string;
+  /** 3-8 words, present only on `other`, and the reason `other` is useful. */
+  otherDescriptor?: string;
 };
 
 export type ParseResult = {
@@ -683,9 +718,16 @@ export function parseLabels(raw: string, episodes: JudgeEpisode[]): ParseResult 
       dimension: dim as JudgeDimension,
       turns: episode.evidence.flatMap((v) => v.turns),
       quote: primary.quote,
-      // The terminal shows one line, so it shows stage B's reasoning. The
-      // 3-6 sentence narrative is persisted for the HTML report.
       why: reasoning,
+      // The record stage A produced. It was dropped here once, and the
+      // comment that used to sit in its place claimed the narrative was
+      // "persisted for the HTML report" while nothing carried it at all.
+      name: episode.name,
+      description: episode.description,
+      alignmentGoal: episode.alignmentGoal,
+      confidence: episode.confidence,
+      context: primary.context,
+      ...(descriptor === '' ? {} : { otherDescriptor: descriptor }),
     });
   }
   for (let i = 0; i < episodes.length; i += 1) {
