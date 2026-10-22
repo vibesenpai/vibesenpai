@@ -40,7 +40,7 @@ import {
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
 import { detailLine, reportBlock, fixLine } from './report-line.ts';
-import { recommend, renderFix } from './fix.ts';
+import { compactionsFor, recommend, renderFix } from './fix.ts';
 import { spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 
@@ -751,7 +751,20 @@ function cmdFix(a: Argv): number {
     console.log('no standing yet — run `standing --refresh`, or open a new session.');
     return 0;
   }
-  console.log(renderFix(recommend(s, judged), config.preset, config.mute));
+  // Whether a compaction dropped context before each finding. It changes the
+  // recommendation rather than decorating it: an instruction that was
+  // summarised away was not ignored, and "move it out of the conversation" is
+  // a different fix from "word the rule better".
+  const compactions = compactionsFor(judged, (id) => {
+    const src = findSessionSource(config.sources, id);
+    if (src === undefined) return undefined;
+    try {
+      return [...parseTranscript(readFileSync(src, 'utf8').split('\n'), id).events];
+    } catch {
+      return undefined;
+    }
+  });
+  console.log(renderFix(recommend(s, judged, compactions), config.preset, config.mute));
   return 0;
 }
 

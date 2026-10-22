@@ -8,10 +8,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { Event } from '../src/types.ts';
+
+let seq = 0;
+const ev = (o: Partial<Event> & Pick<Event, 'turnType'>): Event =>
+  ({ uuid: `u${++seq}`, sessionId: 's1', seq, ts: '2026-01-01T00:00:00.000Z', ...o }) as Event;
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recommend, renderFix, memoryAllowed, MEMORY_WORD_BUDGET } from '../src/fix.ts';
+import { recommend, renderFix, memoryAllowed, MEMORY_WORD_BUDGET, compactionsFor } from '../src/fix.ts';
 import type { Standing } from '../src/standing.ts';
 
 const base = (over: Partial<Standing> = {}): Standing => ({
@@ -308,5 +313,64 @@ describe('fix — the output explains itself without citing papers at the user',
     const r = recommend(base(), [{ sessionId: 's1', dimension: 'constraint_violation', turns: [9], why: 'x', at: 'now' }] as never);
     expect(r?.because).toMatch(/checked by Claude Code itself/);
     expect(r?.because).not.toMatch(/\d+%/);
+  });
+});
+
+describe('fix — a constraint that was compacted away was not ignored', () => {
+  const cv = [{ sessionId: 's1', dimension: 'constraint_violation', turns: [2711], why: 'x', at: 'now' }] as never;
+
+  it('changes the recommendation when a compaction preceded the violation', () => {
+    // "Enforcement survives, context does not" — the harness docs' own line.
+    // Permissions and hooks are configuration, so a compact cannot remove
+    // them; an instruction typed into the conversation is simply gone. Measured
+    // across 1,323 episodes: 0% violation when the constraint survived the
+    // summary, 38% when it was dropped. So this is a different problem with a
+    // different fix, not a worse-worded rule.
+    const r = recommend(base(), cv, new Map([['s1', { before: 2, dropped: 904_334 }]]));
+    expect(r?.kind).toBe('CONFIG');
+    expect(r?.because).toMatch(/may not have been ignored/);
+    expect(r?.because).toMatch(/904,000\+/);
+    expect(r?.config?.snippet).toMatch(/"matcher": "compact"/);
+    expect(r?.config?.snippet).toMatch(/SessionStart/);
+  });
+
+  it('gives the ordinary mechanism when no compaction preceded it', () => {
+    const r = recommend(base(), cv, new Map());
+    expect(r?.kind).toBe('VERIFY');
+    expect(r?.because).not.toMatch(/compacted/);
+  });
+
+  it('ignores a compaction that happened AFTER the cited turn', () => {
+    // `compactionsFor` only counts compactions strictly before the finding, so
+    // a later one cannot explain an earlier violation.
+    seq = 0;
+    const events = [
+      ev({ turnType: 'user_prompt' }),
+      ev({ turnType: 'assistant_msg' }),
+      ev({ turnType: 'assistant_msg', systemKind: 'compaction', compaction: { preTokens: 900_000, postTokens: 1_000 } }),
+    ];
+    const found = compactionsFor(
+      [{ sessionId: 's1', dimension: 'constraint_violation', turns: [1], why: 'x', at: 'now' }] as never,
+      () => events,
+    );
+    expect(found.size).toBe(0);
+  });
+
+  it('measures what the last compaction dropped, not the first', () => {
+    seq = 0;
+    const events = [
+      ev({ turnType: 'assistant_msg', systemKind: 'compaction', compaction: { preTokens: 100_000, postTokens: 1_000 } }),
+      ev({ turnType: 'assistant_msg', systemKind: 'compaction', compaction: { preTokens: 900_000, postTokens: 2_000 } }),
+      ev({ turnType: 'assistant_msg' }),
+    ];
+    const found = compactionsFor(
+      [{ sessionId: 's1', dimension: 'constraint_violation', turns: [3], why: 'x', at: 'now' }] as never,
+      () => events,
+    );
+    expect(found.get('s1')).toEqual({ before: 2, dropped: 898_000 });
+  });
+
+  it('treats an unreadable transcript as no overlay, not as an error', () => {
+    expect(compactionsFor(cv, () => undefined).size).toBe(0);
   });
 });

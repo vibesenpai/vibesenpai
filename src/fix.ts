@@ -35,6 +35,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Event } from './types.ts';
 import type { Standing } from './standing.ts';
 import type { JudgedFinding } from './judge-store.ts';
 import { reasonLabel } from './report-line.ts';
@@ -209,6 +210,40 @@ const STOP_HOOK_COSTS =
   'This can stop a turn from finishing and send the agent back to work. ' +
   'Claude Code will not let that repeat more than 8 times in a row.';
 
+/**
+ * What a compaction did before the cited turn, if anything.
+ *
+ * ── Why this changes the recommendation rather than decorating it ─────────
+ *
+ * The harness docs put it in one line: **"enforcement survives, context does
+ * not."** Permissions and hooks are configuration, so a compaction cannot
+ * remove them. Project-root `CLAUDE.md` is re-read from disk after a compact.
+ * A constraint typed into the conversation is simply gone.
+ *
+ * That split is measurable. Across 1,323 episodes, a governance constraint was
+ * violated **0% of the time when it survived the summary and 38% when it was
+ * dropped** (arXiv 2606.22528). So when a compaction sits between a constraint
+ * and its violation, the useful advice is not a better-worded rule — it is
+ * *move this out of the conversation*, which is a different category of fix.
+ *
+ * `dropped` is `preTokens - postTokens` of the last compaction before the
+ * finding: the size of what the agent stopped being able to see.
+ */
+export type CompactionContext = {
+  /** Compactions strictly before the cited turn. */
+  before: number;
+  /** Tokens the last one discarded. */
+  dropped: number;
+};
+
+/**
+ * Compaction context per session, keyed by id.
+ *
+ * Computed by the caller, because `recommend` is pure and the events live on
+ * disk — the same reason `Standing` is passed in rather than read here.
+ */
+export type Compactions = Map<string, CompactionContext>;
+
 type DimensionFix = {
   kind: ArtifactKind;
   prompt?: string;
@@ -310,6 +345,7 @@ function plural(n: number, one: string, many = `${one}s`): string {
 export function recommend(
   s: Standing | undefined,
   judged: JudgedFinding[] = [],
+  compactions: Compactions = new Map(),
 ): Recommendation | undefined {
   // ── Judge findings outrank rule findings, and the reason is the mechanism ──
   //
@@ -336,16 +372,55 @@ export function recommend(
     const turns = anchors.flatMap((f) => f.turns).sort((a, b) => a - b);
     const where =
       turns.length > 1 ? `turns ${turns[0]}–${turns[turns.length - 1]}` : `turn ${turns[0] ?? '?'}`;
+    // ── The compaction overlay ────────────────────────────────────────────
+    //
+    // If a compaction dropped context before the cited turn, the constraint
+    // was probably not ignored — it was no longer there to follow. That is a
+    // different problem with a different fix, so it replaces the generic
+    // mechanism rather than being appended to it.
+    const lost = anchors
+      .map((f) => compactions.get(f.sessionId))
+      .filter((c): c is CompactionContext => c !== undefined && c.before > 0)
+      .sort((a, b) => b.dropped - a.dropped)[0];
+
+    const overlay =
+      lost !== undefined && (dimension === 'constraint_violation' || dimension === 'overreach')
+        ? {
+            because:
+              'This one may not have been ignored. The conversation was ' +
+              `compacted first, dropping about ${approx(lost.dropped)} tokens — ` +
+              'so by the time of this turn the instruction may simply no longer ' +
+              'have been in view. Anything you say in chat can be summarised ' +
+              'away; a file on disk cannot.',
+            config: {
+              what: 'put standing instructions in a file, and re-read it after every compaction',
+              snippet: `# once:  put them in .claude/standing.md
+{ "hooks": { "SessionStart": [{ "matcher": "compact",
+    "hooks": [{ "type": "command", "command": "cat .claude/standing.md" }] }] } }`,
+              costs:
+                'Costs you nothing per turn. The file is re-read only after a ' +
+                'compaction, so it stays out of the way until the moment it is ' +
+                'needed. Project CLAUDE.md is already re-read this way — this is ' +
+                'for the instructions that are too long or too situational to live ' +
+                'there.',
+            },
+          }
+        : undefined;
+
     return {
-      kind: fix.kind,
+      kind: overlay !== undefined ? 'CONFIG' : fix.kind,
       dimension,
       evidence:
         `${plural(n, 'time')} across your sessions, at ${where}` +
         (first.name !== undefined ? ` — ${first.name}` : '') +
         (first.quote !== undefined && first.quote !== '' ? `\n             "${first.quote.slice(0, 90)}"` : ''),
-      because: fix.because,
+      because: overlay?.because ?? fix.because,
       ...(fix.prompt !== undefined ? { prompt: fix.prompt } : {}),
-      ...(fix.config !== undefined ? { config: fix.config } : {}),
+      ...(overlay?.config !== undefined
+        ? { config: overlay.config }
+        : fix.config !== undefined
+          ? { config: fix.config }
+          : {}),
       ...(fix.external !== undefined ? { external: fix.external } : {}),
     };
   }
@@ -477,6 +552,38 @@ export function recommend(
     because: `${reasonLabel(reason)} is the most common reason, at ${n} of ${target.occurrences}.`,
     ...(cost !== undefined && cost.written + cost.received > 0 ? { cost } : {}),
   };
+}
+
+/**
+ * Compaction context for the sessions a set of findings came from.
+ *
+ * Reads each transcript once and keeps only two numbers per session, because
+ * the alternative is holding every event for a recommendation that needs a
+ * count and a size.
+ *
+ * Unreadable is not an error: a missing transcript means no overlay, which is
+ * the same outcome as no compaction and the correct one either way.
+ */
+export function compactionsFor(
+  judged: JudgedFinding[],
+  read: (sessionId: string) => Event[] | undefined,
+): Compactions {
+  const out: Compactions = new Map();
+  for (const id of new Set(judged.map((f) => f.sessionId))) {
+    const events = read(id);
+    if (events === undefined) continue;
+    const cited = Math.min(
+      ...judged.filter((f) => f.sessionId === id).flatMap((f) => f.turns),
+    );
+    const before = events
+      .filter((e) => e.compaction !== undefined && e.seq < cited)
+      .sort((a, b) => a.seq - b.seq);
+    const last = before[before.length - 1];
+    if (last === undefined) continue;
+    const c = last.compaction as { preTokens: number; postTokens: number };
+    out.set(id, { before: before.length, dropped: Math.max(0, c.preTokens - c.postTokens) });
+  }
+  return out;
 }
 
 /**
