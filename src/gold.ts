@@ -138,30 +138,73 @@ export function locateSessions(
  *
  * Their `TURN 3 | USER` comes from their own formatter, which merges
  * consecutive same-role messages — so it cannot be compared to our `seq` at
- * all. The quotes can: 72% of them are locatable in our parsed events, and
- * every episode checked had at least one.
+ * all. The quotes can.
  *
- * Matched on a 40-character prefix because our summaries are capped and
- * redacted; a full-string match would fail on exactly the long quotes most
- * worth finding.
+ * ── Both sides must be located on the same text ───────────────────────────
+ *
+ * This searched `textSummary`: the 200-character, head-only cap that exists so
+ * an evidence row fits in 80 columns, and that `packet.ts` was written to
+ * escape. The judge quotes **full text**. So every comparison had the gold
+ * evidence anchored on one string and the finding on another, and a gold quote
+ * from the tail of a long message could not be found at all.
+ *
+ * Reading `full` instead: **570 anchors rather than 371**, and episodes with no
+ * locatable evidence fall from 2 to 0.
+ *
+ * It also keeps **every** match rather than stopping at the first. Repeated
+ * text — a re-pasted instruction, a compaction summary echoing earlier turns —
+ * appears more than once, and pinning the episode to its first occurrence put
+ * its evidence hundreds of turns from where the judge was looking.
+ *
+ * Matched on a 40-character prefix because text is redacted on both sides; a
+ * full-string match would fail on exactly the long quotes most worth finding.
  */
-export function locateTurns(ep: GoldEpisode, events: Event[]): number[] {
+export function locateTurns(
+  ep: GoldEpisode,
+  events: Event[],
+  full?: Map<number, string>,
+): number[] {
   const hay = events.map((e) => ({
     seq: e.seq,
-    text: (e.textSummary ?? e.command ?? '').replace(/\s+/g, ' '),
+    text: (full?.get(e.seq) ?? e.textSummary ?? e.command ?? '').replace(/\s+/g, ' '),
   }));
   const seqs: number[] = [];
   for (const q of ep.quotes) {
     const needle = q.replace(/\s+/g, ' ').trim().slice(0, 40);
     if (needle.length < 12) continue;
     for (const h of hay) {
-      if (h.text.includes(needle) && !seqs.includes(h.seq)) {
-        seqs.push(h.seq);
-        break;
-      }
+      if (h.text.includes(needle) && !seqs.includes(h.seq)) seqs.push(h.seq);
     }
   }
   return seqs.sort((a, b) => a - b);
+}
+
+/**
+ * Sessions their pipeline processed and found **nothing** in.
+ *
+ * `session_mapping.json` lists all 20,574 sessions that went through
+ * extraction, so a session absent from the episode list was examined and came
+ * back empty — a labelled negative, not an unexamined one. 319 of ours qualify.
+ *
+ * **This is the only instrument that can turn our number into a precision.**
+ * On a session with episodes, a finding they did not record might be their
+ * miss; here it is a false-positive candidate, because they looked.
+ *
+ * Two caveats that must travel with any figure from it. Their 0.93 precision
+ * was self-scored on 200 of 16,118 records, so these labels are strong rather
+ * than perfect. And we deliberately do not adopt their "visible developer
+ * pushback" trigger, so some findings here will be correct and merely outside
+ * what they set out to count.
+ */
+export function loadNegatives(mappingPath: string, episodes: GoldEpisode[]): Set<string> {
+  const raw = JSON.parse(readFileSync(mappingPath, 'utf8')) as { session_sha?: unknown }[];
+  const withEpisode = new Set(episodes.map((e) => e.sessionSha));
+  const out = new Set<string>();
+  for (const r of raw) {
+    const sha = r['session_sha'];
+    if (typeof sha === 'string' && !withEpisode.has(sha)) out.add(sha);
+  }
+  return out;
 }
 
 export type JudgeOutput = { sessionId: string; dimension: JudgeDimension; turns: number[] };
@@ -186,6 +229,36 @@ export type GoldScore = {
   outOfScope: number;
   sessionsJudged: number;
   byDimension: Record<string, { inScope: number; matched: number }>;
+
+  /**
+   * **The headline, and the unit that matches the product.**
+   *
+   * `/agentsensei:fix` surfaces *one thing to try*. It has never claimed to
+   * enumerate every episode in a session, so a session holding three problems
+   * where one real one is surfaced with correct evidence is a served user —
+   * counting the other two as misses measures a product nobody built.
+   *
+   * `caught` requires **at least one labelled episode found AND turn-anchored**.
+   * The tempting wrong reading — "did we emit any finding in this session" —
+   * scores 76% where this scores 60%, because it credits 9 sessions where the
+   * judge spoke and hit nothing real. That is the exact failure this project
+   * refuses to reward, so the distinction is asserted in a test.
+   */
+  sessionLevel: { withEpisode: number; caught: number; recall: number | undefined };
+
+  /**
+   * Episodes caught at the right place, **whatever label we gave them**.
+   *
+   * The paper multi-labels — 38 of 127 episodes carry more than one dimension —
+   * so S2/S3/S4/S7 are not mutually exclusive in the gold set either. Calling
+   * an episode `misread_intent` where they recorded `constraint_violation` on
+   * the same turn is two models disagreeing on a fuzzy boundary, not a missed
+   * problem. Still turn-anchored: only the label is free.
+   */
+  episodeLevel: { total: number; caught: number; recall: number | undefined };
+
+  /** Our label against theirs, for episodes we located but labelled otherwise. */
+  confusion: Record<string, number>;
 };
 
 /**
@@ -248,14 +321,55 @@ export function score(
     }
   }
 
+  // ── The two looser denominators, both still turn-anchored ────────────────
+  //
+  // Computed from the same findings and the same tolerance. Nothing here
+  // relaxes where a finding must sit; they relax only the LABEL and the UNIT.
+  const near = (f: JudgeOutput, ep: GoldEpisode): boolean => {
+    const evidence = located.get(`${ep.sessionSha}:${ep.misalignmentId}`) ?? [];
+    return evidence.length === 0 || f.turns.some((t) => evidence.some((e) => Math.abs(t - e) <= TURN_TOLERANCE));
+  };
+
+  const confusion: Record<string, number> = {};
+  let episodesCaught = 0;
+  for (const ep of inScopeEps) {
+    const here = mine.filter((f) => f.sessionId === ep.sessionSha && near(f, ep));
+    if (here.length > 0) episodesCaught++;
+    for (const f of here) {
+      if (ep.dimensions.includes(f.dimension)) continue;
+      for (const d of ep.dimensions) {
+        const key = `${f.dimension} -> ${d}`;
+        confusion[key] = (confusion[key] ?? 0) + 1;
+      }
+    }
+  }
+
+  const sessionsWithEpisode = [...new Set(inScopeEps.map((e) => e.sessionSha))];
+  const sessionsCaught = sessionsWithEpisode.filter((sha) =>
+    inScopeEps.some((ep) => ep.sessionSha === sha && mine.some((f) => f.sessionId === sha && near(f, ep))),
+  ).length;
+
+  const claims = inScopeEps.reduce((n, e) => n + e.dimensions.length, 0);
+
   return {
-    inScope: inScopeEps.reduce((n, e) => n + e.dimensions.length, 0),
+    inScope: claims,
     matched,
-    recall: inScopeEps.length === 0 ? undefined : matched / inScopeEps.reduce((n, e) => n + e.dimensions.length, 0),
+    recall: claims === 0 ? undefined : matched / claims,
     rightDimensionWrongPlace: nearMiss,
     unmatched: mine.length - usedFindings.size,
     outOfScope,
     sessionsJudged: judged.size,
     byDimension,
+    sessionLevel: {
+      withEpisode: sessionsWithEpisode.length,
+      caught: sessionsCaught,
+      recall: sessionsWithEpisode.length === 0 ? undefined : sessionsCaught / sessionsWithEpisode.length,
+    },
+    episodeLevel: {
+      total: inScopeEps.length,
+      caught: episodesCaught,
+      recall: inScopeEps.length === 0 ? undefined : episodesCaught / inScopeEps.length,
+    },
+    confusion,
   };
 }

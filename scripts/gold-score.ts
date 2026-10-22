@@ -30,7 +30,7 @@ import { tmpdir } from 'node:os';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
 import { buildSession, parseResponse, renderPacket, type JudgePacketSession } from '../src/judge.ts';
 import { JUDGE_CWD_MARKER } from '../src/read.ts';
-import { loadGold, locateSessions, locateTurns, score, type JudgeOutput } from '../src/gold.ts';
+import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from '../src/gold.ts';
 import { redact } from '../src/redact.ts';
 import type { Event } from '../src/types.ts';
 
@@ -59,6 +59,7 @@ function callModel(packet: string, model: string): string | undefined {
     const u = r.usage ?? {};
     spent.input += (u['cache_creation_input_tokens'] ?? 0) + (u['cache_read_input_tokens'] ?? 0) + (u['input_tokens'] ?? 0);
     spent.output += u['output_tokens'] ?? 0;
+    spent.usd += (r as { total_cost_usd?: number }).total_cost_usd ?? 0;
     spent.calls++;
     return r.result;
   } catch {
@@ -66,14 +67,31 @@ function callModel(packet: string, model: string): string | undefined {
   }
 }
 
-const spent = { calls: 0, input: 0, output: 0 };
+// `total_cost_usd` comes back from the harness itself, so it is measured
+// rather than derived from a price table we would have to keep current.
+const spent = { calls: 0, input: 0, output: 0, usd: 0 };
 
 async function main(): Promise<void> {
   const limit = Number(process.argv[2] ?? '30');
   const model = process.argv[3] ?? 'haiku';
 
   const episodes = loadGold(GOLD_JSON);
-  const files = locateSessions(episodes, SESSION_DIRS);
+
+  // `--negatives` scores the other half of the question: on sessions their
+  // pipeline examined and found nothing in, every finding is a false-positive
+  // candidate. Recall alone cannot say whether we are better or merely noisier.
+  const negativesMode = process.argv.includes('--negatives');
+  let files: Map<string, string>;
+  if (negativesMode) {
+    const mapping = process.env['AGENTSENSEI_GOLD_MAPPING'] ?? '/tmp/cam-check/data/core/session_mapping.json';
+    const negative = loadNegatives(mapping, episodes);
+    files = locateSessions(
+      [...negative].map((sessionSha) => ({ sessionSha }) as never),
+      SESSION_DIRS,
+    );
+  } else {
+    files = locateSessions(episodes, SESSION_DIRS);
+  }
   const shas = [...files.keys()].slice(0, limit);
 
   console.log(`gold · ${episodes.length} swe episodes · ${files.size} sessions held · judging ${shas.length} · ${model}\n`);
@@ -101,7 +119,7 @@ async function main(): Promise<void> {
 
     for (const ep of episodes) {
       if (ep.sessionSha !== sha) continue;
-      located.set(`${sha}:${ep.misalignmentId}`, locateTurns(ep, events));
+      located.set(`${sha}:${ep.misalignmentId}`, locateTurns(ep, events, fullText));
     }
   }
 
@@ -164,22 +182,54 @@ async function main(): Promise<void> {
     console.log(`\n  findings cached to ${cache}`);
   }
 
+  if (negativesMode) {
+    const bySession = new Map<string, number>();
+    for (const f of found) bySession.set(f.sessionId, (bySession.get(f.sessionId) ?? 0) + 1);
+    const byDim: Record<string, number> = {};
+    for (const f of found) byDim[f.dimension] = (byDim[f.dimension] ?? 0) + 1;
+    console.log(`\n  LABELLED-NEGATIVE sessions judged : ${packets.length}`);
+    console.log(`  sessions where we found something : ${bySession.size}`);
+    console.log(`  findings (all false-positive candidates) : ${found.length}`);
+    console.log(`  per dimension: ${JSON.stringify(byDim)}`);
+    console.log(
+      `\n  spent: ${spent.calls} call(s) · ${spent.input.toLocaleString()} in · ` +
+        `${spent.output.toLocaleString()} out` +
+        (spent.usd > 0 ? ` · $${spent.usd.toFixed(2)} (harness-reported)` : ''),
+    );
+    return;
+  }
+
   const s = score(episodes, located, found, packets.map((p) => p.sessionId));
 
+  const pct = (r: number | undefined): string => (r === undefined ? 'n/a' : `${(r * 100).toFixed(0)}%`);
+
   console.log(`\n  sessions judged          : ${s.sessionsJudged}`);
-  console.log(`  labelled claims in scope : ${s.inScope}`);
   console.log(`  out of scope (S1/S5/S6)  : ${s.outOfScope}  — the packet cannot show these`);
   console.log('');
-  console.log(`  MATCHED                  : ${s.matched}`);
-  console.log(`  recall                   : ${s.recall === undefined ? 'n/a' : `${(s.recall * 100).toFixed(0)}%`}`);
+  // Loosest first: this is the unit the product is built around. Every one of
+  // the three requires a finding within TURN_TOLERANCE of located evidence —
+  // they differ only in the denominator and whether the LABEL must match.
+  console.log(`  SESSION-level  (any dimension) : ${s.sessionLevel.caught}/${s.sessionLevel.withEpisode}   ${pct(s.sessionLevel.recall)}   <- headline`);
+  console.log(`  episode-level  (any dimension) : ${s.episodeLevel.caught}/${s.episodeLevel.total}   ${pct(s.episodeLevel.recall)}`);
+  console.log(`  claim-level    (exact dimension): ${s.matched}/${s.inScope}   ${pct(s.recall)}`);
+  console.log('');
   console.log(`  right dimension, wrong place: ${s.rightDimensionWrongPlace}`);
   console.log(`  unmatched findings       : ${s.unmatched}  — read these; they are not automatically wrong`);
   console.log('');
   for (const [dim, v] of Object.entries(s.byDimension)) {
     console.log(`    ${dim.padEnd(24)} ${v.matched}/${v.inScope}`);
   }
+  const conf = Object.entries(s.confusion).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (conf.length > 0) {
+    console.log('\n  label disagreements (ours -> theirs), on episodes we DID locate:');
+    for (const [k, n] of conf) console.log(`    ${k.padEnd(46)} ${n}`);
+  }
   if (Object.keys(dropped).length > 0) console.log(`\n  gate dropped: ${JSON.stringify(dropped)}`);
-  console.log(`\n  spent: ${spent.calls} call(s) · ${spent.input.toLocaleString()} in · ${spent.output.toLocaleString()} out`);
+  console.log(
+    `\n  spent: ${spent.calls} call(s) · ${spent.input.toLocaleString()} in · ` +
+      `${spent.output.toLocaleString()} out` +
+      (spent.usd > 0 ? ` · $${spent.usd.toFixed(2)} (harness-reported)` : ''),
+  );
 }
 
 main().catch((e: unknown) => {

@@ -120,20 +120,40 @@ export type PacketTurn = {
   seqs: number[];
   text: string;
   /**
-   * Where each constituent turn's text sits inside `text`.
+   * Each constituent turn's own text, kept so a quote can name its turn.
    *
    * **Without this a quote resolves to the block it is in, not the turn.** A
-   * merged agent turn spans a measured p90 of 92 `seq` and a maximum of 768,
+   * merged agent turn spans a measured p90 of 79 `seq` and a maximum of 454,
    * so returning the first seq put the evidence up to hundreds of turns from
    * where it actually was — which scored as "right dimension, wrong place"
    * and was mistaken for a judge failure.
+   *
+   * **It holds text rather than offsets, and that is the whole fix.** Offsets
+   * were measured against the pre-truncation block, so `buildTurns` had to
+   * discard them whenever the text was cut — and `turnForQuote` then fell back
+   * to the block's first seq with no error. Measured over 87 findings: 45
+   * resolved through that fallback and sat a median **460 seq** from their
+   * evidence, against 222 for the ones that resolved exactly. Text cannot go
+   * stale, so there is nothing left to invalidate.
    */
-  parts: { seq: number; start: number; end: number }[];
+  parts: { seq: number; text: string }[];
 };
 
-/** A `user` record the harness wrote, not something the developer said. */
+/**
+ * A `user` record the harness wrote, not something the developer said.
+ *
+ * **`command-name` is deliberately NOT filtered.** It was, and that discarded
+ * the developer's intent whenever they expressed it as a slash command: the
+ * gold evidence for one episode is literally
+ * `<command-name>/gsd:discuss-phase</command-name> <command-args>23</command-args>`,
+ * and the judge never saw it. One episode in this corpus, but local sessions
+ * are full of `/commands` and every one of them was being dropped.
+ *
+ * `command-message` stays filtered — it is the harness echoing the command back
+ * — as do `task-notification` and `local-command`, which no developer typed.
+ */
 function isHarnessNoise(text: string): boolean {
-  return /^<(?:task-notification|command-message|command-name|local-command)/.test(text);
+  return /^<(?:task-notification|command-message|local-command)/.test(text);
 }
 
 /**
@@ -177,29 +197,28 @@ export function buildTurns(events: Event[], full: Map<number, string>): PacketTu
     if (line === undefined) continue;
     const last = merged[merged.length - 1];
     if (last !== undefined && last.role === line.role) {
-      const start = last.text.length + 2;
       last.text += `\n\n${line.text}`;
       last.seqs.push(e.seq);
-      last.parts.push({ seq: e.seq, start, end: last.text.length });
+      last.parts.push({ seq: e.seq, text: line.text });
     } else {
       merged.push({
         role: line.role,
         seqs: [e.seq],
         text: line.text,
-        parts: [{ seq: e.seq, start: 0, end: line.text.length }],
+        parts: [{ seq: e.seq, text: line.text }],
       });
     }
   }
 
   const budget = agentBudget(merged.length);
-  return merged.map((t) => {
-    const text = truncate(t.text, t.role === 'USER' ? PROMPT_UNCAPPED : budget);
-    // Truncation moves everything after the cut, so offsets computed on the
-    // full text no longer hold. Rather than guess, parts are kept only when
-    // nothing was removed; `turnForQuote` falls back to the block start, which
-    // is the honest answer once the middle is gone.
-    return text === t.text ? { ...t, text } : { ...t, text, parts: [] };
-  });
+  // `parts` survives truncation untouched: it holds each turn's own text, so
+  // cutting the rendered block cannot move anything. The rendered text is what
+  // the model sees and what the gate checks; `parts` is only ever used to name
+  // the turn a quote came from.
+  return merged.map((t) => ({
+    ...t,
+    text: truncate(t.text, t.role === 'USER' ? PROMPT_UNCAPPED : budget),
+  }));
 }
 
 export type SessionPacket = {
@@ -213,25 +232,17 @@ export function buildPacket(
   sessionId: string,
   events: Event[],
   full: Map<number, string>,
-  opts: { agentBudgetScale?: number } = {},
 ): SessionPacket {
+  // There was an `agentBudgetScale` option here, the un-wired remnant of a
+  // degrade-until-it-fits idea. No caller ever passed it, and it re-truncated
+  // while carrying the original offsets forward — wrong turn numbers, no
+  // error. Deleted rather than fixed: the batcher takes whole sessions and
+  // defers the rest, which is the behaviour that was actually wanted.
   const turns = buildTurns(events, full);
-  const scale = opts.agentBudgetScale ?? 1;
-  const scaled =
-    scale === 1
-      ? turns
-      : turns.map((t) => ({
-          ...t,
-          // Only the agent degrades. Prompts stay whole at any scale: halving
-          // the developer's instruction would remove the evidence for the two
-          // largest dimensions in order to afford the session.
-          text: t.role === 'USER' ? t.text : truncate(t.text, agentBudget(turns.length) * scale),
-        }));
-
   return {
     sessionId,
-    turns: scaled,
-    seqs: scaled.flatMap((t) => t.seqs),
+    turns,
+    seqs: turns.flatMap((t) => t.seqs),
   };
 }
 
@@ -256,35 +267,53 @@ export function renderSession(p: SessionPacket): string {
 }
 
 /**
- * Which turn a quote came from.
+ * Which turn or turns a quote came from.
  *
  * The model quotes; we derive the number. It never counts, so it cannot
  * miscount — and a fabricated quote simply is not found, where a fabricated
  * turn number can pass by coincidence and attach to the wrong claim.
  *
+ * ── Searched against each turn's own text, never by offset ─────────────────
+ *
+ * The previous version located the quote in the merged block and then worked
+ * out which constituent turn that character offset fell inside. That arithmetic
+ * was correct and still gave the wrong answer, because truncating the block
+ * moved every offset after the cut — so `buildTurns` discarded `parts` on any
+ * truncated block and this function silently returned `seqs[0]`. With a 500
+ * character agent budget past 74 merged turns, nearly every long block in a
+ * long session took that path.
+ *
+ * Searching each part's own text has no offsets to go stale.
+ *
+ * **Returns every match.** Repeated text — a re-pasted instruction, a
+ * compaction summary echoing earlier turns — appears more than once, and the
+ * first occurrence is not privileged. Returning all of them lets the scorer and
+ * the reader see the ambiguity instead of inheriting an arbitrary pick.
+ *
  * Matched on a normalised prefix because a model may reflow whitespace or stop
  * short; an exact comparison would fail on the long quotes most worth having.
  */
-export function turnForQuote(p: SessionPacket, quote: string): number | undefined {
+export function turnsForQuote(p: SessionPacket, quote: string): number[] {
   const needle = quote.replace(/\s+/g, ' ').trim().slice(0, 60);
-  if (needle.length < 8) return undefined;
+  if (needle.length < 8) return [];
 
+  const hits: number[] = [];
   for (const t of p.turns) {
-    // Normalised for the search, then mapped back through the same transform
-    // so an offset in one is an offset in the other.
-    const flat = t.text.replace(/\s+/g, ' ');
-    const at = flat.indexOf(needle);
-    if (at === -1) continue;
-
-    // Which constituent turn that offset fell in. Whitespace collapsing shifts
-    // offsets slightly, so the comparison is against normalised part bounds
-    // rather than raw ones.
     for (const part of t.parts) {
-      const startFlat = t.text.slice(0, part.start).replace(/\s+/g, ' ').length;
-      const endFlat = t.text.slice(0, part.end).replace(/\s+/g, ' ').length;
-      if (at >= startFlat && at <= endFlat) return part.seq;
+      if (!part.text.replace(/\s+/g, ' ').includes(needle)) continue;
+      if (!hits.includes(part.seq)) hits.push(part.seq);
     }
-    return t.seqs[0];
   }
-  return undefined;
+  return hits.sort((a, b) => a - b);
+}
+
+/**
+ * The first turn a quote came from, or `undefined`.
+ *
+ * Kept for callers that want a single anchor. **The quote must still be present
+ * in the rendered packet** — that check belongs to the caller and is what stops
+ * a quote matching text truncation removed from view.
+ */
+export function turnForQuote(p: SessionPacket, quote: string): number | undefined {
+  return turnsForQuote(p, quote)[0];
 }

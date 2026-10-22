@@ -70,7 +70,7 @@
  * function is load-bearing; see `test/judge.test.ts`.
  */
 
-import { buildPacket, renderSession, turnForQuote, type SessionPacket } from './packet.ts';
+import { buildPacket, renderSession, turnsForQuote, type SessionPacket } from './packet.ts';
 import type { Event } from './types.ts';
 
 /** What a judged finding may claim. Deliberately narrow. */
@@ -386,6 +386,11 @@ export type ParseResult = {
  * and sessions not in the batch are all hallucination shapes, and dropping them
  * silently would hide exactly the failure mode that killed three rule detectors.
  */
+/** The same normalisation both sides of the presence check must use. */
+function flatten(quote: string): string {
+  return quote.replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
 export function parseResponse(raw: string, sessions: JudgePacketSession[]): ParseResult {
   const byId = new Map(sessions.map((s) => [s.sessionId, s]));
   const drops = new Map<string, number>();
@@ -437,8 +442,18 @@ export function parseResponse(raw: string, sessions: JudgePacketSession[]): Pars
     // "hallucinations" whose reasoning was sound. And a fabricated quote is
     // simply not found, where a fabricated number can pass by coincidence and
     // attach itself to the wrong claim.
-    const turn = turnForQuote(session.packet, f.quote);
-    if (turn === undefined) {
+    //
+    // **Two checks, in this order, and the order matters.** `turnsForQuote`
+    // searches each turn's own untruncated text, which is what makes the anchor
+    // immune to truncation — but it would also match text the cut removed from
+    // view, which the model cannot have quoted. So presence in the RENDERED
+    // packet is asserted first and the turn is resolved second.
+    if (!renderSession(session.packet).replace(/\s+/g, ' ').includes(flatten(f.quote))) {
+      drop('quote is not in the packet');
+      continue;
+    }
+    const turns = turnsForQuote(session.packet, f.quote);
+    if (turns.length === 0) {
       drop('quote is not in the packet');
       continue;
     }
@@ -446,7 +461,7 @@ export function parseResponse(raw: string, sessions: JudgePacketSession[]): Pars
     findings.push({
       sessionId: session.sessionId,
       dimension: f.dimension as JudgeDimension,
-      turns: [turn],
+      turns,
       quote: f.quote.trim(),
       why: f.why.trim(),
     });

@@ -27,13 +27,13 @@ const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => (
     turns: [
       {
         role: 'USER', seqs: [9], text: 'do the thing, but do not add dependencies',
-        parts: [{ seq: 9, start: 0, end: 41 }],
+        parts: [{ seq: 9, text: 'do the thing, but do not add dependencies' }],
       },
       {
         role: 'AGENT', seqs: [10, 11, 12], text: 'on it\n\n[Bash] pnpm add left-pad',
         // Two constituents: the prose at 10, the call at 12. A quote from the
         // call must resolve to 12, not to the block start.
-        parts: [{ seq: 10, start: 0, end: 5 }, { seq: 12, start: 7, end: 31 }],
+        parts: [{ seq: 10, text: 'on it' }, { seq: 12, text: '[Bash] pnpm add left-pad' }],
       },
     ],
     seqs: [9, 10, 11, 12],
