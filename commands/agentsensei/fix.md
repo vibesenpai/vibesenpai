@@ -3,7 +3,7 @@ description: One evidence-backed change to try, from your own sessions
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/src/cli.js" fix`
+!`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" fix`
 
 Reproduce the recommendation above in a code block, preserving every line and
 figure exactly. You may bold the figures and nothing else — the command cannot

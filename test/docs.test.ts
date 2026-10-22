@@ -24,7 +24,9 @@
  * is scoped rather than global, and the scope is the risk.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { JUDGE_DIMENSIONS } from '../src/judge.ts';
@@ -260,5 +262,57 @@ describe('the docs do not promise an install that does not exist', () => {
     for (const file of ['README.md', 'CONTRIBUTING.md']) {
       expect(readFileSync(file, 'utf8')).not.toMatch(/\b\d{3,} tests\b/);
     }
+  });
+});
+
+describe('documented output samples match the shape the code produces', () => {
+  // The full Tier-0 mechanism — regenerating every sample from a live run —
+  // is not built. This is the cheap part of it, and it catches the failure
+  // that actually matters.
+  //
+  // Numbers in a sample drift harmlessly: they illustrate one machine, and a
+  // reader understands that. What makes a sample worthless is *shape* drift —
+  // a renamed label, a dropped column, a changed unit — because then the
+  // sample describes a tool that no longer exists, which is how every README
+  // block in this project came to be fiction.
+  //
+  // So: run the real command, normalise every digit away, and require each
+  // documented line to match a line the code can still produce.
+  const shape = (line: string): string =>
+    line.replace(/\d[\d,.]*/g, 'N').replace(/[ \t]+/g, ' ').trim();
+
+  it('`judge --status` still prints the lines the docs show', () => {
+    const archive = mkdtempSync(join(tmpdir(), 'as-docshape-'));
+    const env = { ...process.env, AGENTSENSEI_ARCHIVE: archive, NO_COLOR: '1' };
+    const run = (...args: string[]): string =>
+      execFileSync(process.execPath, ['--experimental-strip-types', 'src/cli.ts', ...args], {
+        encoding: 'utf8',
+        env,
+      });
+    // The documented sample is the *enabled* branch — a disabled judge prints
+    // "nothing will run until you enable it" instead, which is a different
+    // shape and would make this compare the wrong thing.
+    run('judge', '--enable', '--apply');
+    const real = run('judge', '--status');
+    const produced = new Set(real.split('\n').map(shape).filter((l) => l !== ''));
+
+    // The documented sample, from the judge page.
+    const doc = readFileSync('site/src/content/docs/start/the-judge.md', 'utf8');
+    const block = /judged {2,}[^\n]*\n(?:[^\n]*\n)*?[^\n]*spent[^\n]*/.exec(doc)?.[0] ?? '';
+    expect(block, 'the judge page no longer shows a --status sample').not.toBe('');
+
+    const drifted = block
+      .split('\n')
+      .map(shape)
+      .filter((l) => l !== '')
+      // `spent` only appears once calls have been made, and a scratch archive
+      // has none — so its absence here is correct, not drift.
+      .filter((l) => !l.startsWith('spent') && !l.startsWith('tokens, not dollars'))
+      .filter((l) => !produced.has(l));
+
+    expect(
+      drifted,
+      `the judge page shows lines \`judge --status\` no longer prints:\n  ${drifted.join('\n  ')}`,
+    ).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ description: Write a self-contained HTML report of your sessions
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/src/cli.js" report --html`
+!`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" report --html`
 
 Give the user the file path from the output above, on its own line, and the
 command to open it. Nothing else.
