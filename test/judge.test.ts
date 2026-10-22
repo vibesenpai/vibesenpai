@@ -42,7 +42,35 @@ const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => (
   ...over,
 });
 
-const reply = (findings: unknown[]): string => JSON.stringify({ findings });
+/**
+ * A reply in the contract the judge actually asks for: one row per session,
+ * each carrying its own verdict.
+ *
+ * Tests still describe what they mean as a flat list of findings, so this
+ * groups them by `sessionId`. A finding naming a session that is not in the
+ * batch still produces a row for it — which is what exercises the
+ * "session not in the batch" drop.
+ */
+const reply = (findings: unknown[]): string => {
+  const bySession = new Map<string, unknown[]>();
+  for (const f of findings) {
+    const id = String((f as { sessionId?: unknown }).sessionId ?? 's1');
+    if (!bySession.has(id)) bySession.set(id, []);
+    const { sessionId: _omit, ...rest } = f as Record<string, unknown>;
+    bySession.get(id)?.push(rest);
+  }
+  return JSON.stringify({
+    sessions: [...bySession].map(([sessionId, fs]) => ({
+      sessionId,
+      verdict: fs.length > 0 ? 'found' : 'nothing',
+      findings: fs,
+    })),
+  });
+};
+
+/** A reply that reviews every session and clears them all. */
+const replyNothing = (...ids: string[]): string =>
+  JSON.stringify({ sessions: ids.map((sessionId) => ({ sessionId, verdict: 'nothing' })) });
 
 describe('parseResponse — what it refuses', () => {
   it('drops a finding whose quote is not in the packet', () => {
@@ -288,8 +316,53 @@ describe('the packet', () => {
     const text = renderPacket([packet()]);
     expect(text).toMatch(/MUST include a .quote./);
     expect(text).toMatch(/do not write a turn number/);
-    expect(text).toMatch(/empty list is the correct answer/i);
+    expect(text).toMatch(/verdict is "nothing"/i);
+    expect(text).toMatch(/correct answer far\s+more often than not/);
     for (const d of JUDGE_DIMENSIONS) expect(text).toContain(d);
+  });
+
+  it('names every session it contains, so an omission is detectable', () => {
+    const text = renderPacket([packet(), packet({ sessionId: 's2' })]);
+    expect(text).toMatch(/contains 2 session\(s\)/);
+    expect(text).toContain('  s1');
+    expect(text).toContain('  s2');
+    expect(text).toMatch(/one entry per session/);
+  });
+});
+
+describe('a session the model never answered for is a counted failure', () => {
+  it('records an omitted session rather than reading it as clean', () => {
+    // The whole reason this contract exists. Under the old flat `findings`
+    // list, s2 simply not appearing was indistinguishable from s2 being
+    // reviewed and cleared — and 14 of 45 batched sessions were in exactly
+    // that state without anyone being able to tell.
+    const r = parseResponse(replyNothing('s1'), [packet(), packet({ sessionId: 's2' })]);
+    expect(r.findings).toEqual([]);
+    expect(r.dropped).toEqual([{ reason: 'session omitted entirely', count: 1 }]);
+  });
+
+  it('reports nothing dropped when every session is answered for', () => {
+    const r = parseResponse(replyNothing('s1', 's2'), [packet(), packet({ sessionId: 's2' })]);
+    expect(r.findings).toEqual([]);
+    expect(r.dropped).toEqual([]);
+  });
+
+  it('counts an unknown session id separately from an omission', () => {
+    const r = parseResponse(replyNothing('s1', 'never-sent'), [packet()]);
+    expect(r.dropped).toEqual([{ reason: 'session not in the batch', count: 1 }]);
+  });
+
+  it('accepts a verdict of nothing as a real answer, not an absence', () => {
+    // "nothing" is a positive assertion: the model read this session and
+    // cleared it. Silence is not the same thing and must not score as it.
+    const r = parseResponse(replyNothing('s1'), [packet()]);
+    expect(r.findings).toEqual([]);
+    expect(r.dropped).toEqual([]);
+  });
+
+  it('rejects a reply with no sessions array at all', () => {
+    const r = parseResponse(JSON.stringify({ findings: [] }), [packet()]);
+    expect(r.dropped).toEqual([{ reason: 'no sessions array', count: 1 }]);
   });
 });
 
