@@ -58,9 +58,6 @@ const bash = (command: string, uuid?: string): Event =>
     ...(uuid ? { uuid } : {}),
   });
 
-/** A call to a tool whose arguments the parser cannot name — only digest. */
-const opaque = (tool: string, args: string): Event =>
-  ev({ turnType: 'tool_use', toolName: tool, argHash: hash(args) });
 /**
  * `outHash` mirrors what the parser computes over the FULL output. Fixtures must
  * carry it, because `tool_loop` compares digests rather than summaries — the

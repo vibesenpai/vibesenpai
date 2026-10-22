@@ -35,7 +35,7 @@ import type { Event, Finding } from './types.ts';
 import { adviceFor, reasonOf, type Reason } from './detect/labels.ts';
 import { sessionStats, type SessionStats } from './stats.ts';
 import { approx, costFor } from './cost.ts';
-import { bold, cyan, dim, green, pad, red, rule, yellow } from './style.ts';
+import { bold, dim, pad, red, rule, yellow } from './style.ts';
 
 /** Corpus percentiles, so a session's number has something to sit against. */
 export const CORPUS = {

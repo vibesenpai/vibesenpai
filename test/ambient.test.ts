@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closed, isTripped, readBreaker, recordFailure, recordSuccess, TRIP_AFTER } from '../src/breaker.ts';
@@ -20,33 +20,16 @@ import {
   generateReportCommandBody, generateReportCommandFilePath, legacyCommandFiles, ourCommandFiles,
   planFor, remove, type Settings,
 } from '../src/install.ts';
-import { materialise } from '../src/finding.ts';
 import {
   clearStarted, computeStanding, computedAtLocal, isFresh, isProcessing, markStarted,
   MARKER_STALE_MS, processingLine, readStanding, standingLine, writeStanding,
   type SessionInput, type Standing,
 } from '../src/standing.ts';
 import { editRetry } from '../src/detect/edit-retry.ts';
-import type { Event, Finding } from '../src/types.ts';
+import type { Event } from '../src/types.ts';
 
 const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-ambient-'));
 
-const finding = (subject: string, occurrences = 2): Finding => ({
-  ...materialise({
-    candidate: {
-      dimension: 'edit_retry',
-      subject,
-      evidence: Array.from({ length: occurrences }, (_, i) => ({ uuid: `u${i}`, sessionId: 's1', seq: i })),
-      confidence: 'certain',
-      method: 'RULE',
-      polarity: 'lower-is-better',
-      requiresOutcome: false,
-    },
-    sessionId: 's1',
-    project: 'p',
-    now: '2026-10-19T00:00:00.000Z',
-  }),
-});
 
 describe('circuit breaker — degrade to silence, not to noise', () => {
   it('trips after repeated failures and records why', () => {

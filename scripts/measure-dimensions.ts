@@ -31,7 +31,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from '../src/parsers/index.ts';
-import { editEvidenceOf, READ_TOOLS } from '../src/edits.ts';
+import { editEvidenceOf } from '../src/edits.ts';
 import { callFailed, countDenominators } from '../src/detect/index.ts';
 import { retriedFailures } from '../src/detect/edit-retry.ts';
 import { isRedundant, repeatGroups } from '../src/detect/redundant-call.ts';

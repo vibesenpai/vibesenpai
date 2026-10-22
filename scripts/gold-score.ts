@@ -28,7 +28,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
-import { buildSession, parseExtract, parseLabels, parseResponse, renderExtract, renderLabel, renderPacket, type JudgeEpisode, type JudgePacketSession } from '../src/judge.ts';
+import { buildSession, parseExtract, parseLabels, parseResponse, renderExtract, renderLabel, renderPacket, type JudgePacketSession } from '../src/judge.ts';
 import { JUDGE_CWD_MARKER } from '../src/read.ts';
 import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from '../src/gold.ts';
 import { redact } from '../src/redact.ts';

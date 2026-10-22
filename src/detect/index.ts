@@ -36,7 +36,7 @@ import { collect, type Candidate } from '../finding.ts';
 import { buildWindows, threadsOf, type SkeletonOptions, type Window } from '../skeleton.ts';
 import type { Event, Finding, Preset } from '../types.ts';
 import type { Detector, DetectorContext, SessionFacts } from './types.ts';
-import { EDIT_TOOLS, READ_TOOLS, editEvidenceOf, type EditEvidence } from '../edits.ts';
+import { editEvidenceOf } from '../edits.ts';
 import { oncePerResponse } from '../normalise.ts';
 import { editRetry } from './edit-retry.ts';
 import { redundantCall } from './redundant-call.ts';

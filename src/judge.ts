@@ -14,49 +14,33 @@
  * failures."** This project proved that the hard way: `inaccurate_self_report`
  * is their S7, was built here on rules, and died 0 true positives against 5.
  *
- * ── Three decisions that set the cost ──────────────────────────────────────
+ * ── The window filter is gone, and what replaced it ───────────────────────
  *
- * Measured over 300 corpus sessions, in tokens (corrected for the `len/4`
- * estimator running ~1.9x low):
+ * This file used to send only prompt-bearing windows and dedupe repeated
+ * lines, and its header carried a four-row cost table arguing that filtering
+ * "pays for the fidelity several times over". Both functions (`worthJudging`,
+ * `dedupe`) were stranded by the `packet.ts` rewrite and sat here uncalled
+ * through a full measurement campaign — `tsconfig.json` had no
+ * `noUnusedLocals`, so nothing said so. Deleted along with the table, which
+ * described a packet that has not been built since.
  *
- * ```
- *   every window, as built today        ~6,127 p50   ~26,990 p90
- *   prompt-bearing windows only         ~2,430       ~11,830
- *     + dedupe repeated identical lines ~2,354       ~11,489
- *     + full prompts + preamble         ~2,800       ~13,300
- * ```
+ * What ships instead: `packet.ts` merges consecutive same-role turns and caps
+ * each merged turn once, so the **whole** session goes, tool traces included.
+ * The old filter reached 3-7% of a long session; a constraint stated early and
+ * violated late was structurally unreachable.
  *
- * 1. **Only windows containing a user prompt.** 39% of windows, and the signal
- *    the research uses lives in exactly those. This is the whole saving.
- * 2. **A preamble of every prompt**, ~288 tokens at p50. A constraint stated in
- *    window 2 has to be visible when judging window 40, or S3 — the largest
- *    dimension at 38.33% — is unreachable.
- * 3. **Dedupe identical consecutive lines.** Five identical `Read` calls tell a
- *    judge nothing the first does not.
- *
- * Filtering pays for the fidelity several times over: the full-fidelity packet
- * is less than half the cost of today's naive all-windows dump.
- *
- * ── What one real call actually cost ───────────────────────────────────────
- *
- * Three of this machine's largest sessions, Haiku, isolated working directory:
+ * ── What one real call costs ───────────────────────────────────────────────
  *
  * ```
- *   packet                      ~14,400 tokens   (3 sessions, 19 windows)
- *   input-side billed            41,392          cache_create 30,163
- *                                                cache_read   11,227
- *   output                        6,048          of which 5,925 THINKING
- *   wall clock                      30s
+ *   per-invocation overhead     26,384 tokens   measured over 98 calls
+ *   packet, merged + capped     ~8,634 p50      ~17,821 p90
+ *   output                      98% THINKING    not approximable from findings
  * ```
  *
- * Two corrections to the estimates above, both worth carrying:
- *
- * 1. **Overhead is ~27,000 tokens per invocation** — the 41,392 input-side
- *    minus our packet. It dwarfs the payload, which is the entire argument for
- *    batching rather than one call per session.
- * 2. **Output is 98% thinking**, and was not in the estimate at all. A judge
- *    reasons far more than it writes, so output cannot be approximated from
- *    the size of the findings it returns.
+ * The overhead dwarfs the payload, which is the whole argument for batching
+ * rather than one call per session. It is also not ours: it is the system
+ * prompt of the `claude -p` child, which exists because `--bare` demands an
+ * API key and fails on a subscription.
  *
  * ── The first real response invented its evidence ──────────────────────────
  *
@@ -234,17 +218,6 @@ export function openFailuresBefore(events: Event[], before: number): JudgeCarry[
 /** Each prompt in the preamble is capped; one pasted log must not be the packet. */
 export const PREAMBLE_PROMPT_MAX = 600;
 
-/** Collapse runs of identical lines — five identical Reads say nothing extra. */
-function dedupe(text: string): string {
-  const out: string[] = [];
-  let prev = '';
-  for (const line of text.split('\n')) {
-    if (line !== prev) out.push(line);
-    prev = line;
-  }
-  return out.join('\n');
-}
-
 /**
  * A `user` record the harness wrote, not something the developer said.
  *
@@ -255,41 +228,6 @@ function dedupe(text: string): string {
  */
 function isHarnessNoise(text: string): boolean {
   return /^<(?:task-notification|command-message|command-name|local-command)/.test(text);
-}
-
-/**
- * Is this window worth sending?
- *
- * ── Prompts alone were far too lossy, and the number is embarrassing ───────
- *
- * The first version kept only prompt-bearing windows, justified by "the signal
- * lives where the prompts are". Measured afterwards, on six real sessions:
- *
- * ```
- *   prompts only   3-7% of the session reached the judge
- *   + failures     9-25%                           2.6x the tokens
- *   everything     48-65%                          9.5x
- * ```
- *
- * A 1,640-event session holds ~7 prompts, so at most 7 of its 89 windows
- * survive a prompt filter. The judge was being shown 3% of the work and asked
- * what went wrong with it — and duly found nothing, on twelve sessions where
- * hand-reading had found candidates it could see.
- *
- * **Failures are the other half of the signal.** The developer's side lives
- * near prompts; the agent's lives near what broke. S7 is a claim contradicted
- * by a failure, and a failure is rarely adjacent to a prompt — so dropping
- * those windows removed the evidence for the dimension most worth having.
- *
- * Everything would be better still and costs nine times as much for coverage
- * that is itself only ~55%; this is the knee of the curve, not a compromise
- * nobody measured.
- */
-function worthJudging(rendered: string): boolean {
-  const hasPrompt = /(?:^|\n)U\s/.test(rendered);
-  // The skeleton marks a failed result; `render` writes it with a leading ✗.
-  const hasFailure = /(?:^|\n)✗/.test(rendered);
-  return hasPrompt || hasFailure;
 }
 
 export function buildSession(

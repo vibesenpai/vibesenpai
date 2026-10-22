@@ -21,14 +21,14 @@ import {
 } from './read.ts';
 import { gatherReport, type ReportData } from './gather.ts';
 import {
-  BYTES_PER_TURN, findingsFor, readJudgeState, writeJudgeState, type JudgeState,
+  BYTES_PER_TURN, findingsFor, readJudgeState, writeJudgeState,
 } from './judge-store.ts';
-import { buildSession, openFailuresBefore, renderPacket } from './judge.ts';
+import { buildSession, renderPacket } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
 import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
-import { countDenominators, detectorsFor, runDetectors, unknownDimensions } from './detect/index.ts';
+import { detectorsFor, runDetectors, unknownDimensions } from './detect/index.ts';
 import { render as renderFindings } from './render.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
