@@ -18,7 +18,7 @@
  *
  * ── Batched, because the overhead is the cost ──────────────────────────────
  *
- * ~27,000 tokens of invocation overhead dwarf a ~3,000-token session, so
+ * 26,384 tokens of invocation overhead dwarf a ~8,634-token session, so
  * sessions are packed to the ceiling and sent together — the same argument as
  * `scripts/judge.ts`, and the reason this is affordable at all.
  */

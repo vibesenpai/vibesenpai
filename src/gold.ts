@@ -5,7 +5,9 @@
  * package: **7,760 labelled misalignment episodes**, each carrying symptom
  * flags, a confidence rating, and turn-level evidence with quotes. 4,020 come
  * from SWE-chat, and **246 of those sessions are transcripts this project
- * already holds** — 492 episodes over data we can open.
+ * already holds** — **492 episodes** over data we can open, of which **437**
+ * fall in the four dimensions this project claims and 55 are S1/S5/S6/S8 only.
+ * Both numbers appear in the docs; this is which is which.
  *
  * That is a better instrument than anything we would have built. It was
  * labelled by people who have never seen this tool, against a codebook
@@ -240,17 +242,23 @@ export type GoldScore = {
    *
    * `caught` requires **at least one labelled episode found AND turn-anchored**.
    * The tempting wrong reading — "did we emit any finding in this session" —
-   * scores 76% where this scores 60%, because it credits 9 sessions where the
-   * judge spoke and hit nothing real. That is the exact failure this project
-   * refuses to reward, so the distinction is asserted in a test.
+   * credits sessions where the judge spoke and hit nothing real, which is the
+   * exact failure this project refuses to reward. Measured on 60 sessions the
+   * two readings were 76% and 60%; the distinction is asserted in a test so the
+   * looser one cannot creep back in.
+   *
+   * On the full set — 232 sessions holding an in-scope episode — two-stage
+   * reaches **165/232, 71%**, against 129/232 for the single-pass prompt it
+   * replaced and 104/232 for the rubric before that.
    */
   sessionLevel: { withEpisode: number; caught: number; recall: number | undefined };
 
   /**
    * Episodes caught at the right place, **whatever label we gave them**.
    *
-   * The paper multi-labels — 38 of 127 episodes carry more than one dimension —
-   * so S2/S3/S4/S7 are not mutually exclusive in the gold set either. Calling
+   * The paper multi-labels — across the 437 in-scope episodes many carry more
+   * than one dimension — so S2/S3/S4/S7 are not mutually exclusive in the gold
+   * set either. Calling
    * an episode `misread_intent` where they recorded `constraint_violation` on
    * the same turn is two models disagreeing on a fuzzy boundary, not a missed
    * problem. Still turn-anchored: only the label is free.

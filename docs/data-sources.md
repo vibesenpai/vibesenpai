@@ -170,7 +170,7 @@ one nobody looked at. Against our corpus:
 
 ```
   processed by their pipeline   565 of our 1,140
-    with >=1 labelled episode   246   (492 episodes)
+    with >=1 labelled episode   246   (492 episodes; 437 in-scope, 55 S1/S5/S6-only)
     with none found             319   <- labelled negatives
 ```
 

@@ -300,10 +300,12 @@ export function buildSession(
  * ask one model to read a transcript, recognise an episode, and choose one of
  * four labels simultaneously — a job their pipeline never gives anyone.
  *
- * Measured consequence of conflating them: 18 of our findings landed on a real
- * episode with the wrong label, dominated by
- * `misread_intent -> constraint_violation` — a boundary the paper treats as so
- * fuzzy that 38 of 127 episodes carry both.
+ * Measured consequence of conflating them, on the full labelled set: splitting
+ * the stages took session recall from **129/232 to 165/232** and more than
+ * doubled `misread_intent` (28 -> 64 of 147), which is precisely the dimension
+ * hardest to choose while still reading the transcript. The label disagreements
+ * are dominated by `misread_intent <-> constraint_violation`, a boundary the
+ * paper treats as fuzzy enough that many episodes carry both.
  *
  * `alignmentGoal` is what the transcript can actually support at this stage:
  * did the agent fail to do what was *said*, or fail to infer what was *meant*.

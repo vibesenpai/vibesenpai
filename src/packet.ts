@@ -46,9 +46,9 @@
  * 3.1x the old packet at p50, with tool traces fully included and no session
  * exceeding a 60k batch ceiling on its own.
  *
- * The tiers count **merged** turns. On raw message counts 0 of 60 corpus
- * sessions land in the `<=8` tier; on merged counts 28 do, close to the
- * paper's stated 62%.
+ * The tiers count **merged** turns. On raw message counts almost no corpus
+ * session lands in the `<=8` tier; on merged counts roughly half do, close to
+ * the paper's stated 62%. Measured over 60 sessions: 0 raw, 28 merged.
  */
 
 import { redact } from './redact.ts';
@@ -90,7 +90,8 @@ export function truncate(text: string, max: number): string {
  * **Measured, and it defeated the gate before it defeated anything else.**
  * Slicing `/Users/[USER]` at the wrong offset leaves `/Users/[USER`, which
  * redaction then *repairs* to `/Users/[USER]` — so `redact(packet) !== packet`
- * on a packet that was already perfectly clean. 2 of 60 sessions did it.
+ * on a packet that was already perfectly clean. 2 of 60 sessions did it when
+ * first measured, and the gate has caught none since.
  *
  * The tempting fix is to re-redact after truncating and compare idempotence
  * instead. That is strictly weaker: `isIdempotent` returns true for text

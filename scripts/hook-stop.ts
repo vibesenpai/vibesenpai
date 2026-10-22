@@ -52,7 +52,7 @@ function main(): void {
  * The live session's judge pass, on a cadence.
  *
  * **Stop fires at every response boundary** — ~788 times in one real session —
- * so this must never be once-per-fire. An invocation costs ~27,000 tokens of
+ * so this must never be once-per-fire. An invocation costs 26,384 tokens of
  * overhead before our packet, which at that rate would be indefensible.
  *
  * `dueForJudging` compares bytes rather than counting turns, because the hook

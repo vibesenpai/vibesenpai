@@ -261,9 +261,9 @@ history to produce a real finding: **380 of 1,139 sessions (33.4%)**, 927 instan
 `certain`, 926 of 927 labelled with the harness's own reason.
 
 Next, in order of how clearly each can point at a turn: `file_churn`, `context_reingest`,
-`redundant_call`. Still unbuilt and deliberately so: `permission_denied` (20% and now structural, but
+`redundant_call`. Still unbuilt and deliberately so: `permission_denied` (18.1% and now structural, but
 declining is the person exercising control and it is not obvious it should ever be surfaced) and
-`user_correction` (needs parser work — 40% of prompts hit the 200-char cap).
+`user_correction` (needs parser work — 45% of prompts hit the 200-char cap).
 
 **A detector is not done until its findings have been read on real data.** This is the only check
 that has ever caught anything here.

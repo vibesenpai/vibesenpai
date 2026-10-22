@@ -394,8 +394,9 @@ someone does not care about cannot be silenced. That has to land before more dim
 
 Deliberately unbuilt, each with its reason in [docs/dimensions.md](docs/dimensions.md):
 `reading_spiral` (51% but sidechain-confounded, widest set A/B gap in the table),
-`permission_denied` (20% and structural, but declining is the person exercising control),
-`user_correction` (needs the 200-char prompt cap raised first — 40% of prompts hit it),
+`permission_denied` (18.1% and structural, but declining is the person exercising control),
+`user_correction` (needs the 200-char prompt cap raised first — 45% of prompts hit it,
+measured in docs/data-sources.md; the judge now bypasses the cap via `withFullText`),
 `user_interrupt` (the published 64% was counting turn-boundary enqueues and `<task-notification>`).
 
 **M2a status: foundation + 1 of 4 detectors.** Done: window→events plumbing, finding identity and

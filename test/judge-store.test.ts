@@ -109,7 +109,7 @@ describe('settings', () => {
 describe('dueForJudging', () => {
   it('waits for a cadence worth of new bytes', () => {
     // Stop fires at every response boundary — ~788 times in one real session —
-    // and an invocation costs ~27,000 tokens of overhead before our packet.
+    // and an invocation costs 26,384 tokens of overhead before our packet.
     const s = emptyState();
     const need = s.settings.cadence * BYTES_PER_TURN;
     expect(dueForJudging(s, 'x', need - 1)).toBe(false);

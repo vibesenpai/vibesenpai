@@ -148,7 +148,7 @@ async function main(): Promise<void> {
   const only = process.argv[2];
 
   // Build one packet across every session with new bytes. Batching is the whole
-  // cost argument: the ~27,000-token invocation overhead dwarfs a ~2,800-token
+  // cost argument: the 26,384-token invocation overhead dwarfs a ~8,634-token
   // session, so N sessions in one call rather than N calls.
   const sessions: JudgePacketSession[] = [];
   const offsets = new Map<string, number>();

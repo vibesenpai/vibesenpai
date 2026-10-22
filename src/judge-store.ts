@@ -34,7 +34,7 @@ export type JudgeSettings = {
    * Default Haiku, on cost rather than quality.
    *
    * Measured: the same call costs ~1/38 the list price of the default model
-   * for the same ~29,000 tokens of overhead. Whether it is *good enough* is
+   * for the same 26,384 tokens of overhead. Whether it is *good enough* is
    * the gold set's question, not this file's, and the answer is one value away.
    */
   model: string;
@@ -48,8 +48,8 @@ export const DEFAULT_SETTINGS: JudgeSettings = {
   enabled: false,
   model: 'haiku',
   // ~50 turns: a 788-turn session is judged a handful of times rather than
-  // hundreds. Measured against the cost of an invocation (~27,000 tokens of
-  // overhead), not against what feels responsive.
+  // hundreds. Measured against the cost of an invocation (26,384 tokens of
+  // overhead, and two-stage pays it twice), not against what feels responsive.
   cadence: 50,
   maxBatchTokens: 60_000,
 };
