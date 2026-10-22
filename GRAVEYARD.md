@@ -355,7 +355,7 @@ in a skill file, a slash command or a project instruction file now counts, where
 before only a developer prompt did. The push-back clause the original entry
 defended is still in force for `overreach`, and nothing here contradicts it.
 
-### Correction 2: there is no 16-point variance band. That was my own edit.
+### Correction 2: there is no 16-point variance band. It was a mid-experiment code change.
 
 An entry reported three runs of "identical code" at 52%, 66% and 67% and
 concluded that judge recall swings 16 points on sampling alone. A later

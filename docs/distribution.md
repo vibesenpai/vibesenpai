@@ -98,7 +98,7 @@ download. Its mechanics, all of which we adopt:
 | **`$CLAUDE_PLUGIN_DATA`** | persistent per-plugin data dir, provided by Claude Code (`~/.claude/plugins/data/<plugin>-<marketplace>/`), with a fallback if unset | **this is where the 270 MB goes** — sanctioned, and removed on plugin uninstall |
 | **`$CLAUDE_PLUGIN_ROOT`** | the plugin's own install directory | locating bundled scripts and the manifest |
 | **Stamp file** | copies `requirements.txt` into the data dir; reinstalls only when it differs | exactly our model-version invalidation: a `models.json` manifest with versions + checksums as the stamp |
-| **`mkdir` lock directory** | atomic lock; a second process waits up to 60s and reads a failure sentinel | **the bug I had missed — see below** |
+| **`mkdir` lock directory** | atomic lock; a second process waits up to 60s and reads a failure sentinel | **the bug the first design missed — see below** |
 | **`.install-failed` sentinel** | records failure so other processes and later runs can report it | legible failure across sessions |
 | **`exit 0` on failure** | writes one line to stderr and exits clean | Principle Zero: never break a session |
 

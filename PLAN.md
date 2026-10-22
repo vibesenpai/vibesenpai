@@ -22,7 +22,7 @@ five hard constraints:
 
 ### The cold start is far better than this machine suggests
 
-A worry I had overweighted, now corrected: **this development machine is pathological, not typical.**
+One correction worth carrying: **this development machine is pathological, not typical.**
 Claude Code's 30-day retention wiped everything here because the tool saw almost no use between
 August and October, leaving 2 trivial transcripts. **A typical active Claude Code user has up to 30
 days of sessions sitting on disk right now** — dozens of them.
@@ -534,13 +534,16 @@ Two items move **earlier** because M6 depends on them being right:
   be valuable.
 - **HF account needed at M2** — downloading SWE-chat requires a Hugging Face login and sharing
   contact info with the dataset host. One-time and development-only; it does not affect the shipped
-  tool. Not blocking for M0/M1 now that the adapter moved to M2, but it needs a go-ahead before I do it.
+  tool. Not blocking for M0/M1 now that the adapter moved to M2, and it needs a deliberate decision
+  before anyone downloads 47 GB of gated data.
 - **Differentiation needs empirical confirmation** — the four surviving claims are argued from
   documentation. M0 runs vibe-log-cli and agentsview on real data to confirm the gap. If vibe-log
   turns out to already link findings to evidence, the positioning narrows to quota + measured
   precision, and that is worth knowing in week one rather than month three.
-- **Claiming the names** — `agentsensei` is free on npm and GitHub as of 2026-10-12 but unclaimed.
-  Worth reserving both before the repo is public; not blocking for M0/M1, which are entirely local.
+- **Registry and repo names** — tracked outside this document. A public planning
+  file is the wrong place to record which names are available, for reasons that
+  become obvious the moment the repository is public.
+
 - **Statusline refresh timing** — the ambient channel is the statusline (hook stdout is model-facing,
   verified). Still unconfirmed: how promptly the statusline re-renders after a `Stop` boundary.
   Tested with a stub statusline script in M3, before M6 depends on it.

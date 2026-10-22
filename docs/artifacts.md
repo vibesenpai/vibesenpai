@@ -10,7 +10,7 @@
 
 Everything above *detects*. This section specifies the other half: how a finding becomes something you
 can use. Per the value proposition, these are **artifacts, never advice** — and the research below
-immediately killed the artifact I had originally made flagship.
+immediately killed the artifact this document originally made flagship.
 
 **Terminology note:** an earlier draft called this "the coaching layer" and framed interventions as
 behaviour change. That framing is retired. The tiers below are *artifact kinds ranked by measured
@@ -253,13 +253,13 @@ option for a tool whose first principle is evidence.
 
 ### So: rename, or keep?
 
-**Keep `agentsensei`.** The gap you spotted was a specification gap, not a naming one — and it is now
+**Keep `agentsensei`.** The gap was a specification gap, not a naming one — and it is now
 closed with a research spine under it: a ranked intervention hierarchy with measured effect sizes, a
 generated-guard mechanism for the failures users cannot fix, a `CLAUDE.md` audit no competitor can
 build, and a measured keep-or-revert loop.
 
 Renaming to "analyzer" would have locked in the lesser product permanently. The honest position is
-that the name was *aspirational* an hour ago and is *specified* now — and that `GUARD` generation is
+that the name was *aspirational* before this document and is *specified* after it — and that `GUARD` generation is
 what earns it, because it is the one tier that changes outcomes without requiring the user to change
 anything at all.
 

@@ -12,8 +12,12 @@
   },
   "files": [
     "dist",
+    "scripts",
+    "commands",
+    ".claude-plugin",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -34,5 +38,23 @@
     "hyparquet": "^1.31.5",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crozzfire/agentsensei.git"
+  },
+  "bugs": {
+    "url": "https://github.com/crozzfire/agentsensei/issues"
+  },
+  "homepage": "https://github.com/crozzfire/agentsensei#readme",
+  "keywords": [
+    "claude-code",
+    "ai-agent",
+    "coding-agent",
+    "observability",
+    "local-first",
+    "transcript-analysis",
+    "developer-tools",
+    "agent-evaluation"
+  ]
 }
