@@ -316,3 +316,53 @@ describe('documented output samples match the shape the code produces', () => {
     ).toEqual([]);
   });
 });
+
+describe('one pitch, not five', () => {
+  // There were five different one-line descriptions of this tool — README,
+  // package.json, plugin.json, the CLI's USAGE header and the site all phrased
+  // the promise differently, and `.claude-plugin/marketplace.json` had none at
+  // all, which is the string a user reads in the plugin picker before
+  // installing.
+  //
+  // The point is not that one wording is better. It is that a reader who sees
+  // the tool in three places should recognise it as one thing.
+  const PITCH =
+    "See what your coding agent's mistakes cost you — in tokens, with the exact turns, on your own machine.";
+
+  it('is identical in every manifest', () => {
+    const json = (p: string) => JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
+    expect(json('package.json')['description']).toBe(PITCH);
+    expect(json('.claude-plugin/plugin.json')['description']).toBe(PITCH);
+    const market = json('.claude-plugin/marketplace.json') as {
+      plugins: { description?: string }[];
+    };
+    expect(market.plugins[0]?.description).toBe(PITCH);
+  });
+
+  it('is what the site leads with', () => {
+    const index = readFileSync('site/src/content/docs/index.mdx', 'utf8');
+    expect(index).toContain(PITCH);
+    expect(readFileSync('site/astro.config.mjs', 'utf8')).toContain(PITCH);
+  });
+
+  it('agrees with the README hero', () => {
+    // The README may break the line, so compare without whitespace.
+    const flat = readFileSync('README.md', 'utf8').replace(/\s+/g, ' ');
+    expect(flat).toContain(PITCH.replace(/\s+/g, ' '));
+  });
+
+  it('does not leave the retired tagline behind anywhere', () => {
+    for (const file of userFacingDocs()) {
+      expect(
+        readFileSync(file, 'utf8'),
+        `${file} still carries the old tagline`,
+      ).not.toContain('Find the turns where you and your coding agent wasted effort');
+    }
+  });
+
+  it('keeps the package and plugin versions in step', () => {
+    // package.json said 0.0.0 while plugin.json said 0.1.0.
+    const v = (p: string) => (JSON.parse(readFileSync(p, 'utf8')) as { version: string }).version;
+    expect(v('package.json')).toBe(v('.claude-plugin/plugin.json'));
+  });
+});

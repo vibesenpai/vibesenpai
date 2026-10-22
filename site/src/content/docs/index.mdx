@@ -1,9 +1,9 @@
 ---
 title: agentsensei
-description: Find the turns where you and your coding agent wasted effort — with the evidence, from your own sessions, on your own machine.
+description: See what your coding agent's mistakes cost you — in tokens, with the exact turns, on your own machine.
 template: splash
 hero:
-  tagline: Find the turns where you and your coding agent wasted effort — with the evidence, from your own sessions, on your own machine.
+  tagline: See what your coding agent's mistakes cost you — in tokens, with the exact turns, on your own machine.
   actions:
     - text: Start here
       link: /agentsensei/start/what-it-is/
@@ -16,12 +16,18 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-You have hundreds of hours of agent transcripts sitting on your disk. Somewhere
-in them, your agent edited a file it had not read, said tests passed when they
-had not, or did the thing you told it not to do twenty turns earlier.
+Your agent edits a file it hasn't read. The harness refuses. It reads the file
+and tries again. That round trip cost you tokens, it happens in **one session in
+three**, and you have never once noticed it — because by the time you read the
+reply, it worked.
 
-`agentsensei` reads those transcripts, finds those moments, quotes them back to
-you, and tells you what — if anything — actually fixes them.
+`agentsensei` reads the transcripts already on your disk, finds those moments,
+prices them, and quotes the turns back to you.
+
+```
+  11,000+ tokens written and discarded · 23 findings
+    18 sessions · 2,460 edits
+```
 
 ```
   one thing to try  inaccurate_self_report  [VERIFY]
@@ -41,13 +47,15 @@ you, and tells you what — if anything — actually fixes them.
 ```
 
 <CardGrid>
-  <Card title="It finds real things" icon="approve-check">
+  <Card title="Priced, not just flagged" icon="approve-check">
     The one fully-measured detector fires on **380 of 1,139 real sessions**,
-    927 instances, **0 false positives** hand-verified.
+    927 instances, **0 false positives** hand-verified — and every finding
+    carries what it cost.
   </Card>
-  <Card title="Nothing leaves your machine" icon="seti:lock">
-    Until you opt in. `scan` prints `copied nothing` and means it.
-    [What leaves →](/agentsensei/trust/egress/)
+  <Card title="We publish our own accuracy" icon="seti:lock">
+    165 of 232 sessions — and we call that *silver agreement*, not precision,
+    because the labels were model-produced.
+    [Measuring ourselves →](/agentsensei/work/measuring/)
   </Card>
   <Card title="One thing at a time" icon="list-format">
     Not a dashboard. One change worth making, or a plain statement that no fix

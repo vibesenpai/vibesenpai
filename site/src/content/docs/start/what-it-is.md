@@ -1,10 +1,21 @@
 ---
 title: What it is
-description: A local-first analyzer for AI coding sessions, and an honest account of what it does and does not do.
+description: What your coding agent's mistakes cost you, in tokens — and an honest account of what this does and does not do.
 ---
 
-`agentsensei` reads the transcripts your coding agent already writes and finds
-the turns where effort was wasted.
+`agentsensei` reads the transcripts your coding agent already writes, finds the
+turns where effort was wasted, and tells you what that cost in tokens.
+
+```
+  11,000+ tokens written and discarded · 23 findings
+    18 sessions · 2,460 edits
+```
+
+The one detector measured end to end fires on **380 of 1,139 real sessions** —
+one session in three — across **927 instances with zero false positives**,
+hand-verified. That is an agent editing a file it had not read, or anchoring an
+edit on text that had since changed: the harness refuses, the agent retries, and
+you never notice because by the time you read the reply it worked.
 
 It is a CLI and a Claude Code plugin. It runs on your machine, reads files in
 place, and copies nothing.

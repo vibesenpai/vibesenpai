@@ -1,7 +1,7 @@
 {
   "name": "agentsensei",
   "version": "0.1.0",
-  "description": "Find the turns where you and your coding agent wasted effort — with the evidence, from your own sessions, on your own machine.",
+  "description": "See what your coding agent's mistakes cost you — in tokens, with the exact turns, on your own machine.",
   "author": {
     "name": "agentsensei contributors"
   },

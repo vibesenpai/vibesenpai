@@ -13,7 +13,8 @@
       "policy": {
         "installation": "AVAILABLE"
       },
-      "category": "Productivity"
+      "category": "Productivity",
+      "description": "See what your coding agent's mistakes cost you — in tokens, with the exact turns, on your own machine."
     }
   ]
 }

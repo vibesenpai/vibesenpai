@@ -1,7 +1,7 @@
 {
   "name": "agentsensei",
-  "version": "0.0.0",
-  "description": "Local-first analyzer for AI coding sessions: finds wasted turns, shows the evidence, generates what you can apply",
+  "version": "0.1.0",
+  "description": "See what your coding agent's mistakes cost you \u2014 in tokens, with the exact turns, on your own machine.",
   "license": "MIT",
   "type": "module",
   "engines": {

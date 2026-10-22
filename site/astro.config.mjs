@@ -12,7 +12,7 @@ export default defineConfig({
     starlight({
       title: 'agentsensei',
       description:
-        'Find the turns where you and your coding agent wasted effort — with the evidence, from your own sessions, on your own machine.',
+        "See what your coding agent's mistakes cost you — in tokens, with the exact turns, on your own machine.",
       social: {
         github: 'https://github.com/crozzfire/agentsensei',
       },

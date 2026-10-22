@@ -4,14 +4,21 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen.svg)](package.json)
 
-**Find the turns where you and your coding agent wasted effort — with the
-evidence, from your own sessions, on your own machine.**
+**See what your coding agent's mistakes cost you — in tokens, with the exact
+turns, on your own machine.**
 
-You have hundreds of hours of transcripts sitting in `~/.claude/projects`.
-Somewhere in them your agent edited a file it hadn't read, claimed tests passed
-when they hadn't, or did something you'd told it not to twenty turns earlier.
-`agentsensei` reads those transcripts, finds those moments, quotes them back to
-you, and tells you what — if anything — actually fixes them.
+Your agent edits a file it hasn't read. The harness refuses. It reads the file
+and tries again. That round trip cost you tokens, it happens in **one session in
+three**, and you have never once noticed it — because by the time you read the
+reply, it worked.
+
+`agentsensei` reads the transcripts already sitting in `~/.claude/projects`,
+finds those moments, prices them, and quotes the turns back to you:
+
+```
+  11,000+ tokens written and discarded · 23 findings
+    18 sessions · 2,460 edits
+```
 
 ---
 
@@ -62,15 +69,23 @@ thing you never notice in the moment and that costs real tokens.
 
 ## Three things that shape everything else
 
-- **Local-first.** `scan` prints `copied nothing`, and means it. Your
-  transcripts are read in place; nothing is duplicated into our store. The only
-  thing that ever leaves your machine is the optional judge, which is **off by
-  default** — see [what leaves your machine](#what-leaves-your-machine).
 - **Evidence or nothing.** Every finding quotes the turn it came from. No
-  scores, no grades, no "you should communicate more clearly."
+  scores, no grades, no "you should communicate more clearly." A number you
+  cannot check is a number you should not be given.
+- **We publish our own accuracy, with the right word on it.** The judge agrees
+  with published human-validated labels on **165 of 232 sessions** — and that
+  is *silver agreement*, not precision, because those labels were themselves
+  model-produced. There is no gold tier yet, so there is no headline accuracy
+  figure, and we will not invent one.
 - **One thing at a time.** `fix` returns a single change, or says plainly that
   no fix exists. A tool that hands you six things to fix has handed you nothing
   to do.
+
+Local-first too, of course — `scan` prints `copied nothing` and means it, and
+the optional judge is **off by default**
+([what leaves your machine](#what-leaves-your-machine)). But that is table
+stakes in this ecosystem rather than a reason to pick this one, and
+[`docs/prior-art.md`](docs/prior-art.md) says so at length.
 
 ## Quickstart
 

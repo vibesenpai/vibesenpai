@@ -117,7 +117,7 @@ function detectorsFromConfig(cfg: { preset: Preset; mute: string[] }): Detector[
   return detectorsFor(cfg.preset, undefined, cfg.mute);
 }
 
-const USAGE = `agentsensei — find the turns where you and your agent wasted effort
+const USAGE = `agentsensei — see what your coding agent's mistakes cost you, in tokens
 
 Usage
   agentsensei scan               read new transcript data (copies nothing)
