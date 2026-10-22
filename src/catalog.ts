@@ -30,7 +30,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   renameSync,
   statSync,
   writeFileSync,
@@ -40,7 +39,7 @@ import { basename, join } from 'node:path';
 import { checkVersion, stamp, type Versioned } from './schema.ts';
 // The byte reader lives in read.ts, which owns reading and imports nothing from
 // here — one implementation, and no cycle.
-import { readRange } from './read.ts';
+import { discoverTranscripts, readRange } from './read.ts';
 import { isPlausibleTimestamp } from './normalise.ts';
 import { detectVersion } from './parsers/registry.ts';
 
@@ -128,24 +127,23 @@ function writeCatalog(dir: string, c: Catalog): void {
   renameSync(tmp, target);
 }
 
-/** Recursively collect *.jsonl under the given roots. Missing roots are not errors. */
+/**
+ * Transcripts worth cataloguing.
+ *
+ * ── Why this delegates instead of walking ─────────────────────────────────
+ *
+ * This was its own recursive walk, and the difference between the two mattered:
+ * `discoverTranscripts` filters out transcripts **our own model calls wrote**
+ * and this did not. Measured on a real machine: `scan` reported 1,009
+ * transcripts and 528MB read, while every analysis path saw 15 — because 995 of
+ * them were headless judge children from one day of measurement runs, 494MB of
+ * our own output indexed as if it were the user's work.
+ *
+ * A headline count that includes our own exhaust is worse than no count: it
+ * says the tool has a thousand sessions of evidence when it has fourteen.
+ */
 export function findTranscripts(sources: string[]): string[] {
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return; // unreadable or absent — skip, never crash
-    }
-    for (const e of entries) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile() && e.name.endsWith('.jsonl')) out.push(p);
-    }
-  };
-  for (const s of sources) walk(s);
-  return out.sort();
+  return discoverTranscripts(sources);
 }
 
 function harnessFor(sourcePath: string): string {

@@ -1,15 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  appendFileSync,
-  rmSync,
-  statSync,
-  readFileSync,
-  existsSync,
-  readdirSync,
-} from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runScan, readCatalog, findTranscripts, describeCatalog } from '../src/catalog.ts';
@@ -347,5 +337,27 @@ describe('catalog — the period a transcript covers', () => {
     const e = Object.values(readCatalog(catalog)!.entries)[0]!;
     expect(e.firstTs).toBeUndefined();
     expect(describeCatalog(catalog).spans).toHaveLength(0);
+  });
+});
+
+describe('scan counts what it would analyse, not our own exhaust', () => {
+  it('skips transcripts our own model calls wrote', () => {
+    // Measured on a real machine: `scan` said 1,009 transcripts / 528MB while
+    // every analysis path saw 15, because 995 were headless judge children —
+    // 494MB of our own output indexed as the user's work. A headline count
+    // including our exhaust claims a thousand sessions of evidence when there
+    // are fourteen.
+    const root = mkdtempSync(join(tmpdir(), 'as-cat-judge-'));
+    const mine = join(root, 'projects', '-private-tmp-agentsensei-judge');
+    const theirs = join(root, 'projects', '-Users-someone-Workspace');
+    const old = join(root, 'projects', '-private-tmp-as-judge-probe');
+    for (const d of [mine, theirs, old]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(mine, 'a.jsonl'), '{}\n');
+    writeFileSync(join(old, 'b.jsonl'), '{}\n');
+    writeFileSync(join(theirs, 'c.jsonl'), '{}\n');
+
+    const found = findTranscripts([join(root, 'projects')]);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain('-Users-someone-Workspace');
   });
 });

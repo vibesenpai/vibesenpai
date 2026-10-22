@@ -223,6 +223,23 @@ export function discoverTranscripts(sources: string[]): string[] {
 export const JUDGE_CWD_MARKER = 'agentsensei-judge';
 
 /**
+ * Directory-name fragments that mean "a transcript our own model call wrote".
+ *
+ * `JUDGE_CWD_MARKER` is what we create *now*, but earlier probes ran in
+ * `/private/tmp/as-judge-probe` and `/private/tmp/as-judge-step0`, which the
+ * marker does not match. Measured on a real machine: of 1,009 transcripts in
+ * `~/.claude/projects`, **995 were our own** — 494MB of headless children from
+ * one day of measurement runs — and 5 of those leaked past the filter because
+ * they predate the marker. They were being analysed as the user's work.
+ *
+ * Matching a list rather than one string, because the cost of a false negative
+ * is analysing our own output and reporting it as theirs, while the cost of a
+ * false positive is skipping a session whose path contains `as-judge`, which no
+ * real project is called.
+ */
+const OUR_CWD_FRAGMENTS = [JUDGE_CWD_MARKER, 'as-judge-'];
+
+/**
  * Is this transcript one our own judge produced?
  *
  * **Measured, not theorised.** A headless `claude -p` child writes its own
@@ -237,7 +254,7 @@ export const JUDGE_CWD_MARKER = 'agentsensei-judge';
  * and the only reliable fix is to recognise where it ran.
  */
 export function isOurOwnJudgeSession(path: string): boolean {
-  return path.includes(JUDGE_CWD_MARKER);
+  return OUR_CWD_FRAGMENTS.some((f) => path.includes(f));
 }
 
 export type LatestSession = { source: string; sessionId: string; mtimeMs: number };
