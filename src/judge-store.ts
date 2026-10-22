@@ -205,6 +205,59 @@ export function dueForJudging(state: JudgeState, sessionId: string, sizeBytes: n
   return sizeBytes - judged >= state.settings.cadence * BYTES_PER_TURN;
 }
 
+/**
+ * How long one model call takes, for estimating a pass.
+ *
+ * **Measured across three runs of very different sizes**, which is why it is a
+ * constant rather than a guess:
+ *
+ * ```
+ *    35 calls / 20 min  =  34s
+ *    98 calls / 50 min  =  31s
+ *   195 calls / 95 min  =  29s
+ * ```
+ *
+ * Two-stage pays this twice per batch — stage A reads the transcripts, stage B
+ * reads the records it produced — so a batch is about a minute.
+ */
+export const JUDGE_SECONDS_PER_CALL = 30;
+
+/**
+ * Seconds as something a person can plan around.
+ *
+ * Deliberately coarse. "about 4 minutes" is honest about an estimate built
+ * from a per-call average; "4m 12s" would imply a precision it does not have.
+ */
+export function humanDuration(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)} seconds`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'}`;
+  const hours = seconds / 3600;
+  return `${hours.toFixed(hours < 10 ? 1 : 0)} hours`;
+}
+
+/**
+ * An estimate of the work a judge pass still has to do.
+ *
+ * Lives here, beside the ledger it reads, so `now`, `report` and
+ * `judge --status` cannot drift into reporting different numbers for the same
+ * state. It is a ceiling rather than a point prediction: a batch holds however
+ * many sessions fit the token ceiling, so two calls per *session* is the
+ * pessimistic end.
+ */
+export function pendingWork(
+  state: JudgeState,
+  sessions: { id: string; sizeBytes: number }[],
+): { pending: number; judged: number; seconds: number } {
+  let pending = 0;
+  let judged = 0;
+  for (const s of sessions) {
+    if ((state.ledger[s.id] ?? 0) >= s.sizeBytes) judged += 1;
+    else pending += 1;
+  }
+  return { pending, judged, seconds: pending * 2 * JUDGE_SECONDS_PER_CALL };
+}
+
 /** Findings for one session, newest first. */
 export function findingsFor(state: JudgeState, sessionId: string): JudgedFinding[] {
   return state.findings

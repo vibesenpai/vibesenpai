@@ -3,7 +3,7 @@ description: What agentsensei found in this session
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" now`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/src/cli.js" now`
 
 Reproduce the output above in a code block, preserving every line, number and
 column exactly. Add no summary and no commentary: it is evidence, and

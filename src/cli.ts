@@ -9,7 +9,7 @@
  */
 
 import { homedir } from 'node:os';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dim } from './style.ts';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
@@ -22,9 +22,10 @@ import {
 } from './read.ts';
 import { gatherReport, type ReportData } from './gather.ts';
 import {
-  BYTES_PER_TURN, findingsFor, readJudgeState, writeJudgeState,
+  BYTES_PER_TURN, findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL, pendingWork,
+  readJudgeState, writeJudgeState,
 } from './judge-store.ts';
-import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, JUDGE_SECONDS_PER_CALL, renderExtract } from './judge.ts';
+import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
 import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
@@ -524,7 +525,17 @@ async function cmdNow(a: Argv): Promise<number> {
       sessionId: current.sessionId,
       events: parsed.events,
       ...(judgeState.settings.enabled
-        ? { judged: { findings: judgedFindings, unjudgedTurns } }
+        ? {
+            judged: {
+              findings: judgedFindings,
+              unjudgedTurns,
+              // Two calls per session — extract then label — at a measured
+              // ~30s each. Only when there is something outstanding.
+              ...(unjudgedTurns > 0
+                ? { eta: humanDuration(2 * JUDGE_SECONDS_PER_CALL) }
+                : {}),
+            },
+          }
         : {}),
       ...(nextStep !== '' ? { nextStep } : {}),
       ...(config.mute.length > 0 ? { muted: config.mute } : {}),
@@ -561,8 +572,34 @@ function projectOf(source: string): string {
 }
 
 /** Where this checkout lives, so the installed commands are absolute. */
+/**
+ * The package root, found by walking up to `package.json`.
+ *
+ * It cannot be a fixed number of `..` any more: the dev entry point is
+ * `src/cli.ts` (one level down) and the compiled one is `dist/src/cli.js`
+ * (two). Hard-coding `'..'` silently resolved to `<root>/dist` once the build
+ * started emitting `scripts/` alongside `src/`, which would have pointed every
+ * installed hook at a path that does not exist.
+ */
 function repoRoot(): string {
+  let dir = import.meta.dirname;
+  for (let up = 0; up < 4; up += 1) {
+    if (existsSync(join(dir, 'package.json'))) return dir;
+    dir = dirname(dir);
+  }
   return join(import.meta.dirname, '..');
+}
+
+/**
+ * Are we running compiled output rather than the TypeScript source?
+ *
+ * This decides what gets written into the user's hooks, and getting it wrong
+ * is silent: **Node refuses to strip types under `node_modules`**, so a
+ * globally installed copy that wires a `.ts` path produces a hook which can
+ * only fail — and `|| true` swallows the error.
+ */
+function isCompiled(): boolean {
+  return import.meta.url.endsWith('.js');
 }
 
 function settingsPath(home: string): string {
@@ -595,7 +632,7 @@ function cmdInstall(a: Argv): number {
   const home = typeof a.flags['home'] === 'string' ? a.flags['home'] : homedir();
   const path = settingsPath(home);
   const before = readSettings(path);
-  const plan = planFor(repoRoot());
+  const plan = planFor(repoRoot(), process.execPath, isCompiled());
 
   // No statusline. It cost a permanent row of screen for one rarely-changing
   // line, and **no official plugin ships one** — the report goes in the main
@@ -632,12 +669,12 @@ function cmdInstall(a: Argv): number {
   // nothing to do. It only escaped notice because `describeChange` also lists
   // untouched keys, which kept the list non-empty by accident.
   const wanted: [string, string, string][] = [
-    [commandFilePath(home), '/agentsensei:now', commandFileBody(repoRoot())],
-    [fixCommandFilePath(home), '/agentsensei:fix', fixCommandBody(repoRoot())],
+    [commandFilePath(home), '/agentsensei:now', commandFileBody(repoRoot(), process.execPath, isCompiled())],
+    [fixCommandFilePath(home), '/agentsensei:fix', fixCommandBody(repoRoot(), process.execPath, isCompiled())],
     [
       generateReportCommandFilePath(home),
       '/agentsensei:generate-report',
-      generateReportCommandBody(repoRoot()),
+      generateReportCommandBody(repoRoot(), process.execPath, isCompiled()),
     ],
   ];
   const commandLines: string[] = [];
@@ -705,9 +742,9 @@ function cmdInstall(a: Argv): number {
   // risk is lower — but it is still their directory, and `uninstall` removes it.
   try {
     mkdirSync(commandDir(home), { recursive: true });
-    writeFileSync(commandFilePath(home), commandFileBody(repoRoot()));
-    writeFileSync(fixCommandFilePath(home), fixCommandBody(repoRoot()));
-    writeFileSync(generateReportCommandFilePath(home), generateReportCommandBody(repoRoot()));
+    writeFileSync(commandFilePath(home), commandFileBody(repoRoot(), process.execPath, isCompiled()));
+    writeFileSync(fixCommandFilePath(home), fixCommandBody(repoRoot(), process.execPath, isCompiled()));
+    writeFileSync(generateReportCommandFilePath(home), generateReportCommandBody(repoRoot(), process.execPath, isCompiled()));
     // The flat files an earlier version wrote, which would otherwise linger as
     // a second, un-namespaced `/agentsensei`.
     for (const old of legacyCommandFiles(home)) rmSync(old, { force: true });
@@ -811,6 +848,13 @@ async function cmdStanding(a: Argv): Promise<number> {
     console.log(`  ${s.unreadable} session(s) could not be read`);
   }
 
+  // Printed before the findings, so "no findings" is never read as finished
+  // when a pass is still outstanding. This is the whole point of the line:
+  // `PLAN.md:21` requires that "nothing found" read as a clean bill of health,
+  // which it only can if an unfinished pass says so.
+  const pendingLine = judgePendingLine(config);
+  if (pendingLine !== undefined) console.log(`\n  ${pendingLine}`);
+
   if (s.dimensions.length === 0) {
     console.log(`\n  no findings across ${s.edits} edits`);
   } else {
@@ -908,19 +952,38 @@ function cmdUninstall(a: Argv): number {
  * The shape is `install`'s, because the risk is the same shape: a background
  * process acting on someone's behalf while they are not looking.
  */
+
+/** Every discoverable session with its current size on disk. */
+function sessionSizes(sources: string[]): { id: string; sizeBytes: number }[] {
+  const out: { id: string; sizeBytes: number }[] = [];
+  for (const source of discoverTranscripts(sources)) {
+    try {
+      out.push({ id: basename(source, '.jsonl'), sizeBytes: statSync(source).size });
+    } catch {
+      // A transcript that vanished mid-scan is not an error; skip it.
+    }
+  }
+  return out;
+}
+
 /**
- * Seconds as something a person can plan around.
+ * One line, only when a judge pass still has work to do across the history.
  *
- * Deliberately coarse. "about 4 minutes" is honest about an estimate built from
- * a per-call average; "4m 12s" would imply a precision the number does not
- * have.
+ * This is the answer to "how do I tell 'found nothing' from 'has not finished
+ * looking yet'". The local pipeline needs no such line — `scan` is 0.22s over
+ * 231 sessions and `standing --refresh` is 0.64s, both measured — so this is
+ * deliberately the *only* progress surface in the tool, and it appears only
+ * when it carries information.
  */
-function humanDuration(seconds: number): string {
-  if (seconds < 90) return `${Math.round(seconds)} seconds`;
-  const mins = Math.round(seconds / 60);
-  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'}`;
-  const hours = seconds / 3600;
-  return `${hours.toFixed(hours < 10 ? 1 : 0)} hours`;
+function judgePendingLine(config: { archive: string; sources: string[] }): string | undefined {
+  const state = readJudgeState(config.archive);
+  if (!state.settings.enabled) return undefined;
+  const { pending, seconds } = pendingWork(state, sessionSizes(config.sources));
+  if (pending === 0) return undefined;
+  return dim(
+    `⌁ the judge still has ${pending} session(s) to read — about ${humanDuration(seconds)}. ` +
+      `Findings will appear here once it has.`,
+  );
 }
 
 function cmdJudge(a: Argv): number {
@@ -941,33 +1004,19 @@ function cmdJudge(a: Argv): number {
   // nothing". No new state was needed: the ledger already records how far each
   // session has been judged, so pending work is a subtraction.
   if (f['status'] === true) {
-    const judged: string[] = [];
-    const pending: string[] = [];
-    for (const source of discoverTranscripts(config.sources)) {
-      const id = basename(source, '.jsonl');
-      let size: number;
-      try {
-        size = statSync(source).size;
-      } catch {
-        continue;
-      }
-      ((state.ledger[id] ?? 0) >= size ? judged : pending).push(id);
-    }
-    // Two calls per batch, and a batch holds however many sessions fit the
-    // ceiling — so this is a ceiling on the estimate, not a point prediction.
-    const seconds = pending.length * 2 * JUDGE_SECONDS_PER_CALL;
+    const { judged, pending, seconds } = pendingWork(state, sessionSizes(config.sources));
 
     console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
     console.log('');
-    console.log(`  judged     ${judged.length} session(s) · ${state.findings.length} finding(s)`);
-    if (pending.length === 0) {
+    console.log(`  judged     ${judged} session(s) · ${state.findings.length} finding(s)`);
+    if (pending === 0) {
       console.log('  pending    nothing — every session is up to date');
       console.log('');
       console.log(`  ${dim('`no findings` from `now` or `report` means a clean bill of health,')}`);
       console.log(`  ${dim('not an unfinished pass.')}`);
     } else {
       console.log(
-        `  pending    ${pending.length} session(s) · about ${humanDuration(seconds)} at ~${JUDGE_SECONDS_PER_CALL}s per call`,
+        `  pending    ${pending} session(s) · about ${humanDuration(seconds)} at ~${JUDGE_SECONDS_PER_CALL}s per call`,
       );
       console.log('');
       console.log(`  ${dim(state.settings.enabled ? 'runs detached after your next turn ends.' : 'nothing will run until you enable it.')}`);
@@ -1279,7 +1328,35 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 }
 
-if (import.meta.filename === process.argv[1]) {
+/**
+ * Was this file invoked directly?
+ *
+ * **`import.meta.filename === process.argv[1]` is not good enough**, and the
+ * failure is as quiet as a bug can be. `npm` installs a bin as a *symlink*:
+ *
+ *     argv[1]   …/pfx/bin/agentsensei
+ *     realpath  …/node_modules/agentsensei/dist/src/cli.js
+ *
+ * Node resolves the symlink before setting `import.meta`, so the two never
+ * match for a globally installed copy — and the whole CLI becomes a no-op that
+ * prints nothing and exits 0. Every command. Verified by installing the
+ * tarball and running `agentsensei help` through the shim: zero lines out.
+ *
+ * So compare resolved paths, and treat an unresolvable `argv[1]` as "not us"
+ * rather than crashing.
+ */
+function invokedDirectly(): boolean {
+  const argv1 = process.argv[1];
+  if (argv1 === undefined) return false;
+  if (import.meta.filename === argv1) return true;
+  try {
+    return import.meta.filename === realpathSync(argv1);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
   try {
     process.exit(await main());
   } catch (err) {

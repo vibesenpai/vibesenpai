@@ -40,13 +40,13 @@ export const MARKER = 'agentsensei';
  * replace evidence with a paraphrase of evidence, which is the one thing this
  * project will not do.
  */
-export function commandFileBody(repoRoot: string, nodePath = process.execPath): string {
+export function commandFileBody(repoRoot: string, nodePath = process.execPath, compiled = false): string {
   return `---
 description: What agentsensei found in this session
 allowed-tools: Bash(${nodePath}:*)
 ---
 
-!\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts now\`
+!\`${cliCommand(repoRoot, nodePath, compiled)} now\`
 
 Reproduce the output above in a code block, preserving every line, number and
 column exactly. Add no summary and no commentary: it is evidence, and
@@ -67,13 +67,13 @@ emphasis the reader gets.
  * instruction not to act until the user says yes. That is the difference
  * between handing someone a suggestion and applying one to their session.
  */
-export function fixCommandBody(repoRoot: string, nodePath = process.execPath): string {
+export function fixCommandBody(repoRoot: string, nodePath = process.execPath, compiled = false): string {
   return `---
 description: One evidence-backed change to try, from your own sessions
 allowed-tools: Bash(${nodePath}:*)
 ---
 
-!\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts fix\`
+!\`${cliCommand(repoRoot, nodePath, compiled)} fix\`
 
 Reproduce the recommendation above in a code block, preserving every line and
 figure exactly. You may bold the figures and nothing else — the command cannot
@@ -113,13 +113,13 @@ act on it, or change how you work until the answer is yes.
  * run from a script or a pipe, and spawning a browser there would be the kind
  * of surprise this project is built to avoid.
  */
-export function generateReportCommandBody(repoRoot: string, nodePath = process.execPath): string {
+export function generateReportCommandBody(repoRoot: string, nodePath = process.execPath, compiled = false): string {
   return `---
 description: Write a self-contained HTML report of your sessions
 allowed-tools: Bash(${nodePath}:*)
 ---
 
-!\`${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts report --html --open\`
+!\`${cliCommand(repoRoot, nodePath, compiled)} report --html --open\`
 
 The report has already opened in their browser. Give them the file path from
 the output above, on its own line, and say it is open. Nothing else.
@@ -200,6 +200,19 @@ export type InstallPlan = {
 };
 
 /**
+ * How to invoke our own CLI from a file the harness will run.
+ *
+ * Same constraint as the hooks: a `.ts` path with `--experimental-strip-types`
+ * cannot work from inside `node_modules`, so the compiled entry point wins
+ * whenever it exists.
+ */
+export function cliCommand(repoRoot: string, nodePath = process.execPath, compiled = false): string {
+  return compiled
+    ? `${nodePath} ${repoRoot}/dist/src/cli.js`
+    : `${nodePath} --experimental-strip-types ${repoRoot}/src/cli.ts`;
+}
+
+/**
  * The commands to install, derived from where the checkout actually is.
  *
  * Absolute paths because a hook runs with an unpredictable working directory.
@@ -207,12 +220,28 @@ export type InstallPlan = {
  * unconditionally, whatever happens inside it — belt as well as the braces the
  * script already wears.
  */
-export function planFor(repoRoot: string, nodePath = process.execPath): InstallPlan {
+export function planFor(repoRoot: string, nodePath = process.execPath, compiled = false): InstallPlan {
+  // Prefer the compiled hook, and not as an optimisation — **Node refuses to
+  // strip types for anything under `node_modules`**:
+  //
+  //     Error [ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING]: Stripping types
+  //     is currently unsupported for files under node_modules
+  //
+  // A globally installed package lives under `node_modules`, so wiring
+  // `--experimental-strip-types scripts/hook-stop.ts` from there produces a
+  // hook that can only fail — and `|| true` means it fails *silently*, which
+  // is the worst of the two. Verified by installing the tarball and running
+  // the exact command this function writes.
+  //
+  // The `.ts` path is kept for a dev checkout with no `dist/`, where it is the
+  // only thing that works.
   const run = (script: string): string =>
-    `${nodePath} --experimental-strip-types ${repoRoot}/scripts/${script}`;
+    compiled
+      ? `${nodePath} ${repoRoot}/dist/scripts/${script}.js`
+      : `${nodePath} --experimental-strip-types ${repoRoot}/scripts/${script}.ts`;
   return {
-    hookCommand: `${run('hook-stop.ts')} || true`,
-    sessionStartCommand: `${run('hook-session-start.ts')} || true`,
+    hookCommand: `${run('hook-stop')} || true`,
+    sessionStartCommand: `${run('hook-session-start')} || true`,
   };
 }
 

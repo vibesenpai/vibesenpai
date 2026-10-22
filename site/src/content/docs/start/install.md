@@ -4,10 +4,13 @@ description: Two ways in — as a Claude Code plugin, or as a CLI.
 ---
 
 :::caution[Not published yet]
-`agentsensei` is not on npm or the plugin marketplace yet, so the first two
-sections below describe installs that are **built and tested but not yet
-reachable** — they start working the day this is published. Until then,
-[from source](#from-source) is the one that works.
+`agentsensei` is not on npm or the plugin marketplace yet. Until it is,
+[from source](#from-source) is the install that works.
+
+The **CLI** path is built and verified end to end — the tarball is installed
+globally in CI and its hooks are run — so it works the day this is published.
+The **plugin** path has a manifest and commands that have not yet been
+exercised through a real plugin install, so treat it as untested.
 :::
 
 ## As a Claude Code plugin

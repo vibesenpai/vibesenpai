@@ -31,8 +31,10 @@ put it. None of them credits being vaguely in the neighbourhood.
 ## Why that is not precision, and we will not call it
 
 The labels we are agreeing with were produced by **a model**, with human
-expert validation on a sample — 0.93 precision against two experts on 200 of
-16,118 records. Strong. Not the same thing as hand-labelled ground truth.
+expert validation on a sample — 0.93 extraction precision against two experts
+on 200 of 16,118 records, with 0.83 inter-rater agreement between the experts
+themselves. Strong, and reported by the study's own authors. Not the same thing
+as hand-labelled ground truth.
 
 This project keeps three scoreboards and refuses to conflate them:
 

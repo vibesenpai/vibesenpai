@@ -14,14 +14,16 @@ claude-code-log
   validation. Commit pinned in scripts/corpus.json.
 
 claude-code-sessions
+  https://github.com/frederick-douglas-pearce/claude-code-sessions
+  MIT License.
   Used as a pinned public corpus for the same purpose. Commit pinned in
   scripts/corpus.json.
 
 SWE-chat / coding-agent-misalignment
   https://github.com/ND-SaNDwichLAB/coding-agent-misalignment
-  Replication package for arXiv:2605.29442, "How Coding Agents Fail Their
-  Users: A Large-Scale Analysis of Developer-Agent Misalignment in 20,574
-  Real-World Sessions".
+  Replication package for "How Coding Agents Fail Their Users"
+  (arXiv:2605.29442), an analysis of 20,574 real sessions from 1,639
+  repositories.
   Used as the labelled set against which this project measures its own judge.
   Its published episode labels are the source of every "silver agreement"
   figure in docs/eval.md. Licence terms are recorded in docs/data-sources.md;

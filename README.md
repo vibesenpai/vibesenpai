@@ -74,10 +74,11 @@ thing you never notice in the moment and that costs real tokens.
 
 ## Quickstart
 
-**Not published yet.** Clone is the only install that works today — `npm
-install -g agentsensei` and `/plugin install agentsensei` are both built and
-tested, and both start working the day this is published. Saying so is cheaper
-than an `E404` on your first command.
+**Not published yet.** Clone is the only install that works today. `npm install
+-g agentsensei` is built and verified end to end against a real global install
+of the tarball — it will work the day this is published. `/plugin install
+agentsensei` has a manifest and commands that have **not been exercised through
+a real plugin install**, so treat that one as untested until it is.
 
 ```bash
 git clone https://github.com/crozzfire/agentsensei && cd agentsensei

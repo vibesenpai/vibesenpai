@@ -105,7 +105,12 @@ export type RenderInput = {
   /** Shown so a reader can tell an empty result from an unanalysed one. */
   sessionId: string;
   /** Model-flagged findings for this session, and how stale they are. */
-  judged?: { findings: { dimension: string; turns: number[]; why: string }[]; unjudgedTurns: number };
+  judged?: {
+    findings: { dimension: string; turns: number[]; why: string }[];
+    unjudgedTurns: number;
+    /** Rough wall-clock for the outstanding work, already formatted. */
+    eta?: string;
+  };
   /**
    * The pointer to `fix`, printed last.
    *
@@ -559,6 +564,7 @@ export function renderCompaction(stats: SessionStats): string[] {
 export function renderJudged(
   findings: { dimension: string; turns: number[]; why: string }[],
   unjudgedTurns: number,
+  eta?: string,
 ): string[] {
   if (findings.length === 0 && unjudgedTurns <= 0) return [];
 
@@ -571,7 +577,16 @@ export function renderJudged(
   }
   if (findings.length === 0) out.push(`${INDENT.repeat(2)}${dim('nothing so far')}`);
   if (unjudgedTurns > 0) {
-    out.push(`${INDENT.repeat(2)}${dim(`… ${unjudgedTurns} turns since the last pass`)}`);
+    // The count alone does not answer the question people actually have,
+    // which is whether to wait. The ETA is what turns this from a status into
+    // something you can act on.
+    out.push(
+      `${INDENT.repeat(2)}${dim(
+        eta === undefined
+          ? `… ${unjudgedTurns} turns since the last pass`
+          : `… ${unjudgedTurns} turns since the last pass · about ${eta} to read them`,
+      )}`,
+    );
   }
   return out;
 }
@@ -622,7 +637,7 @@ export function render(input: RenderInput): string {
   if (cost.length > 0) lines.push(...cost, '');
 
   if (input.judged !== undefined) {
-    const j = renderJudged(input.judged.findings, input.judged.unjudgedTurns);
+    const j = renderJudged(input.judged.findings, input.judged.unjudgedTurns, input.judged.eta);
     if (j.length > 0) lines.push(...j, '');
   }
 

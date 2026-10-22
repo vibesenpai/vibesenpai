@@ -54,7 +54,7 @@ jobs:
           npm pack --dry-run --json > /tmp/pack.json
           node -e '
             const files = require("/tmp/pack.json")[0].files.map(f => f.path);
-            const need = ["LICENSE", "NOTICE", "dist/cli.js", ".claude-plugin/plugin.json"];
+            const need = ["LICENSE", "NOTICE", "dist/src/cli.js", ".claude-plugin/plugin.json"];
             const missing = need.filter(n => !files.includes(n));
             if (!files.some(f => f.startsWith("scripts/"))) missing.push("scripts/");
             if (!files.some(f => f.startsWith("commands/"))) missing.push("commands/");
@@ -62,4 +62,42 @@ jobs:
             console.log("tarball is whole: " + files.length + " files");
           '
       - name: the built CLI runs
-        run: node dist/cli.js help > /dev/null
+        run: node dist/src/cli.js help > /dev/null
+
+      - name: a globally installed copy is not a silent no-op
+        # This is the gate that caught the real one. `npm` installs a bin as a
+        # symlink, and the entry guard compared `import.meta.filename` against
+        # an unresolved `process.argv[1]`, so every command printed nothing and
+        # exited 0. A smoke test checking only the exit code passes happily on
+        # a no-op, so this asserts there is output.
+        run: |
+          npm pack --pack-destination /tmp/pk
+          npm i -g /tmp/pk/agentsensei-*.tgz --prefix /tmp/pfx
+          lines=$(/tmp/pfx/bin/agentsensei help | wc -l)
+          echo "help printed $lines lines through the bin shim"
+          [ "$lines" -gt 10 ] || { echo "installed CLI is a no-op"; exit 1; }
+
+      - name: an installed copy wires hooks that actually run
+        # Node refuses `--experimental-strip-types` under node_modules, and the
+        # hooks carry `|| true`, so a broken wiring is invisible at runtime.
+        # Run what `install` writes, with the `|| true` stripped off.
+        run: |
+          export HOME=/tmp/fakehome
+          mkdir -p $HOME/.claude && echo '{}' > $HOME/.claude/settings.json
+          /tmp/pfx/bin/agentsensei install --apply
+          node -e '
+            const s = require(process.env.HOME + "/.claude/settings.json");
+            const cmds = [];
+            for (const ev of ["Stop", "SessionStart"])
+              for (const m of s.hooks[ev] ?? []) for (const h of m.hooks) cmds.push(h.command);
+            if (cmds.length === 0) { console.error("no hooks were wired"); process.exit(1); }
+            for (const c of cmds) {
+              if (c.includes("--experimental-strip-types")) {
+                console.error("installed hook uses type stripping: " + c); process.exit(1);
+              }
+            }
+            require("fs").writeFileSync("/tmp/hooks.sh",
+              cmds.map(c => c.replace(" || true", "")).join("\n"));
+            console.log("wired " + cmds.length + " hook(s), none type-stripped");
+          '
+          sh -e /tmp/hooks.sh < /dev/null

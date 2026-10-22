@@ -380,13 +380,3 @@ export function isProcessing(archive: string, now = Date.now()): boolean {
   }
 }
 
-/**
- * What to show while history is still being read.
- *
- * Friendly and finite. It names what is happening and implies it will end,
- * because an ambient line that explains itself once is not a nag — and the
- * alternative on a fresh install is a blank bar that looks broken.
- */
-export function processingLine(): string {
-  return '⌁ reading your past sessions…';
-}

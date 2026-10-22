@@ -16,13 +16,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closed, isTripped, readBreaker, recordFailure, recordSuccess, TRIP_AFTER } from '../src/breaker.ts';
 import {
+  humanDuration, JUDGE_SECONDS_PER_CALL, pendingWork, readJudgeState,
+} from '../src/judge-store.ts';
+import {
   addHook, commandDir, commandFilePath, describeChange, dropOurStatusLine, fixCommandFilePath,
   generateReportCommandBody, generateReportCommandFilePath, legacyCommandFiles, ourCommandFiles,
   planFor, remove, type Settings,
 } from '../src/install.ts';
 import {
   clearStarted, computeStanding, computedAtLocal, isFresh, isProcessing, markStarted,
-  MARKER_STALE_MS, processingLine, readStanding, standingLine, writeStanding,
+  MARKER_STALE_MS, readStanding, standingLine, writeStanding,
   type SessionInput, type Standing,
 } from '../src/standing.ts';
 import { editRetry } from '../src/detect/edit-retry.ts';
@@ -338,13 +341,44 @@ describe('standing — "sit tight" while the first pass runs', () => {
     expect(() => clearStarted(scratch())).not.toThrow();
   });
 
-  it('says what is happening and implies it ends', () => {
-    const line = processingLine();
-    expect(line).toContain('past sessions');
-    // Transient and explanatory, so it is not a nag — but still not a nag.
-    for (const nag of ['fix', 'should', 'must', 'warning', 'error', '!']) {
-      expect(line.toLowerCase(), `must not contain "${nag}"`).not.toContain(nag);
-    }
+  // `processingLine()` used to live here: `⌁ reading your past sessions…`,
+  // written for the statusline. The statusline was removed (D58) and the
+  // function kept its test while losing every production caller — a passing
+  // test for code nothing runs.
+  //
+  // The job it was meant to do is real, and it moved: the only slow thing in
+  // this tool is the judge, so the "still working" signal is now computed from
+  // the judge ledger and shown by `now` and `standing`. These assert the
+  // calculation behind it, since that is what ships.
+  it('reports nothing pending when every session is up to date', () => {
+    const state = { ...readJudgeState(scratch()), ledger: { a: 500, b: 200 } };
+    const w = pendingWork(state, [
+      { id: 'a', sizeBytes: 500 },
+      { id: 'b', sizeBytes: 200 },
+    ]);
+    expect(w).toEqual({ pending: 0, judged: 2, seconds: 0 });
+  });
+
+  it('counts a grown session as pending and estimates two calls for it', () => {
+    const state = { ...readJudgeState(scratch()), ledger: { a: 500 } };
+    const w = pendingWork(state, [
+      { id: 'a', sizeBytes: 900 },
+      { id: 'new', sizeBytes: 100 },
+    ]);
+    expect(w.pending).toBe(2);
+    expect(w.judged).toBe(0);
+    // Two calls each at the measured ~30s, which is a ceiling: a batch holds
+    // however many sessions fit the token limit.
+    expect(w.seconds).toBe(2 * 2 * JUDGE_SECONDS_PER_CALL);
+  });
+
+  it('rounds a duration coarsely, because the estimate is an average', () => {
+    expect(humanDuration(45)).toBe('45 seconds');
+    expect(humanDuration(60)).toBe('60 seconds');
+    expect(humanDuration(300)).toBe('5 minutes');
+    expect(humanDuration(60 * 60)).toBe('1.0 hours');
+    // No false precision: never "5m 12s".
+    expect(humanDuration(312)).not.toMatch(/\d+m/);
   });
 });
 

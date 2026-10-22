@@ -29,8 +29,9 @@ Verified against a real multi-harness plugin on this machine
       → the plugin bundles the analyzer, so npm is never involved.
 
 # Secondary — CLI, for CI / scripting / pre-install trial
-npm i -g agentsensei && agentsensei init
+npm i -g agentsensei && agentsensei install
       → does by hand what /plugin install does natively; asks before each write.
+      → the command is `install`, not `init`; `init` was never built.
 ```
 
 **This is where your "don't change user configs" rule needs a precise edge, because installing a

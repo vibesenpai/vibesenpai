@@ -232,22 +232,6 @@ export const PREAMBLE_PROMPT_MAX = 600;
  */
 export const JUDGE_OVERHEAD_TOKENS = 26_384;
 
-/**
- * How long one model call takes, for estimating a pass.
- *
- * **Measured across three runs of very different sizes**, which is why it is a
- * constant rather than a guess:
- *
- * ```
- *    35 calls / 20 min  =  34s
- *    98 calls / 50 min  =  31s
- *   195 calls / 95 min  =  29s
- * ```
- *
- * Two-stage pays this twice per batch — stage A reads the transcripts, stage B
- * reads the records it produced — so a batch is about a minute.
- */
-export const JUDGE_SECONDS_PER_CALL = 30;
 
 /**
  * Token estimate for a packet, used to decide what fits in a batch.

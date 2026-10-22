@@ -24,8 +24,9 @@
  * is scoped rather than global, and the scope is the risk.
  */
 
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { JUDGE_DIMENSIONS } from '../src/judge.ts';
 import { detectorsFor } from '../src/detect/index.ts';
 
@@ -72,6 +73,72 @@ function fictionIn(path: string): { word: string; line: number }[] {
   return out;
 }
 
+/**
+ * Every document a reader might copy a command out of.
+ *
+ * Deliberately includes the site and `docs/`, because the first version of
+ * this guard covered only `README.md` and therefore missed
+ * `docs/surfaces.md:32` advertising `agentsensei init`, which does not exist.
+ * `docs/archive/` is excluded: it is explicitly archival.
+ */
+function userFacingDocs(): string[] {
+  const out = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md'];
+  const walkSite = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walkSite(full);
+      else if (entry.name.endsWith('.md') || entry.name.endsWith('.mdx')) out.push(full);
+    }
+  };
+  walkSite('site/src/content/docs');
+  return out.filter((f) => existsSync(f));
+}
+
+/**
+ * Those, plus the engineering docs under `docs/`.
+ *
+ * Used where the rule applies to anything a reader might run — an `npm run`
+ * that no longer exists is a dead end wherever it appears. The command guard
+ * deliberately does *not* use this wider set: `docs/surfaces.md` designs a
+ * command surface, so naming `agentsensei trends` there is the subject matter,
+ * not a false promise. `docs/archive/` is excluded throughout; it is
+ * explicitly archival.
+ */
+function allDocs(): string[] {
+  const out = userFacingDocs();
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== 'archive' && entry.name !== 'node_modules') walk(full);
+      } else if (entry.name.endsWith('.md') || entry.name.endsWith('.mdx')) {
+        out.push(full);
+      }
+    }
+  };
+  walk('docs');
+  return out.filter((f) => existsSync(f));
+}
+
+describe('every `npm run` in the docs is a real script', () => {
+  it('names no script package.json does not define', () => {
+    // The docs reference `measure`, `gold`, `judge:control`, `verify:corpus`
+    // and `cli`. A renamed script silently turns each mention into a dead end
+    // for whoever follows it.
+    const defined = new Set(Object.keys(
+      JSON.parse(readFileSync('package.json', 'utf8')).scripts as Record<string, string>,
+    ));
+    const bad = new Set<string>();
+    for (const file of allDocs()) {
+      for (const m of readFileSync(file, 'utf8').matchAll(/npm run ([a-z][a-z:-]*)/g)) {
+        const name = m[1] as string;
+        if (!defined.has(name)) bad.add(`${name} (${file})`);
+      }
+    }
+    expect([...bad], `docs reference npm scripts that do not exist`).toEqual([]);
+  });
+});
+
 describe('the README describes the tool that exists', () => {
   it('names no dimension the tool does not have', () => {
     // If this fails, either the README is describing something unbuilt, or a
@@ -95,16 +162,21 @@ describe('the README describes the tool that exists', () => {
         (m) => m[1] as string,
       ),
     );
-    const readme = readFileSync('README.md', 'utf8');
+    // README-only was too narrow: `docs/surfaces.md:32` advertised
+    // `agentsensei init` and the guard never saw it. Every page a reader might
+    // copy a command out of is now in scope.
+    const text = userFacingDocs()
+      .map((f) => readFileSync(f, 'utf8'))
+      .join('\n');
     const claimed = new Set(
-      [...readme.matchAll(/(?:agentsensei|\/agentsensei:)[ \t]+([a-z][a-z-]*)/g)].map(
+      [...text.matchAll(/(?:agentsensei|\/agentsensei:)[ \t]+([a-z][a-z-]*)/g)].map(
         (m) => m[1] as string,
       ),
     );
     // Words that follow "agentsensei" in prose rather than as a command.
-    const prose = new Set(['is', 'does', 'reads', 'finds', 'runs', 'and', 'to', 'the', 'a', 'in', 'on', 'for', 'as', 'at', 'from', 'with', 'you', 'your', 'it', 'its', 'can', 'will', 'has', 'have', 'was', 'were', 'needs', 'copies', 'writes', 'never', 'only', 'also', 'how', 'what', 'why', 'generate-report']);
+    const prose = new Set(['is', 'does', 'reads', 'finds', 'runs', 'and', 'to', 'the', 'a', 'in', 'on', 'for', 'as', 'at', 'from', 'with', 'you', 'your', 'it', 'its', 'can', 'will', 'has', 'have', 'was', 'were', 'needs', 'copies', 'writes', 'never', 'only', 'also', 'how', 'what', 'why', 'generate-report', 'looks']);
     const missing = [...claimed].filter((c) => !dispatch.has(c) && !prose.has(c));
-    expect(missing, `README advertises commands the CLI does not have: ${missing.join(', ')}`).toEqual([]);
+    expect(missing, `docs advertise commands the CLI does not have: ${missing.join(', ')}`).toEqual([]);
   });
 });
 
