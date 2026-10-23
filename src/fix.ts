@@ -38,7 +38,7 @@ import { join } from 'node:path';
 import type { Event } from './types.ts';
 import type { Standing } from './standing.ts';
 import type { JudgedFinding } from './judge-store.ts';
-import { reasonLabel } from './report-line.ts';
+import { nextRung, reasonLabel } from './report-line.ts';
 import { approx } from './cost.ts';
 import { bold, cyan, dim, green, pad, rule, yellow } from './style.ts';
 
@@ -724,6 +724,10 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
   lines.push(
     `  ${rule(W)}`,
     `  ${dim(`chosen from preset "${preset}"${muted.length > 0 ? ` · muted: ${muted.join(', ')}` : ''}`)}`,
+    // Which preset chose this is provenance, not a next step. Every other
+    // surface ends by naming the one after it; this one ended on machinery.
+    '',
+    `  ${dim(nextRung('fix'))}`,
   );
   return lines.join('\n');
 }

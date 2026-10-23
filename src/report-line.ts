@@ -166,7 +166,11 @@ export function detailLine(_repoRoot: string, _home: string): string {
   //
   // Every session-start block was therefore ending with an instruction that
   // fails. Found by diffing the block before and after an unrelated change.
-  return '/agentsensei:insights for the exact turns';
+  //
+  // Reads from `nextRung` rather than repeating the string, so the block and
+  // the commands cannot drift — which is how the dead `now` survived here
+  // after the rename.
+  return nextRung('block');
 }
 
 export function fixCommandPath(home: string): string {
@@ -292,4 +296,37 @@ export function reportBlock(
   // from the harness's `SessionStart:startup says:` prefix. `claude-security`
   // does the same for the same reason.
   return `\n${[head, ...lines].join('\n')}`;
+}
+
+/**
+ * The next rung, printed at the end of every surface.
+ *
+ * ── Why this is one function and not four strings ──────────────────────────
+ *
+ * Each surface ends by naming the one after it, so a reader always has
+ * somewhere to go and never has to guess the vocabulary:
+ *
+ *     session-start block  →  :insights   the exact turns
+ *     :insights            →  :report     every session, as a file
+ *     :report              →  :fix        one thing to try
+ *     :fix                 →  :report     the evidence behind it
+ *
+ * The block already did this and the other three did not — `:report` ended on
+ * a file path and `:fix` on the preset it had used, which is machinery, not a
+ * next step.
+ *
+ * Kept together because the ladder only works if the rungs agree, and four
+ * strings in four files is how they stop agreeing.
+ */
+export function nextRung(from: 'block' | 'insights' | 'report' | 'fix'): string {
+  switch (from) {
+    case 'block':
+      return '/agentsensei:insights for the exact turns';
+    case 'insights':
+      return '/agentsensei:report for every session, as a file you can keep';
+    case 'report':
+      return '/agentsensei:fix for one thing to try';
+    case 'fix':
+      return '/agentsensei:report for the evidence behind this';
+  }
 }

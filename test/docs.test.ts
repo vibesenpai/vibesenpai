@@ -29,6 +29,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { detailLine, nextRung } from '../src/report-line.ts';
 import { leadSegments } from '../src/render.ts';
 import { JUDGE_DIMENSIONS } from '../src/judge.ts';
 import { detectorsFor } from '../src/detect/index.ts';
@@ -582,5 +583,47 @@ describe('the plugin command files are not a stale copy', () => {
     for (const name of ['insights', 'report', 'fix']) {
       expect(body(name)).toContain('${CLAUDE_PLUGIN_ROOT}');
     }
+  });
+});
+
+describe('every surface ends by naming the next one', () => {
+  // The session-start block did this and the other three did not: `:report`
+  // ended on a file path and `:fix` on the preset it had used, which is
+  // provenance, not a next step. A reader who finished either had nowhere to
+  // go and no way to learn the vocabulary.
+  //
+  // Guarded because this rots quietly. `detailLine` pointed at `cli.ts now`
+  // for a whole rename, printing a dead command at every session start, and
+  // nothing noticed until the block was diffed for an unrelated reason.
+  const rungs = ['block', 'insights', 'report', 'fix'] as const;
+
+  it('gives every surface a rung', () => {
+    for (const r of rungs) {
+      expect(nextRung(r), `${r} has no next step`).not.toBe('');
+    }
+  });
+
+  it('names only commands the plugin actually ships', () => {
+    const shipped = readdirSync('commands').map((f) => f.replace(/\.md$/, ''));
+    for (const r of rungs) {
+      const m = /\/agentsensei:(\w+)/.exec(nextRung(r));
+      expect(m, `${r} names no command`).not.toBeNull();
+      expect(shipped, `${r} points at /agentsensei:${m?.[1]}, which is not shipped`).toContain(
+        m?.[1] ?? '',
+      );
+    }
+  });
+
+  it('never points a surface at itself', () => {
+    for (const r of rungs) {
+      if (r === 'block') continue;
+      expect(nextRung(r), `${r} points at itself`).not.toContain(`/agentsensei:${r}`);
+    }
+  });
+
+  it('is the single source for the block, which once drifted', () => {
+    // `detailLine` held its own copy of the string and kept pointing at a
+    // subcommand that had been renamed away.
+    expect(detailLine('/repo', '/home')).toBe(nextRung('block'));
   });
 });

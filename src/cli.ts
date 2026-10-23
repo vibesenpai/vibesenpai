@@ -44,7 +44,7 @@ import {
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
 import {
-  costLine, detailLine, dimensionLine, fixLine, reportBlock, whereLine,
+  costLine, detailLine, dimensionLine, fixLine, nextRung, reportBlock, whereLine,
 } from './report-line.ts';
 import { compactionsFor, recommend, renderFix } from './fix.ts';
 import { spawn } from 'node:child_process';
@@ -710,15 +710,25 @@ async function cmdInsights(a: Argv): Promise<number> {
     // it reads as a non-sequitur above the history and as a conclusion below
     // it. Printed here rather than passed into `render`, which has no idea the
     // history section exists.
-    if (nextStep !== '') console.log(`\n  ${nextStep}`);
 
-    // ── Last, and only when it is true ─────────────────────────────────────
+    // ── Caveat, then the ways out ──────────────────────────────────────────
     //
-    // This printed between the session and the history, so the first thing a
-    // reader met after the findings was a parenthetical about transcript
-    // resolution. It is a caveat on everything above it, which is where a
-    // caveat goes.
-    if (guessNote !== '') console.log(`${guessNote}\n`);
+    // The guess note qualifies everything above it, so it follows the content;
+    // the ways out follow everything, because a way out that is not last is
+    // not a way out. Both hooks had been printed on either side of the note,
+    // which left it sandwiched between them.
+    if (guessNote !== '') console.log(guessNote);
+
+    const ways = [
+      ...(nextStep === '' ? [] : [['/agentsensei:fix', 'one thing to try, from your history']]),
+      ['/agentsensei:report', 'every session, as a file you can keep'],
+    ];
+    const w = Math.max(...ways.map(([c]) => (c as string).length));
+    console.log('');
+    for (const [cmd, what] of ways) {
+      console.log(`  ${dim((cmd as string).padEnd(w))}  ${dim(what as string)}`);
+    }
+    console.log('');
   return 0;
 }
 
@@ -1614,6 +1624,8 @@ function writeHtmlReport(data: ReportData, archive: string, f: Argv['flags']): n
   );
   console.log(`  ${dim(shown)}`);
   if (wantsOpen && !opened) console.log(`  ${dim(`could not launch ${opener} — run:  ${opener} ${shown}`)}`);
+  console.log('');
+  console.log(`  ${dim(nextRung('report'))}`);
   console.log('');
   return 0;
 }
