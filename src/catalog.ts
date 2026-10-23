@@ -121,8 +121,18 @@ export function initCatalog(dir: string): Catalog {
 
 function writeCatalog(dir: string, c: Catalog): void {
   // Temp path then rename, so a kill cannot leave a half-written catalog.
+  //
+  // ── The pid is not decoration ────────────────────────────────────────────
+  //
+  // This used a fixed `index.json.tmp`, alone among the writers in this
+  // project. Two concurrent `scan` runs therefore wrote the same temp path,
+  // and the loser's `renameSync` threw ENOENT out of `runScan`, which has no
+  // handler — the only write in the archive that could crash a command.
+  //
+  // Low stakes, because the catalog is re-derivable. Still the kind of thing
+  // that is one line to fix and an afternoon to diagnose.
   const target = join(dir, INDEX_FILE);
-  const tmp = `${target}.tmp`;
+  const tmp = `${target}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(c, null, 2), { mode: 0o600 });
   renameSync(tmp, target);
 }

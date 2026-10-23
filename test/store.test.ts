@@ -7,7 +7,7 @@
  * `PLAN.md` names `better-sqlite3` as the fallback if the RC API bites.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { occurrencesOf } from '../src/finding.ts';
 import { stamp } from '../src/schema.ts';
 import { tmpdir } from 'node:os';
@@ -276,5 +276,21 @@ describe('the rule tier is persisted at all', () => {
     const again = occurrencesOf([base]).map((r) => r.id);
     expect(new Set(first).size, 'ids must differ per anchor').toBe(2);
     expect(again, 'ids must be stable across runs').toEqual(first);
+  });
+});
+
+describe('every archive writer uses a distinct temp path', () => {
+  // `src/catalog.ts` used a fixed `index.json.tmp`, alone among the writers.
+  // Two concurrent `scan` runs wrote the same path and the loser's rename threw
+  // ENOENT out of an uncaught path — the only write in the archive that could
+  // crash a command.
+  it('includes the pid', () => {
+    for (const f of ['src/catalog.ts', 'src/standing.ts', 'src/judge-store.ts', 'src/breaker.ts']) {
+      const src = readFileSync(f, 'utf8');
+      const temps = [...src.matchAll(/`\$\{[^`]*\}\.(?:\$\{process\.pid\}\.)?tmp`/g)].map((m) => m[0]);
+      for (const t of temps) {
+        expect(t, `${f} writes a temp path with no pid in it`).toContain('process.pid');
+      }
+    }
   });
 });
