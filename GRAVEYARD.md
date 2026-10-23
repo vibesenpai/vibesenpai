@@ -400,3 +400,34 @@ whoever was running them. So:
 Still open and recorded so it is not re-discovered: **`overreach` scores 1/38,
 1/38 and 2/38** across three arms and two models. Established as broken rather
 than untuned. Retiring a dimension is a product decision, so it stays for now.
+
+## The `settings.json` installer (585 lines)
+
+`src/install.ts` plus `cmdInstall` and `cmdUninstall` merged hook entries into
+`~/.claude/settings.json` and wrote `~/.claude/commands/agentsensei/*.md`. It
+was the whole of D54 and D61, and it worked.
+
+**What killed it: the plugin manifest does the same job without writing anyone's
+config.** `/plugin install` declares hooks from `hooks/hooks.json` and commands
+from `commands/*.md`, and `claude plugin details` confirms the harness resolves
+them — `Skills (3) fix, report, session`, `Hooks (2) SessionStart, Stop`.
+Nothing in the plugin ever called into `install.ts`.
+
+Deleting it removes the project's **only** code that writes the user's
+configuration. CLAUDE.md has a whole section promising not to abuse that
+capability; not having it is stronger than promising.
+
+**How the rot showed.** Renaming `:now` to `:session` updated `commands/*.md`,
+which the plugin reads, and missed `install.ts`, which has its own copies of the
+filenames and bodies. The installed `now.md` kept invoking `cli.ts now`, so
+`/agentsensei:now` printed `unknown command: now` over the usage screen. Nobody
+noticed, because nobody runs the path — which is the argument for deletion
+stated as a bug.
+
+Found during a verification pass, by running `uninstall` on a real machine and
+reading what it listed: `now.md` and `generate-report.md` on disk, against
+`session.md` and `report.md` in the repo.
+
+**The CLI itself survives.** `src/cli.ts` is the engine the plugin's hooks and
+slash commands invoke; it is simply never typed by a human. What died is the
+installer, not the program.
