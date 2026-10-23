@@ -644,3 +644,55 @@ export function progressLine(
   if (unread === 0) return '';
   return `${unread} session${unread === 1 ? '' : 's'} still to read, about one per turn as you work.`;
 }
+
+/**
+ * How far the analysis has got, and how much is left — as a block.
+ *
+ * ── Why the user could not see an ETA ──────────────────────────────────────
+ *
+ * There was one, and it only ever appeared while a pass was mid-flight, which
+ * is a window of about a minute that nobody happens to be looking at. Every
+ * other time the surfaces said how much was *outstanding* and never how much
+ * was *done*, so there was no number to watch move.
+ *
+ * Progress is the thing a person can act on: `3 of 30 read` tells you it is
+ * working, where `27 still to read` could equally mean nothing ever happens —
+ * which, until the backlog started draining, it did.
+ *
+ * The minutes are honest if qualified. 27 sessions is ~27 minutes of model
+ * time; what converts that to wall-clock is how much you work, because the
+ * `Stop` hook reads one per idle turn boundary. Said plainly rather than
+ * hidden, because a reader who wants an ETA is owed a number.
+ */
+export function analysisBlock(opts: {
+  total: number;
+  read: number;
+  unread: number;
+  running?: { sessionId?: string; elapsedMs: number };
+  callMs?: number;
+  spawned?: boolean;
+}): string[] {
+  const { total, read, unread } = opts;
+  if (total === 0) return [];
+
+  const head = `${read} of ${total} session${total === 1 ? '' : 's'} read`;
+  if (unread === 0 && opts.running === undefined) {
+    return [head, 'Up to date.'];
+  }
+
+  const now = progressLine({
+    unread,
+    ...(opts.running === undefined ? {} : { running: opts.running }),
+    ...(opts.callMs === undefined ? {} : { callMs: opts.callMs }),
+    ...(opts.spawned === true ? { spawned: true } : {}),
+  });
+
+  // Model time, stated as such. The per-call figure is measured where we have
+  // it and falls back to the constant until three passes exist.
+  const perSession = ((opts.callMs ?? JUDGE_SECONDS_PER_CALL * 1000) * 2) / 1000;
+  const left = humanDuration(Math.round(unread * perSession));
+
+  return opts.running !== undefined
+    ? [head, now]
+    : [head, `about ${left} of reading left, done in the background as you work`];
+}

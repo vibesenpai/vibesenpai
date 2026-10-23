@@ -195,34 +195,38 @@ describe('render — the cost line measures you against yourself', () => {
   // sessions, which is to say other people's. A reader cannot check it, cannot
   // find it and has no relationship with it. The baseline is now their own
   // history, the one yardstick they own.
+  // Output above MIN_OUTPUT_FOR_RATIO. Below it the figure is mostly the first
+  // turn's one-time caching divided by almost nothing — measured at
+  // cache_creation 17,766 against output 134 — which is how a one-minute
+  // session came to report "133x".
   const session = (cacheCreation: number) => ({
     ...zeros,
-    tokens: { input: 0, output: 1000, cacheRead: 0, cacheCreation },
+    tokens: { input: 0, output: 10_000, cacheRead: 0, cacheCreation },
   });
   const usual = { ratio: 5, sessions: 20 };
 
   it('says nothing when the session is ordinary for this user', () => {
     // Presence is the signal — D62, applied where it had been waived. A line
     // reporting "normal" every run teaches people to skip the output.
-    expect(renderCost(session(7000), undefined, usual)).toEqual([]);
+    expect(renderCost(session(70_000), undefined, usual)).toEqual([]);
   });
 
   it('speaks when the session is unlike their others, and still does not judge it', () => {
-    const out = renderCost(session(200_000), undefined, usual).join('\n');
+    const out = renderCost(session(2_000_000), undefined, usual).join('\n');
     expect(out).toMatch(/your usual/);
     expect(out).not.toMatch(/bad|too high|excessive|warning/i);
   });
 
   it('never names a corpus, a percentile or a median', () => {
-    const out = renderCost(session(200_000), undefined, usual).join('\n');
+    const out = renderCost(session(2_000_000), undefined, usual).join('\n');
     expect(out).not.toMatch(/corpus|percentile|median/i);
   });
 
   it('stays silent rather than borrow a baseline the reader cannot see', () => {
     // Too few sessions to have a "usual". The old code printed the corpus
     // comparison here, which is the defect itself.
-    expect(renderCost(session(200_000), undefined, { ratio: 5, sessions: 2 })).toEqual([]);
-    expect(renderCost(session(200_000), undefined, undefined)).toEqual([]);
+    expect(renderCost(session(2_000_000), undefined, { ratio: 5, sessions: 2 })).toEqual([]);
+    expect(renderCost(session(2_000_000), undefined, undefined)).toEqual([]);
   });
 
   it('prints nothing at all when there is no token data', () => {
@@ -364,7 +368,7 @@ describe('render — model findings are kept visibly apart', () => {
     // would imply a currency they do not have.
     // "Since the last pass" implied a pass had happened and fallen 23 turns
     // behind it. With no findings and a full count, there has never been one.
-    expect(renderJudged([], 23).join('\n')).toContain('still in progress');
+    expect(renderJudged([], 23).join('\n')).toContain('Nothing flagged in this session yet');
   });
 
   it('says nothing at all when there is nothing and no lag', () => {
@@ -376,8 +380,11 @@ describe('render — model findings are kept visibly apart', () => {
     // changed: with no findings and turns outstanding, the session has never
     // been read, so it says that rather than reporting a lag against a pass
     // that never happened.
+    // The queue sentence moved to the `Analysis` block, which owns it — this
+    // one was printing `27 sessions still to read` on the same screen as that
+    // block. What belongs here is only what is true of *this* session.
     const out = renderJudged([], 5).join('\n');
-    expect(out).toContain('still in progress');
+    expect(out).toContain('Nothing flagged in this session yet');
     expect(out).not.toMatch(/fail|error|behind|stale/i);
   });
 });
@@ -512,5 +519,43 @@ describe('the harness says when a turn is not a human speaking', () => {
       message: { role: 'user', content: 'please fix the parser' },
     });
     expect(parse('x.jsonl', line, 's1').events.map((e) => e.turnType)).toContain('user_prompt');
+  });
+});
+
+describe('a mechanism is not a behaviour, sixth instance', () => {
+  // The user, on a session they had just opened:
+  //
+  //   "Claude re-read it 133x more than it wrote" — I just started the
+  //    session, and claude reread what?
+  //
+  // Nothing. Measured on a real short session, the first assistant turn is
+  // `cache_creation 17,766` against `output 134` — the system prompt, tools
+  // and CLAUDE.md being cached **for the first time**. There is no
+  // conversation to re-read yet.
+  //
+  // CLAUDE.md tabulates five instances of claiming a behaviour from a
+  // mechanism, one of them cache hit rate. This was the sixth, from the same
+  // family of numbers.
+  const d = (output: number, cacheCreation: number) => ({
+    editCount: 0,
+    unclassifiedTouchCount: 0,
+    tokens: { input: 0, output, cacheRead: 0, cacheCreation },
+  });
+
+  it('says nothing about a session too small to divide', () => {
+    expect(renderCost(d(134, 17_766), undefined, { ratio: 5, sessions: 20 })).toEqual([]);
+  });
+
+  it('still speaks when the session is big enough for the ratio to mean something', () => {
+    // Above the floor the first turn's caching is immaterial — on a real long
+    // session it is 0.26% of the total.
+    const out = renderCost(d(50_000, 1_000_000), undefined, { ratio: 5, sessions: 20 }).join('');
+    expect(out).toMatch(/20x/);
+  });
+
+  it('describes the tokens, never an inferred behaviour', () => {
+    const out = renderCost(d(50_000, 1_000_000), undefined, { ratio: 5, sessions: 20 }).join('');
+    expect(out, 'nothing was necessarily re-READ').not.toMatch(/re-read/i);
+    expect(out).toMatch(/Re-sending the conversation cost/);
   });
 });

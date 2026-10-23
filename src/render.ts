@@ -176,6 +176,29 @@ export const BASELINE_MIN_SESSIONS = 5;
 /** How far above their usual a session has to be before it is worth a sentence. */
 export const NOTABLE_MULTIPLE = 2;
 
+/**
+ * Below this much output, the ratio describes its own denominator.
+ *
+ * ── Two faults, one floor ─────────────────────────────────────────────────
+ *
+ * A session with 78 tokens of output reported a ratio of 133. Measured on a
+ * real short session, the first assistant turn alone is:
+ *
+ * ```
+ *   turn 1   cache_creation 17,766   output 134
+ *   turn 2   cache_creation    388   output 231
+ * ```
+ *
+ * That 17,766 is the system prompt, tools and CLAUDE.md being cached **for
+ * the first time** — not the conversation being re-sent, because there is no
+ * conversation yet. So on a short session the number is mostly one-time setup
+ * divided by almost nothing.
+ *
+ * Above this floor the setup is immaterial — on a real long session it is
+ * 0.26% of the total — and what remains is genuine context churn.
+ */
+export const MIN_OUTPUT_FOR_RATIO = 2_000;
+
 export type RenderInput = {
   findings: Finding[];
   denominators: Denominators;
@@ -550,6 +573,18 @@ export function renderCost(
 
   const ratio = cacheCreation / output;
 
+  // ── A tiny session has no meaningful ratio ──────────────────────────────
+  //
+  // A session with 78 tokens of output reported `re-read it 133x more than it
+  // wrote — about 24x your usual`, which is a statement about the denominator
+  // and not about the session. GRAVEYARD.md records the same mistake made with
+  // cache hit rate, where `read/(read+creation)` is pinned near 1 by
+  // construction and an "outlier" is just a short session.
+  //
+  // The floor is on *output*, not on turns: it is the number doing the
+  // dividing.
+  if (output < MIN_OUTPUT_FOR_RATIO) return [];
+
   // No baseline, no claim. A reader with four sessions has no "usual", and
   // inventing one from someone else's corpus is the defect being removed.
   if (baseline === undefined || baseline.sessions < BASELINE_MIN_SESSIONS) return [];
@@ -557,8 +592,8 @@ export function renderCost(
 
   const times = Math.round(ratio / baseline.ratio);
   const lines = [
-    `${INDENT.repeat(2)}Claude re-read it ${bold(`${Math.round(ratio)}x`)} more than it wrote` +
-      `${dim(` — about ${times}x your usual`)}`,
+    `${INDENT.repeat(2)}${dim('Re-sending the conversation cost')} ${bold(`${Math.round(ratio)}x`)}` +
+      `${dim(` what Claude wrote — about ${times}x your usual`)}`,
   ];
 
   // The anchored half. Measured: half a session's re-ingestion comes from 6% of
@@ -704,7 +739,6 @@ function dejargon(text: string): string {
 export function renderJudged(
   findings: { dimension: string; turns: number[]; why: string; quote?: string }[],
   unjudgedTurns: number,
-  eta?: string,
 ): string[] {
   if (findings.length === 0 && unjudgedTurns <= 0) return [];
 
@@ -712,7 +746,10 @@ export function renderJudged(
   // show it was a title followed by `nothing so far`, which is two lines to
   // say none — and CLAUDE.md's rule that a model's claim is never blurred with
   // a rule's only needs stating when a claim is actually present.
-  const out: string[] = [`${INDENT}${dim('Findings so far')}`];
+  // Scope, not category. `Findings so far` read as global and sat directly
+  // above the history's actual findings, so the output contradicted itself:
+  // "nothing flagged", then four flagged things.
+  const out: string[] = [];
   for (const f of findings) {
     // ── The marker moved with the heading, and must not be lost ───────────
     //
@@ -766,12 +803,14 @@ export function renderJudged(
     // `progressLine` and says what is actually happening: reading right now
     // with time left, or N sessions still queued. Appending a sentence to a
     // sentence produced "still in progress — about 24 sessions still to read".
-    const status = eta ?? 'Background analysis still in progress.';
-    out.push(
-      `${INDENT.repeat(2)}${dim(
-        findings.length === 0 ? `Nothing flagged yet. ${status}` : status,
-      )}`,
-    );
+    // ── The queue is not this block's business ─────────────────────────────
+    //
+    // This appended the whole progress sentence, which the `Analysis` block
+    // below now owns — so `27 sessions still to read` was printed twice on one
+    // screen. What belongs here is only what is true of **this** session.
+    if (findings.length === 0) {
+      out.push(`${INDENT.repeat(2)}${dim('Nothing flagged in this session yet.')}`);
+    }
   }
   return out;
 }
@@ -970,7 +1009,7 @@ export function render(input: RenderInput): string {
   // without claiming it" (GRAVEYARD.md). Filing these under "Findings" would
   // make the claim the measurement would not support.
   if (input.judged !== undefined) {
-    const j = renderJudged(input.judged.findings, input.judged.unjudgedTurns, input.judged.eta);
+    const j = renderJudged(input.judged.findings, input.judged.unjudgedTurns);
     if (j.length > 0) lines.push(...j, '');
   }
 
@@ -980,7 +1019,7 @@ export function render(input: RenderInput): string {
     ...renderRewritten(stats),
   ];
   if (observations.length > 0) {
-    lines.push(`${INDENT}${dim('About this session')}`, ...observations, '');
+    lines.push(...observations, '');
   }
 
   if (d.unclassifiedTouchCount > 0) {

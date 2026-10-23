@@ -24,6 +24,7 @@ import {
 import { gatherReport, type ReportData } from './gather.ts';
 import {
   JUDGE_RUNNING_STALE_MS,
+  analysisBlock,
   findingsFor,
   humanDuration,
   judgeRunning,
@@ -529,13 +530,19 @@ function printHistory(config: Config): void {
     return;
   }
 
+  // ── One session count on the screen, not two ────────────────────────────
+  //
+  // This said `Across your last 26 sessions` while the line above said `27
+  // sessions still to read`. Both were right — 26 is what the last standing
+  // pass covered, 27 is what is on disk now — and side by side they read as a
+  // bug. The count belongs with the progress that owns it, below.
   console.log('');
-  console.log(`  ${bold(`Across your last ${standing.sessions} sessions`)}`);
+  console.log(`  ${bold('Your history')}`);
   console.log('');
 
   const judged = tallyByDimension(readJudgeState(config.archive));
   if (standing.dimensions.length === 0 && judged.length === 0) {
-    console.log(`  ${dim('Nothing found yet.')}`);
+    console.log(`    ${dim('Nothing found yet.')}`);
   } else {
     // ── A cap, which this surface never had ────────────────────────────────
     //
@@ -543,14 +550,14 @@ function printHistory(config: Config): void {
     // printed every dimension there has ever been. Fine at two, and this
     // project's own plan adds more.
     for (const d of standing.dimensions.slice(0, HISTORY_DIMENSIONS)) {
-      console.log(`  ${dimensionLine(d)}`);
+      console.log(`    ${dimensionLine(d)}`);
       // `whereLine` carries its own leading spaces, sized for the block it is
       // shared with. Adding four more put the filename nine columns in.
       const where = whereLine(d);
-      if (where !== '') console.log(where);
+      if (where !== '') console.log(`  ${where}`);
     }
     const hidden = standing.dimensions.length - HISTORY_DIMENSIONS;
-    if (hidden > 0) console.log(`  ${dim(`and ${hidden} more`)}`);
+    if (hidden > 0) console.log(`    ${dim(`and ${hidden} more`)}`);
 
     for (const { dimension, count } of judged) {
       console.log(`  ${count} ${dimension.replace(/_/g, ' ')} ${dim('— flagged by a model')}`);
@@ -563,12 +570,50 @@ function printHistory(config: Config): void {
     console.log(`  ${dim(cost)}`);
   }
 
-  // ── A timestamp and a command are not one sentence ────────────────────────
+  // ── What the analysis has got through, which is the thing you watch ──────
   //
-  // This read `as of 2026-10-23 11:35 · /agentsensei:report for every session`
-  // — two unrelated facts joined by the separator used for related ones.
+  // The footer used to be `Last read 2026-10-23 14:48.` — a timestamp for a
+  // background pass, which answers a question nobody asked. What a reader
+  // wants is whether it is making progress and how much is left, and until
+  // now that number only appeared during the ~1 minute a pass was in flight.
+  printAnalysis(config);
+}
+
+/** Progress and what remains, from the store rather than from the standing. */
+function printAnalysis(config: Config): void {
+  let lines: string[] = [];
+  try {
+    const db = openStore(config.archive);
+    try {
+      const sizes = sessionSizes(config.sources);
+      const { unread, judged, behind } = pendingWork(readJudgeState(config.archive), sizes);
+      lines = analysisBlock({
+        total: sizes.length,
+        // "Read" means looked at at all — a live session is never *fully*
+        // caught up, so counting only those would show 0 for ever.
+        read: judged + behind,
+        unread,
+        ...(() => {
+          const run = currentRun(db, JUDGE_RUNNING_STALE_MS);
+          return run === undefined ? {} : { running: run };
+        })(),
+        ...(() => {
+          const ms = measuredCallMs(db);
+          return ms === undefined ? {} : { callMs: ms };
+        })(),
+        ...(judgeRunning(config.archive) ? { spawned: true } : {}),
+      });
+    } finally {
+      db.close();
+    }
+  } catch {
+    // A store that will not open is not a reason to withhold the history.
+  }
+  if (lines.length === 0) return;
   console.log('');
-  console.log(`  ${dim(`Last read ${computedAtLocal(standing)}.`)}`);
+  console.log(`  ${bold('Analysis')}`);
+  console.log('');
+  for (const l of lines) console.log(`    ${dim(l)}`);
 }
 
 async function cmdInsights(a: Argv): Promise<number> {
@@ -758,7 +803,7 @@ async function cmdInsights(a: Argv): Promise<number> {
     // the ways out follow everything, because a way out that is not last is
     // not a way out. Both hooks had been printed on either side of the note,
     // which left it sandwiched between them.
-    if (guessNote !== '') console.log(guessNote);
+    if (guessNote !== '') console.log(`\n${guessNote}`);
 
     const ways = [
       ...(nextStep === '' ? [] : [['/agentsensei:fix', 'one thing to try, from your history']]),
