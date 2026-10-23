@@ -22,7 +22,15 @@ import {
 import { join } from 'node:path';
 import type { JudgeDimension } from './judge.ts';
 import {
-  addSpend, advanceLedger, openStore, putEvidence, putOccurrences, readSpend, transact, type Db,
+  addSpend,
+  advanceLedger,
+  openStore,
+  putEvidence,
+  putOccurrences,
+  readSpend,
+  skippedSessions,
+  transact,
+  type Db,
 } from './store.ts';
 import { createHash } from 'node:crypto';
 
@@ -135,6 +143,13 @@ export type JudgeState = {
    * check this first and say what it does not know.
    */
   storeUnreadable?: boolean;
+  /**
+   * Sessions no packet can hold, so nothing returns to them.
+   *
+   * Not a failure and not an error — a property of the data. See
+   * `markSkipped` in `src/store.ts` for why it is kept away from the breaker.
+   */
+  skipped?: string[];
 };
 
 export function emptyState(): JudgeState {
@@ -233,10 +248,12 @@ function readProgress(archive: string): Omit<JudgeState, 'v' | 'settings'> {
     for (const row of db.prepare('SELECT session_id, judged_bytes FROM ledger').all()) {
       ledger[String(row['session_id'])] = Number(row['judged_bytes']);
     }
+    const skipped = skippedSessions(db).map((r) => r.sessionId);
     return {
       ledger,
       findings: readJudgedFindings(db),
       usage: { calls: spend.calls, inputTokens: spend.tokensIn, outputTokens: spend.tokensOut },
+      ...(skipped.length === 0 ? {} : { skipped }),
     };
   } catch {
     // ── Not throwing is correct. Returning a bare zero is not ──────────────
@@ -503,8 +520,14 @@ export function oldestUnread(
   state: JudgeState,
   sessions: { id: string; sizeBytes: number; mtimeMs?: number }[],
 ): string | undefined {
+  // ── Skipped sessions are passed over, or this stalls ────────────────────
+  //
+  // A session no packet can hold never advances its watermark, so without
+  // this it stays `unread` and is selected on every idle turn boundary — for
+  // ever, and taking the backlog behind it down with it.
+  const skipped = new Set(state.skipped ?? []);
   const unread = sessions
-    .filter((s) => (state.ledger[s.id] ?? 0) === 0 && s.sizeBytes > 0)
+    .filter((s) => !skipped.has(s.id) && (state.ledger[s.id] ?? 0) === 0 && s.sizeBytes > 0)
     .sort((a, b) => (a.mtimeMs ?? 0) - (b.mtimeMs ?? 0));
   return unread[0]?.id;
 }

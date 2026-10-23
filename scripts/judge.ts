@@ -36,7 +36,7 @@
  * discovered sessions to 12.
  */
 
-import { endRun, openStore, startRun } from '../src/store.ts';
+import { endRun, markSkipped, openStore, startRun } from '../src/store.ts';
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { recordFailure, recordSuccess, isTripped, readBreaker } from '../src/breaker.ts';
@@ -90,6 +90,71 @@ function carryFor(state: JudgeState, sessionId: string, events: Event[], fromSeq
       .map((f) => ({ dimension: f.dimension, turns: f.turns })),
     turnsJudged: fromSeq,
   };
+}
+
+
+/**
+ * The longest run of turns from the front of `fresh` that fits one packet.
+ *
+ * ── Why a session can be read in pieces ────────────────────────────────────
+ *
+ * Returning `undefined` for an oversize session meant it was never read at
+ * all, and once the `Stop` hook began draining the backlog it would select the
+ * same session on every idle turn boundary — five of which trip the breaker
+ * and disable the judge entirely. Measured: one of 29 real sessions is over
+ * budget, at 66,196 tokens against a 60,000 ceiling.
+ *
+ * Reading it in windows is the operation that **already exists** for a session
+ * that has grown: `fromSeq` maps the byte watermark back to a turn and
+ * `carryFor` forwards open failures and findings so far. Only the reason for
+ * stopping is new — budget rather than end of file.
+ *
+ * Binary search rather than a token-count heuristic, because `renderExtract`
+ * is the only thing that knows what a packet really costs. ~13 probes for a
+ * 6,000-turn session, in a detached process that has the time.
+ *
+ * `undefined` means not even one turn fits, which no packet can ever hold.
+ */
+function largestFittingWindow(
+  sessionId: string,
+  fresh: Event[],
+  fullText: Map<number, string>,
+  carry: JudgeCarry | undefined,
+  budget: number,
+): { session: JudgePacketSession; turns: number } | undefined {
+  const build = (n: number): JudgePacketSession =>
+    buildSession(sessionId, fresh.slice(0, n), fullText, carry);
+  const fits = (n: number): boolean => {
+    const p = build(n);
+    return p.packet.turns.length > 0 && estimateTokens(renderExtract([p])) <= budget;
+  };
+
+  if (!fits(1)) return undefined;
+
+  let lo = 1;
+  let hi = fresh.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(mid)) lo = mid;
+    else hi = mid - 1;
+  }
+  return { session: build(lo), turns: lo };
+}
+
+/** Mark a session no packet can hold, without opening a store at every caller. */
+function skipSession(archive: string, sessionId: string, reason: string): void {
+  try {
+    const db = openStore(archive);
+    try {
+      markSkipped(db, sessionId, reason);
+    } finally {
+      db.close();
+    }
+  } catch {
+    // Principle Zero: failing to record a skip must not fail the pass. The
+    // cost is that the session is reconsidered next time, which is what used
+    // to happen always.
+  }
 }
 
 async function main(): Promise<void> {
@@ -153,6 +218,39 @@ async function main(): Promise<void> {
       offsets.set(sessionId, size);
       continue;
     }
+
+    // ── Too big for one packet is not too big to read ──────────────────────
+    //
+    // Windowed here rather than in the batching loop below, because this is
+    // where the events, their count and the file size are still in scope —
+    // all three are needed to say where the window stopped in bytes.
+    if (estimateTokens(renderExtract([packet])) > state.settings.maxBatchTokens) {
+      const carry = judged === 0 ? undefined : carryFor(state, sessionId, events, fromSeq);
+      const win = largestFittingWindow(
+        sessionId,
+        fresh,
+        fullText,
+        carry,
+        state.settings.maxBatchTokens,
+      );
+      if (win === undefined) {
+        // No packet can ever hold it. Recorded as a property of the data
+        // rather than as a breaker failure — the breaker is for transient
+        // faults, and a turn that is simply too large is permanent.
+        skipSession(config.archive, sessionId, 'a single turn exceeds the judge budget');
+        continue;
+      }
+      sessions.push(win.session);
+
+      // Where this window stopped, in bytes, so the next pass resumes there.
+      // The same proportional mapping `fromSeq` reads back, and it rounds
+      // down — so a resume lands at or before the last turn sent. Overlap,
+      // never a gap, and overlap is free because occurrence ids are hashes.
+      const firstFresh = events.length - fresh.length;
+      offsets.set(sessionId, Math.floor(((firstFresh + win.turns) / events.length) * size));
+      continue;
+    }
+
     sessions.push(packet);
     offsets.set(sessionId, size);
   }
@@ -182,9 +280,23 @@ async function main(): Promise<void> {
     const candidate = [...batch, session];
     if (estimateTokens(renderExtract(candidate)) > state.settings.maxBatchTokens) {
       if (batch.length === 0) {
-        // One session alone is over budget. It can never be sent as it stands,
-        // so say so rather than looping on it every pass.
-        recordFailure(config.archive, `session ${session.sessionId} exceeds the judge budget alone`);
+        // ── Unreachable, and defensive anyway ────────────────────────────
+        //
+        // Every packet in `sessions` was checked against the budget as it was
+        // built, and windowed if it exceeded one — so a batch of exactly one
+        // always fits and this branch cannot be taken.
+        //
+        // It used to be the only handling oversize got: `recordFailure` and
+        // move on, which never advanced the watermark. Harmless while the Stop
+        // hook judged only the live session; once it began draining the
+        // backlog it meant selecting the same session for ever, and five
+        // failures trip the breaker and disable the judge entirely.
+        //
+        // Kept as a skip rather than deleted, because if the invariant above
+        // ever breaks the right outcome is still "pass over it", never "wedge
+        // the queue". Deliberately not a breaker failure.
+        skipSession(config.archive, session.sessionId, 'did not fit a packet of its own');
+        offsets.delete(session.sessionId);
         continue;
       }
       deferred.push(session.sessionId);

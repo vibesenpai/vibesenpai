@@ -116,6 +116,15 @@ CREATE TABLE IF NOT EXISTS run (
 );
 `;
 
+/** Sessions no packet can hold, so the drain stops returning to them. */
+const SKIPPED_DDL = `
+CREATE TABLE IF NOT EXISTS skipped (
+  session_id TEXT PRIMARY KEY,
+  reason     TEXT NOT NULL,
+  at         TEXT NOT NULL
+);
+`;
+
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
@@ -180,6 +189,7 @@ CREATE TABLE IF NOT EXISTS spend (
 -- Is analysis in flight, did it finish, what did it cost. Answered directly
 -- rather than inferred, which is what the session-start line needs.
 ${RUN_DDL}
+${SKIPPED_DDL}
 `;
 
 /**
@@ -266,6 +276,8 @@ export function openStore(archive: string): Db {
         db.exec(RUN_DDL);
       }
     }
+    // Added after `run`, so an existing store has neither.
+    db.exec(SKIPPED_DDL);
   } catch {
     // A store we cannot inspect is one `initialised` will rebuild below.
   }
@@ -552,4 +564,36 @@ export function measuredCallMs(db: Db, minRuns = 3): number | undefined {
   if (rows.length < minRuns) return undefined;
   const sorted = rows.map((r) => r.duration_ms).sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
+}
+
+/**
+ * Mark a session no packet can hold.
+ *
+ * ── Why this is not a breaker failure ──────────────────────────────────────
+ *
+ * It used to be. A session whose smallest unit exceeds the budget called
+ * `recordFailure` and returned without advancing the watermark, so the drain
+ * selected it again on the next idle turn boundary — and five of those trip
+ * the breaker, which disables the judge **entirely**.
+ *
+ * The breaker exists for transient faults: the model unreachable, a timeout, a
+ * malformed reply. A turn that is simply too large is a permanent property of
+ * the data, and counting it as a fault conflates "something is broken" with
+ * "this one does not fit".
+ */
+export function markSkipped(db: Db, sessionId: string, reason: string): void {
+  db.prepare(
+    'INSERT INTO skipped(session_id, reason, at) VALUES (?, ?, ?) ' +
+      'ON CONFLICT(session_id) DO UPDATE SET reason = excluded.reason, at = excluded.at',
+  ).run(sessionId, reason, new Date().toISOString());
+}
+
+/** Sessions the drain should pass over, with why. */
+export function skippedSessions(db: Db): { sessionId: string; reason: string }[] {
+  return (
+    db.prepare('SELECT session_id, reason FROM skipped').all() as {
+      session_id: string;
+      reason: string;
+    }[]
+  ).map((r) => ({ sessionId: r.session_id, reason: r.reason }));
 }

@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { markSkipped, openStore } from '../src/store.ts';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -193,5 +194,73 @@ describe('a pass that finds nothing still records that it looked', () => {
     const clean = /episodes\.length === 0[\s\S]{0,1400}?\n  \}/.exec(src)?.[0] ?? '';
     expect(clean, 'the clean-batch branch moved').not.toBe('');
     expect(clean).toMatch(/recordPass\(config\.archive, \[\], offsets\)/);
+  });
+});
+
+describe('a session too big for one packet is read, not abandoned', () => {
+  // It used to call `recordFailure` and return without advancing the
+  // watermark. Harmless while the Stop hook only judged the live session;
+  // once it began draining the backlog it would select the same session on
+  // every idle turn boundary, and five of those trip the breaker and disable
+  // the judge entirely.
+  //
+  // Measured on a real archive: 1 of 29 sessions is over budget, at 66,196
+  // tokens against a 60,000 ceiling — and it windows into 4,710 turns then
+  // 1,357. Two passes, nothing abandoned.
+  const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-window-'));
+
+  it('windows rather than giving up', () => {
+    const src = readFileSync('scripts/judge.ts', 'utf8');
+    expect(src, 'oversize is no longer a breaker failure').not.toMatch(
+      /recordFailure\([^)]*exceeds the judge budget alone/,
+    );
+    expect(src).toMatch(/largestFittingWindow/);
+  });
+
+  it('resumes at or before the last turn sent, never after it', () => {
+    // The watermark is bytes and the window is turns, so the two map through a
+    // ratio. Rounding down is what makes the round trip safe: a resume lands
+    // at or before where we stopped, so turns overlap rather than being
+    // skipped — and overlap is free, because occurrence ids are content
+    // hashes.
+    const totalEvents = 6067;
+    const size = 26_272_768;
+    const sentThrough = 4710;
+
+    const watermark = Math.floor((sentThrough / totalEvents) * size);
+    const resumeAt = Math.floor((watermark / size) * totalEvents);
+    expect(resumeAt).toBeLessThanOrEqual(sentThrough);
+  });
+
+  it('still overlaps rather than gaps when the session has grown', () => {
+    // A growing session increases both the size and the event count, which
+    // moves the resume point earlier still.
+    const watermark = Math.floor((4710 / 6067) * 26_272_768);
+    const grownSize = 26_272_768 * 2;
+    const grownEvents = 6067 * 2;
+    expect(Math.floor((watermark / grownSize) * grownEvents)).toBeLessThanOrEqual(4710);
+  });
+
+  it('passes over a session nothing can hold, instead of stalling on it', () => {
+    const dir = scratch();
+    const sizes = [
+      { id: 'huge', sizeBytes: 999, mtimeMs: 1 },
+      { id: 'next', sizeBytes: 100, mtimeMs: 2 },
+    ];
+    expect(oldestUnread(readJudgeState(dir), sizes)).toBe('huge');
+
+    const db = openStore(dir);
+    markSkipped(db, 'huge', 'a single turn exceeds the judge budget');
+    db.close();
+
+    expect(oldestUnread(readJudgeState(dir), sizes), 'the drain moves on').toBe('next');
+  });
+
+  it('keeps that away from the breaker, which is for transient faults', () => {
+    const src = readFileSync('scripts/judge.ts', 'utf8');
+    const branch = /const win = largestFittingWindow[\s\S]{0,800}?skipSession[^\n]*\n/.exec(src)?.[0] ?? '';
+    expect(branch, 'the windowing branch moved').not.toBe('');
+    expect(branch, 'too large is permanent, not a fault').not.toMatch(/recordFailure/);
+    expect(branch).toMatch(/skipSession/);
   });
 });
