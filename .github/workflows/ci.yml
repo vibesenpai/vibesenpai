@@ -54,7 +54,8 @@ jobs:
           npm pack --dry-run --json > /tmp/pack.json
           node -e '
             const files = require("/tmp/pack.json")[0].files.map(f => f.path);
-            const need = ["LICENSE", "NOTICE", "dist/src/cli.js", ".claude-plugin/plugin.json"];
+            const need = ["LICENSE", "NOTICE", "dist/src/cli.js", ".claude-plugin/plugin.json",
+                          ".claude-plugin/marketplace.json", "hooks/hooks.json"];
             const missing = need.filter(n => !files.includes(n));
             if (!files.some(f => f.startsWith("scripts/"))) missing.push("scripts/");
             if (!files.some(f => f.startsWith("commands/"))) missing.push("commands/");

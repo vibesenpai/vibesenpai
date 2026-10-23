@@ -1,20 +1,21 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "agentsensei",
-  "interface": {
-    "displayName": "agentsensei"
+  "description": "The agentsensei plugin for Claude Code.",
+  "owner": {
+    "name": "agentsensei contributors",
+    "url": "https://github.com/crozzfire/agentsensei"
   },
   "plugins": [
     {
       "name": "agentsensei",
-      "source": {
-        "source": "local",
-        "path": "."
-      },
-      "policy": {
-        "installation": "AVAILABLE"
+      "description": "See what your coding agent's mistakes cost you — in tokens, with the exact turns, using the AI you already pay for.",
+      "author": {
+        "name": "agentsensei contributors"
       },
       "category": "Productivity",
-      "description": "See what your coding agent's mistakes cost you — in tokens, with the exact turns, using the AI you already pay for."
+      "source": "./",
+      "homepage": "https://github.com/crozzfire/agentsensei#readme"
     }
   ]
 }
