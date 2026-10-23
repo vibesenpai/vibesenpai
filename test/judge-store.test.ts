@@ -8,8 +8,16 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  BYTES_PER_TURN, DEFAULT_SETTINGS, dueForJudging, emptyState, findingsFor,
-  readJudgeState, recordPass, recordSpend, writeSettings,
+  BYTES_PER_TURN,
+  DEFAULT_SETTINGS,
+  dueForJudging,
+  emptyState,
+  findingsFor,
+  oldestUnread,
+  readJudgeState,
+  recordPass,
+  recordSpend,
+  writeSettings,
 } from '../src/judge-store.ts';
 
 const archive = (): string => mkdtempSync(join(tmpdir(), 'as-judge-'));
@@ -144,5 +152,46 @@ describe('an unreadable store is not an empty one', () => {
     const src = readFileSync('src/cli.ts', 'utf8');
     expect(src).toMatch(/storeUnreadable === true/);
     expect(src).toMatch(/the store could not be read/);
+  });
+});
+
+describe('a pass that finds nothing still records that it looked', () => {
+  // `judge.ts` returned on `episodes.length === 0` without calling
+  // `recordPass`, and its own comment called that **the common case** — so
+  // most sessions never left `unread`. Visible on a real machine as
+  // `0 of 29 sessions read` after five completed passes, against an empty
+  // ledger.
+  //
+  // Worse than cosmetic: an unmarked session is re-read and re-paid for by
+  // every pass that reaches it, which is the waste this tool exists to detect.
+  const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-clean-'));
+
+  it('advances the watermark with no findings', () => {
+    const dir = scratch();
+    recordPass(dir, [], new Map([['s1', 4242]]));
+    expect(readJudgeState(dir).ledger['s1']).toBe(4242);
+  });
+
+  it('creates no findings while doing so', () => {
+    const dir = scratch();
+    recordPass(dir, [], new Map([['s1', 4242]]));
+    expect(readJudgeState(dir).findings).toEqual([]);
+  });
+
+  it('means a clean session stops being unread', () => {
+    // The drain walks `oldestUnread`, which reads the ledger. A session that
+    // never advanced it would be selected for ever.
+    const dir = scratch();
+    const sizes = [{ id: 's1', sizeBytes: 4242, mtimeMs: 1 }];
+    expect(oldestUnread(readJudgeState(dir), sizes)).toBe('s1');
+    recordPass(dir, [], new Map([['s1', 4242]]));
+    expect(oldestUnread(readJudgeState(dir), sizes)).toBeUndefined();
+  });
+
+  it('is what judge.ts actually does on an empty extract', () => {
+    const src = readFileSync('scripts/judge.ts', 'utf8');
+    const clean = /episodes\.length === 0[\s\S]{0,1400}?\n  \}/.exec(src)?.[0] ?? '';
+    expect(clean, 'the clean-batch branch moved').not.toBe('');
+    expect(clean).toMatch(/recordPass\(config\.archive, \[\], offsets\)/);
   });
 });

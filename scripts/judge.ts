@@ -192,12 +192,19 @@ async function main(): Promise<void> {
     }
     batch.push(session);
   }
-  if (batch.length === 0) return;
-
-  // Only what is actually sent advances the ledger.
+  // Only what is actually sent advances the ledger — so the unsent are pruned
+  // **before** the empty check, not after it. Returning first discarded the
+  // watermarks of sessions that were genuinely read and found quiet (set
+  // above, where a session has no turns worth judging), whenever the batch
+  // happened to end up empty. Those are reads we can honestly record.
   for (const id of deferred) offsets.delete(id);
   for (const s of sessions) {
     if (!batch.some((b) => b.sessionId === s.sessionId)) offsets.delete(s.sessionId);
+  }
+
+  if (batch.length === 0) {
+    if (offsets.size > 0) recordPass(config.archive, [], offsets);
+    return;
   }
 
   // ── Stage A: extract, without labelling ──────────────────────────────────
@@ -247,8 +254,22 @@ async function main(): Promise<void> {
 
   const { episodes } = parseExtract(extracted.reply, batch);
   if (episodes.length === 0) {
-    // Nothing to label, and that is the common case. Stage B is not worth an
-    // invocation's overhead for an empty list.
+    // ── Nothing found is a result, and has to be recorded as one ───────────
+    //
+    // Stage B is still skipped: it is not worth an invocation's overhead for
+    // an empty list, and the comment above was right about that. What was
+    // wrong is what followed — `return` without `recordPass`, so the watermark
+    // never moved and the session stayed `unread` for ever.
+    //
+    // Since this is **the common case**, most sessions never left that state.
+    // Visible on a real machine as `0 of 29 sessions read` after five
+    // completed passes, with an empty ledger — and worse than cosmetic: those
+    // bytes get re-read and re-paid for on every pass that reaches them, which
+    // is precisely the waste this tool exists to point at.
+    //
+    // "We read to byte N and found nothing" is exactly what a watermark is
+    // for. Recorded with no findings, in the same transaction as always.
+    recordPass(config.archive, [], offsets);
     recordSuccess(config.archive);
     return;
   }
