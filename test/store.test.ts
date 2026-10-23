@@ -7,7 +7,7 @@
  * `PLAN.md` names `better-sqlite3` as the fallback if the RC API bites.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { occurrencesOf } from '../src/finding.ts';
 import { stamp } from '../src/schema.ts';
 import { tmpdir } from 'node:os';
@@ -292,5 +292,51 @@ describe('every archive writer uses a distinct temp path', () => {
         expect(t, `${f} writes a temp path with no pid in it`).toContain('process.pid');
       }
     }
+  });
+});
+
+describe('the store is no more readable than the files it replaced', () => {
+  // `node:sqlite` takes no mode option and creates the database under the
+  // process umask — 022 here — so the store arrived world-readable while the
+  // `index.json` beside it was `-rw-------`. It holds file paths and redacted
+  // transcript quotes, and `-wal` holds rows not yet committed.
+  const mode = (p: string): string => (statSync(p).mode & 0o777).toString(8);
+
+  it('creates the database 0600', () => {
+    const dir = scratch();
+    openStore(dir).close();
+    expect(mode(join(dir, 'store.db'))).toBe('600');
+  });
+
+  it('tightens a store that was created world-readable', () => {
+    // The repair path: a store from before this fix, on the next open.
+    const dir = scratch();
+    openStore(dir).close();
+    chmodSync(join(dir, 'store.db'), 0o644);
+    openStore(dir).close();
+    expect(mode(join(dir, 'store.db'))).toBe('600');
+  });
+
+  it('gets 0600 on the WAL and SHM too, which hold uncommitted rows', () => {
+    // Not asserted as SQLite trivia — asserted because the fix *depends* on
+    // SQLite matching the companions to the main file. If a version stops
+    // doing that, this fails rather than quietly leaking.
+    const dir = scratch();
+    const db = openStore(dir);
+    db.exec('BEGIN IMMEDIATE');
+    putOccurrences(db, [occ()]);
+    for (const f of ['store.db-wal', 'store.db-shm']) {
+      expect(mode(join(dir, f)), `${f} is readable by other users`).toBe('600');
+    }
+    db.exec('ROLLBACK');
+    db.close();
+  });
+
+  it('opens even when the mode cannot be set', () => {
+    // Principle Zero outranks a tightened mode.
+    const dir = scratch();
+    openStore(dir).close();
+    chmodSync(join(dir, 'store.db'), 0o400);
+    expect(() => openStore(dir).close()).not.toThrow();
   });
 });

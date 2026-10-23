@@ -42,7 +42,7 @@
  * alias for `Database`. One import site means one place to change when that
  * lands, and one place to swap for `better-sqlite3` if the RC API bites.
  */
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as sqlite from 'node:sqlite';
 
@@ -179,7 +179,32 @@ CREATE TABLE IF NOT EXISTS run (
  */
 export function openStore(archive: string): Db {
   mkdirSync(archive, { recursive: true, mode: 0o700 });
-  const db = new DatabaseCtor(join(archive, STORE_FILE), { timeout: 5000 });
+  const file = join(archive, STORE_FILE);
+  const db = new DatabaseCtor(file, { timeout: 5000 });
+
+  // ── 0600, because SQLite does not do it for us ───────────────────────────
+  //
+  // Every flat file in this archive is written `mode: 0o600`. `node:sqlite`
+  // takes no mode option and creates the database under the process umask —
+  // 022 on this machine — so the store arrived **world-readable** while the
+  // `index.json` beside it was `-rw-------`. It holds file paths and redacted
+  // transcript quotes, and `-wal` holds rows not yet committed.
+  //
+  // The directory is 0700, which contains it. That is not a reason to skip
+  // the file mode: the flat store set 0600 *inside* that same directory, and
+  // dropping a layer silently is how a privacy posture decays.
+  //
+  // One chmod covers all three files. Verified rather than assumed: with only
+  // `store.db` tightened, SQLite created `-wal` and `-shm` at 0600 as well,
+  // because it matches the companions to the main database's mode.
+  //
+  // Unconditional, so a store created before this fix is repaired on the next
+  // open — and wrapped, because Principle Zero outranks a tightened mode.
+  try {
+    chmodSync(file, 0o600);
+  } catch {
+    // A mode we could not set is not a reason to fail a session.
+  }
 
   // Connection settings. Neither takes a lock.
   db.exec('PRAGMA busy_timeout = 5000');
