@@ -316,8 +316,8 @@ describe('render — CONTEXT states compaction without judging it', () => {
     const out = renderCompaction(
       statsWith(1, [{ seq: 1745, preTokens: 1_000_333, postTokens: 31_492 }]) as never,
     ).join('\n');
-    expect(out).toContain('compacted');
-    expect(out).toContain('compacted once');
+    expect(out).toContain('summarised');
+    expect(out).toContain('summarised once');
     // The per-turn rows (`turn 1745  1.0M → 31k`) were a debug view: a reader
     // can act on none of them, and eight of them buried the one fact that can
     // be acted on, which is that it happened at all.
@@ -333,11 +333,11 @@ describe('render — CONTEXT states compaction without judging it', () => {
     const out = renderCompaction(
       statsWith(3, [{ seq: 10, preTokens: 900, postTokens: 100 }]) as never,
     ).join('\n');
-    expect(out).toContain('compacted 3 times');
+    expect(out).toContain('summarised 3 times');
     // The older record shape carries no figures. That was once stated as its
     // own line; with the rows gone there is nothing for it to qualify, and the
     // count it belongs to is already right.
-    expect(out).toContain('compacted 3 times');
+    expect(out).toContain('summarised 3 times');
   });
 });
 
@@ -350,7 +350,10 @@ describe('render — model findings are kept visibly apart', () => {
       [{ dimension: 'inaccurate_self_report', turns: [412, 460], why: 'said green, 412 failed' }],
       0,
     ).join('\n');
-    expect(out).toContain('Flagged by a model');
+    // The marker is per-row now, not a section title: grouping rule and model
+    // findings under one heading would otherwise leave a model's claim
+    // indistinguishable from a rule's. See CLAUDE.md on never blurring them.
+    expect(out).toContain('flagged by a model');
     expect(out).toContain('inaccurate_self_report');
     expect(out).toContain('412, 460');
   });
@@ -360,7 +363,7 @@ describe('render — model findings are kept visibly apart', () => {
     // would imply a currency they do not have.
     // "Since the last pass" implied a pass had happened and fallen 23 turns
     // behind it. With no findings and a full count, there has never been one.
-    expect(renderJudged([], 23).join('\n')).toContain('Not read yet');
+    expect(renderJudged([], 23).join('\n')).toContain('still in progress');
   });
 
   it('says nothing at all when there is nothing and no lag', () => {
@@ -373,7 +376,7 @@ describe('render — model findings are kept visibly apart', () => {
     // been read, so it says that rather than reporting a lag against a pass
     // that never happened.
     const out = renderJudged([], 5).join('\n');
-    expect(out).toContain('Not read yet');
+    expect(out).toContain('still in progress');
     expect(out).not.toMatch(/fail|error|behind|stale/i);
   });
 });

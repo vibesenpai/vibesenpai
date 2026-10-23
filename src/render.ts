@@ -522,8 +522,8 @@ export function renderCost(
 
   const times = Math.round(ratio / baseline.ratio);
   const lines = [
-    `${INDENT}Claude re-read this conversation ${bold(`${Math.round(ratio)}x`)} more than it wrote` +
-      ` — about ${bold(`${times}x`)} your usual.`,
+    `${INDENT.repeat(2)}Claude re-read it ${bold(`${Math.round(ratio)}x`)} more than it wrote` +
+      `${dim(` — about ${times}x your usual`)}`,
   ];
 
   // The anchored half. Measured: half a session's re-ingestion comes from 6% of
@@ -532,7 +532,7 @@ export function renderCost(
   if (heaviest.length > 1 && stats !== undefined && stats.reingest.share > 0) {
     const share = Math.round(stats.reingest.share * 100);
     lines.push(
-      `${INDENT}${dim(`${heaviest.length} turns account for ${share}% of it.`)}`,
+      `${INDENT.repeat(3)}${dim(`${heaviest.length} turns account for ${share}% of that`)}`,
     );
   }
   return lines;
@@ -565,18 +565,21 @@ export function renderRewritten(stats: SessionStats): string[] {
   // and this line was kept — see GRAVEYARD.md. Gating it on a threshold would
   // quietly turn the honest version into the rejected one.
   const name = basename(top.path);
-  const others = stats.rewritten.length - 1;
-  const alsoOthers = others > 0 ? ` (and ${others} other${others === 1 ? '' : 's'})` : '';
   const how =
     top.editCalls === 0
-      ? ', though not through edits we saw'
+      ? ', none from Claude editing it directly'
       : ` across ${top.editCalls} edit${top.editCalls === 1 ? '' : 's'}`;
 
-  return [
-    `${INDENT}${dim('Most rewritten:')} ${yellow(name)}${dim(
-      `, ${top.versions} versions${how}${alsoOthers}.`,
-    )}`,
+  const lines = [
+    `${INDENT.repeat(2)}${yellow(name)}${dim(` changed most — ${top.versions} versions${how}`)}`,
   ];
+  // The tail carried the scale and pushed the line past a hundred columns. It
+  // is a separate fact and reads as one.
+  const others = stats.rewritten.length - 1;
+  if (others > 0) {
+    lines.push(`${INDENT.repeat(2)}${dim(`${others} other file${others === 1 ? '' : 's'} changed too`)}`);
+  }
+  return lines;
 }
 
 /**
@@ -604,8 +607,8 @@ export function renderCompaction(stats: SessionStats): string[] {
   // this project does not give. What it adds is the scale, which is otherwise
   // invisible: one real session dropped 2.8M tokens without ever saying so.
   const times = c.count === 1 ? 'once' : `${c.count} times`;
-  const scale = c.dropped > 0 ? ` ${dim(`(${human(c.dropped)} tokens of context)`)}` : '';
-  return [`${INDENT}${dim(`The conversation was compacted ${times}`)}${scale}${dim('.')}`];
+  const scale = c.dropped > 0 ? ` ${dim(`(${human(c.dropped)} tokens)`)}` : '';
+  return [`${INDENT.repeat(2)}${dim(`Claude's memory of it was summarised ${times}`)}${scale}`];
 }
 
 /**
@@ -674,11 +677,24 @@ export function renderJudged(
   // show it was a title followed by `nothing so far`, which is two lines to
   // say none — and CLAUDE.md's rule that a model's claim is never blurred with
   // a rule's only needs stating when a claim is actually present.
-  const out: string[] =
-    findings.length > 0 ? [`${INDENT}${dim('Flagged by a model')}`] : [];
+  const out: string[] = [`${INDENT}${dim('Findings so far')}`];
   for (const f of findings) {
+    // ── The marker moved with the heading, and must not be lost ───────────
+    //
+    // `FLAGGED BY A MODEL` used to be the section title, so every row under it
+    // was marked by position. Grouping rule and model findings under
+    // `Findings so far` is better for a reader and silently dropped that —
+    // leaving `misread_intent  turn 12` indistinguishable from a rule's
+    // deterministic finding.
+    //
+    // CLAUDE.md: the UI never blurs "flagged by rule" and "flagged by a model
+    // at 0.7". The caution is earned — the first judge response this project
+    // received invented its evidence, citing turn 4 of a session whose packet
+    // began at turn 400. So the marker is per-row now, where it cannot be
+    // detached from what it qualifies.
     out.push(
-      `${INDENT.repeat(2)}${bold(f.dimension)}  ${dim(`turn${f.turns.length === 1 ? '' : 's'} ${f.turns.join(', ')}`)}`,
+      `${INDENT.repeat(2)}${bold(f.dimension)} ${dim('— flagged by a model')}  ` +
+        `${dim(`turn${f.turns.length === 1 ? '' : 's'} ${f.turns.join(', ')}`)}`,
     );
     // The quote first, because it is the evidence — what was actually said at
     // that turn. The model's reasoning is a gloss on it and reads as one.
@@ -699,16 +715,21 @@ export function renderJudged(
   // The count alone also does not answer the question people actually have,
   // which is whether to wait — so the ETA stays wherever we have it.
   if (findings.length === 0 && unjudgedTurns <= 0) {
-    out.push(`${INDENT.repeat(2)}${dim('nothing so far')}`);
+    out.push(`${INDENT.repeat(2)}${dim('Nothing flagged.')}`);
   }
+
+  // ── A status, said in as many words as a status deserves ─────────────────
+  //
+  // This was two sentences explaining what a background pass is. A reader who
+  // wants that has the docs; a reader looking at their session wants to know
+  // whether anything is still coming.
   if (unjudgedTurns > 0) {
-    const never = findings.length === 0;
     const wait = eta === undefined ? '' : ` — about ${eta}`;
     out.push(
-      `${findings.length > 0 ? INDENT.repeat(2) : INDENT}${dim(
-        never
-          ? `Not read yet${wait}. This happens in the background once a turn finishes.`
-          : `${unjudgedTurns.toLocaleString()} turns have not been read yet${wait}.`,
+      `${INDENT.repeat(2)}${dim(
+        findings.length === 0
+          ? `Nothing flagged yet — background analysis still in progress${wait}`
+          : `Background analysis still in progress${wait}`,
       )}`,
     );
   }
@@ -832,7 +853,23 @@ export function render(input: RenderInput): string {
   // The lead first, then who we are talking about. This was the other way
   // round: a reader's first line was `session 46b591a1 · 4362 events`, an
   // identifier and two counts, with the actual news several lines below.
-  lines.push('', `${INDENT}${leadLine(findings, judgedCount, d, input.events)}`, '');
+  // The lead is the headline when something was found. When nothing was, the
+  // `Findings so far` section below says so in the place a reader looks for
+  // it, and printing `no findings across 2,972 edits` first said it twice —
+  // once with a denominator nobody asked for.
+  //
+  // Only when something else will say it. With the judge disabled there is no
+  // `Findings so far` section at all, and suppressing the lead as well left a
+  // session reporting neither findings nor their absence — caught by the test
+  // that asserts the nothing-found case is always stated somewhere.
+  const saidBelow = input.judged !== undefined;
+  const nothingFound =
+    saidBelow && findings.length === 0 && judgedCount === 0 && d.editCount > 0;
+  if (!nothingFound) {
+    lines.push('', `${INDENT}${leadLine(findings, judgedCount, d, input.events)}`, '');
+  } else {
+    lines.push('');
+  }
 
   // ── Who we are talking about, in words they can use ──────────────────────
   //
@@ -870,19 +907,34 @@ export function render(input: RenderInput): string {
   for (const f of findings) lines.push(...renderFinding(f, byUuid, input.events));
 
   const stats = sessionStats(input.events);
-  const cost = renderCost(d, stats, input.baseline);
-  if (cost.length > 0) lines.push(...cost, '');
 
+  // ── Two groups, because they are two kinds of claim ──────────────────────
+  //
+  // A flat list of sentences was the last attempt, and it failed for the
+  // reason headings existed in the first place: `Not read yet`, `compacted 8
+  // times` and `revert-churn.ts, 93 versions` are a tool status and two
+  // observations, with nothing saying which is which or how to read any of
+  // them. Natural is not the same as unstructured.
+  //
+  // The split is the project's own line, not a layout choice. A **finding**
+  // points at turns and claims something went wrong. The rest state facts and
+  // claim nothing — `MOST REWRITTEN` exists precisely because `file_churn` was
+  // rejected as a dimension, on the grounds that it "reports the same fact
+  // without claiming it" (GRAVEYARD.md). Filing these under "Findings" would
+  // make the claim the measurement would not support.
   if (input.judged !== undefined) {
     const j = renderJudged(input.judged.findings, input.judged.unjudgedTurns, input.judged.eta);
     if (j.length > 0) lines.push(...j, '');
   }
 
-  const compaction = renderCompaction(stats);
-  if (compaction.length > 0) lines.push(...compaction, '');
-
-  const rewritten = renderRewritten(stats);
-  if (rewritten.length > 0) lines.push(...rewritten, '');
+  const observations = [
+    ...renderCost(d, stats, input.baseline),
+    ...renderCompaction(stats),
+    ...renderRewritten(stats),
+  ];
+  if (observations.length > 0) {
+    lines.push(`${INDENT}${dim('About this session')}`, ...observations, '');
+  }
 
   if (d.unclassifiedTouchCount > 0) {
     // The coverage gap, surfaced rather than folded into a count. An MCP tool
