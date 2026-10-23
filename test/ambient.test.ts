@@ -11,13 +11,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closed, isTripped, readBreaker, recordFailure, recordSuccess, TRIP_AFTER } from '../src/breaker.ts';
-import {
-  humanDuration, JUDGE_SECONDS_PER_CALL, pendingWork, readJudgeState,
-} from '../src/judge-store.ts';
+import { JUDGE_SECONDS_PER_CALL, humanDuration, oldestUnread, pendingWork, readJudgeState } from '../src/judge-store.ts';
 import {
   addHook, commandDir, commandFilePath, describeChange, dropOurStatusLine, fixCommandFilePath,
   generateReportCommandBody, generateReportCommandFilePath, legacyCommandFiles, ourCommandFiles,
@@ -356,7 +354,11 @@ describe('standing — "sit tight" while the first pass runs', () => {
       { id: 'a', sizeBytes: 500 },
       { id: 'b', sizeBytes: 200 },
     ]);
-    expect(w).toEqual({ pending: 0, judged: 2, seconds: 0 });
+    // `unread` and `behind` split what `pending` used to conflate: a session
+    // never looked at, and one read before it grew. Only the first is what a
+    // person means by "not analysed yet", and a live session is permanently
+    // the second — so a count including it could never reach zero.
+    expect(w).toEqual({ pending: 0, judged: 2, unread: 0, behind: 0, seconds: 0 });
   });
 
   it('counts a grown session as pending and estimates two calls for it', () => {
@@ -462,5 +464,52 @@ describe('command files — install and uninstall cannot disagree', () => {
     // look at a report, so handing them a path to copy is a step with no
     // purpose. `report --html` alone still opens nothing — it can be piped.
     expect(generateReportCommandBody('/repo')).toContain('--html --open');
+  });
+});
+
+describe('the backlog drains, which it did not', () => {
+  // The only automatic spawner is the `Stop` hook and it judged just the live
+  // session; the backlog was reachable solely through `judge --backlog
+  // --apply`, a CLI command that under D64 nobody types. Measured on a real
+  // machine before this change: `pending 25 session(s)`, `judged 0`.
+  const state = (ledger: Record<string, number>) =>
+    ({ ...readJudgeState(scratch()), ledger }) as Parameters<typeof oldestUnread>[0];
+  const sizes = [
+    { id: 'old', sizeBytes: 100, mtimeMs: 1 },
+    { id: 'mid', sizeBytes: 100, mtimeMs: 2 },
+    { id: 'new', sizeBytes: 100, mtimeMs: 3 },
+  ];
+
+  it('picks the session nobody has ever looked at, oldest first', () => {
+    expect(oldestUnread(state({}), sizes)).toBe('old');
+  });
+
+  it('skips one that was read and merely grew', () => {
+    // Picking the oldest *pending* session would keep returning to ones
+    // already mostly covered — a live session is always pending — while
+    // sessions nobody has looked at wait behind them.
+    expect(oldestUnread(state({ old: 50 }), sizes)).toBe('mid');
+  });
+
+  it('walks forward rather than stalling on one session', () => {
+    const ledger: Record<string, number> = {};
+    const order: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const id = oldestUnread(state(ledger), sizes);
+      if (id === undefined) break;
+      order.push(id);
+      ledger[id] = 100;
+    }
+    expect(order).toEqual(['old', 'mid', 'new']);
+  });
+
+  it('has nothing to offer once everything has been read', () => {
+    expect(oldestUnread(state({ old: 100, mid: 100, new: 100 }), sizes)).toBeUndefined();
+  });
+
+  it('is what the Stop hook falls back to when the live session is quiet', () => {
+    const hook = readFileSync('scripts/hook-stop.ts', 'utf8');
+    expect(hook).toMatch(/dueForJudging\([^)]*\)\s*\?/);
+    expect(hook).toMatch(/oldestUnread/);
   });
 });

@@ -48,6 +48,16 @@ export type ModelReply = {
    * an experiment consumed.
    */
   usd: number;
+  /**
+   * How long the call actually took, from the harness's own envelope.
+   *
+   * It was already arriving and being discarded: the destructure below took
+   * `usage` and `total_cost_usd` and stepped over `duration_ms`, one line from
+   * where it lands. `JUDGE_SECONDS_PER_CALL` is a constant hand-copied from
+   * three runs, and this is the free, exact, continuous alternative — the
+   * difference between an ETA that is measured and one that is asserted.
+   */
+  durationMs?: number;
 };
 
 /** Where the child runs. The marker is what keeps its transcript out of ours. */
@@ -118,6 +128,7 @@ export function callModel(
       result?: string;
       usage?: Record<string, number>;
       total_cost_usd?: number;
+      duration_ms?: number;
     };
     if (parsed.is_error === true || typeof parsed.result !== 'string') return undefined;
     const u = parsed.usage ?? {};
@@ -129,6 +140,7 @@ export function callModel(
         (u['input_tokens'] ?? 0),
       outputTokens: u['output_tokens'] ?? 0,
       usd: parsed.total_cost_usd ?? 0,
+      ...(typeof parsed.duration_ms === 'number' ? { durationMs: parsed.duration_ms } : {}),
     };
   } catch {
     return undefined;

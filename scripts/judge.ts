@@ -36,6 +36,7 @@
  * discovered sessions to 12.
  */
 
+import { endRun, openStore, startRun } from '../src/store.ts';
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { recordFailure, recordSuccess, isTripped, readBreaker } from '../src/breaker.ts';
@@ -221,6 +222,7 @@ async function main(): Promise<void> {
   if (refuseIfUnredacted(extractPacket, batch.map((b) => b.sessionId))) return;
 
   const extracted = callModel(extractPacket, state.settings.model, { timeoutMs: TIMEOUT_MS, maxBufferBytes: 32 * 1024 * 1024 });
+  if (extracted?.durationMs !== undefined) lastCallMs = (lastCallMs ?? 0) + extracted.durationMs;
   if (extracted === undefined) {
     recordFailure(config.archive, 'judge extract call failed');
     return;
@@ -266,6 +268,7 @@ async function main(): Promise<void> {
   if (refuseIfUnredacted(labelPacket, batch.map((b) => b.sessionId))) return;
 
   const labelled = callModel(labelPacket, state.settings.model, { timeoutMs: TIMEOUT_MS, maxBufferBytes: 32 * 1024 * 1024 });
+  if (labelled?.durationMs !== undefined) lastCallMs = (lastCallMs ?? 0) + labelled.durationMs;
   if (labelled === undefined) {
     // Stage A is already paid for and its episodes are real. Losing them to a
     // stage-B failure would mean paying twice for the same reading.
@@ -293,6 +296,49 @@ async function main(): Promise<void> {
 // spend ~58k tokens on the same bytes. `finally` rather than a success path:
 // a crashed pass that held the marker would block every later one until it
 // aged out, turning one failure into five minutes of silence.
+// ── A record of the pass, so a reader can see one in flight ───────────────
+//
+// `judge.running` says only that *something* is running: it holds a timestamp
+// nothing reads, names no session, is written by the spawner rather than the
+// pass, and is deleted by whichever pass exits first. A reader cannot learn
+// from it what is being read or how long it has been going — which is exactly
+// what somebody waiting on their own session wants to know.
+//
+// The `run` table was declared for this and never written to. Opened before
+// the work and closed in the `finally`, so a crash still leaves a row with an
+// end time rather than one that looks live for ever.
+/**
+ * How long the model calls in this pass actually took.
+ *
+ * Summed across both stages, from the harness's own `duration_ms`. It was
+ * already arriving in the envelope and being stepped over in `src/model.ts`,
+ * which is what left `JUDGE_SECONDS_PER_CALL` a constant copied from three
+ * runs when every run could have been measuring it.
+ */
+let lastCallMs: number | undefined;
+
+const runArchive = (() => {
+  try {
+    return resolveConfig().config.archive;
+  } catch {
+    return undefined;
+  }
+})();
+
+let runId: string | undefined;
+if (runArchive !== undefined) {
+  try {
+    const db = openStore(runArchive);
+    try {
+      runId = startRun(db, 'judge', process.argv[2]);
+    } finally {
+      db.close();
+    }
+  } catch {
+    // Principle Zero: a pass that cannot record itself still runs.
+  }
+}
+
 main()
   .catch(() => {
     // Principle Zero: a broken analyzer must never break a session.
@@ -302,5 +348,17 @@ main()
       clearJudgeRunning(resolveConfig().config.archive);
     } catch {
       // Staleness covers it.
+    }
+    if (runArchive !== undefined && runId !== undefined) {
+      try {
+        const db = openStore(runArchive);
+        try {
+          endRun(db, runId, 'done', lastCallMs);
+        } finally {
+          db.close();
+        }
+      } catch {
+        // The row ages out of `currentRun` on its own.
+      }
     }
   });

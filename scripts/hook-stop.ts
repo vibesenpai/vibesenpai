@@ -24,11 +24,13 @@
  */
 
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { isTripped, readBreaker } from '../src/breaker.ts';
 import { statSync } from 'node:fs';
-import { dueForJudging, judgeRunning, markJudgeRunning, readJudgeState } from '../src/judge-store.ts';
-import { resolveCurrentSession } from '../src/read.ts';
+import {
+  dueForJudging, judgeRunning, markJudgeRunning, oldestUnread, readJudgeState,
+} from '../src/judge-store.ts';
+import { discoverTranscripts, resolveCurrentSession } from '../src/read.ts';
 import { resolveConfig } from '../src/config.ts';
 import { isFresh, readStanding } from '../src/standing.ts';
 
@@ -83,10 +85,47 @@ function maybeJudge(archive: string, sources: string[]): void {
   } catch {
     return;
   }
-  if (!dueForJudging(state, current.sessionId, size)) return;
+  // ── When the live session has nothing new, drain the backlog ─────────────
+  //
+  // This returned here, and that return is why a cold start never caught up.
+  // The only automatic spawner is this hook, and it only ever judged the
+  // session you are sitting in; the backlog was reachable solely through
+  // `judge --backlog --apply`, a CLI command that under D64 nobody types.
+  // Measured on a real machine: `pending 25 session(s)`, `judged 0`. Not
+  // draining slowly — not draining at all.
+  //
+  // So an idle turn boundary reads one session nobody has ever looked at.
+  // Every gate above still applies — off, already running, breaker tripped —
+  // so this adds no new way to spend, only a use for a moment that was
+  // already doing nothing.
+  const target = dueForJudging(state, current.sessionId, size)
+    ? current.sessionId
+    : oldestUnread(state, sessionSizes(sources));
+  if (target === undefined) return;
 
   markJudgeRunning(archive);
-  spawnDetached('judge.ts', current.sessionId);
+  spawnDetached('judge.ts', target);
+}
+
+/**
+ * Every discoverable session with its size, for choosing what to read next.
+ *
+ * A `statSync` per transcript and nothing parsed: this hook has milliseconds,
+ * and the whole reason `dueForJudging` compares bytes is that a stat is free
+ * where a parse is not.
+ */
+function sessionSizes(sources: string[]): { id: string; sizeBytes: number; mtimeMs: number }[] {
+  const out: { id: string; sizeBytes: number; mtimeMs: number }[] = [];
+  for (const source of discoverTranscripts(sources)) {
+    try {
+      const st = statSync(source);
+      out.push({ id: basename(source, '.jsonl'), sizeBytes: st.size, mtimeMs: st.mtimeMs });
+    } catch {
+      // A transcript that vanished between listing and stat is simply not a
+      // candidate. Principle Zero: never throw out of a hook.
+    }
+  }
+  return out;
 }
 
 /** Spawn and forget. The hook never waits for analysis — see docs/surfaces.md. */

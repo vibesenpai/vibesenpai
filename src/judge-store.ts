@@ -64,10 +64,16 @@ export const DEFAULT_SETTINGS: JudgeSettings = {
   // sessions where the judge found 19. Opt-in does not produce a cautious
   // product; it produces one nobody turns on.
   //
-  // The principle survives intact because the trigger moved rather than the
-  // consent: **nothing is judged until the user runs a command.** The `Stop`
-  // hook no longer spawns a pass. See `cmdNow` in `cli.ts`, and `/insights`,
-  // which spends a user's tokens on exactly these terms.
+  // The principle survives intact because the consent moved rather than
+  // vanished: installing the plugin is the act, and the one-time notice at
+  // session start states what will be spent before anything is.
+  //
+  // This paragraph used to say the opposite — *"nothing is judged until the
+  // user runs a command, the `Stop` hook no longer spawns a pass"* — and
+  // pointed at a `cmdNow` that no longer exists. Both halves were inverted by
+  // the producer/reader split: the `Stop` hook is the **only** automatic
+  // spawner, and no command spends at all. `test/spend-boundary.test.ts`
+  // asserts exactly that, so the code was right and the comment was lying.
   enabled: true,
   model: 'haiku',
   // ~50 turns: a 788-turn session is judged a handful of times rather than
@@ -443,14 +449,64 @@ export function humanDuration(seconds: number): string {
 export function pendingWork(
   state: JudgeState,
   sessions: { id: string; sizeBytes: number }[],
-): { pending: number; judged: number; seconds: number } {
-  let pending = 0;
+): { pending: number; judged: number; unread: number; behind: number; seconds: number } {
+  // ── Three states, because "pending" was two of them ──────────────────────
+  //
+  // This counted a session as judged only when `ledger >= sizeBytes`, and
+  // everything else as pending. Two very different facts were landing in that
+  // one bucket:
+  //
+  //   unread   never looked at — nothing of it has ever been read
+  //   behind   read, then the session grew, so there are newer bytes
+  //
+  // The distinction is not academic. **A live session is permanently
+  // "behind"**: it grows as you work, so the moment a pass finishes there are
+  // new bytes again. Reporting that as pending made the status read
+  // `judged 0 session(s)` on a machine where two sessions had in fact been
+  // read and had produced findings — and made the count something that can
+  // never reach zero while anyone is using the tool.
+  //
+  // Only `unread` is what a person means by "not analysed yet", so only
+  // `unread` drives the estimate.
+  let unread = 0;
+  let behind = 0;
   let judged = 0;
   for (const s of sessions) {
-    if ((state.ledger[s.id] ?? 0) >= s.sizeBytes) judged += 1;
-    else pending += 1;
+    const at = state.ledger[s.id] ?? 0;
+    if (at >= s.sizeBytes) judged += 1;
+    else if (at === 0) unread += 1;
+    else behind += 1;
   }
-  return { pending, judged, seconds: pending * 2 * JUDGE_SECONDS_PER_CALL };
+  return {
+    // "Has work outstanding" — both states do, and `seconds` must cover both.
+    // Scoping the estimate to `unread` was wrong and a test said so by name:
+    // a grown session still costs two calls to catch up on.
+    pending: unread + behind,
+    judged,
+    // What a person means by "not analysed yet". Only this drives the count a
+    // user reads, because a live session is permanently `behind` and a number
+    // including it could never reach zero.
+    unread,
+    behind,
+    seconds: (unread + behind) * 2 * JUDGE_SECONDS_PER_CALL,
+  };
+}
+
+/**
+ * The session to read next when the live one has nothing new.
+ *
+ * Oldest-first and **never-read only**. Picking the oldest *pending* session
+ * would keep returning to ones already mostly covered — a live session is
+ * always pending — while sessions nobody has ever looked at wait behind them.
+ */
+export function oldestUnread(
+  state: JudgeState,
+  sessions: { id: string; sizeBytes: number; mtimeMs?: number }[],
+): string | undefined {
+  const unread = sessions
+    .filter((s) => (state.ledger[s.id] ?? 0) === 0 && s.sizeBytes > 0)
+    .sort((a, b) => (a.mtimeMs ?? 0) - (b.mtimeMs ?? 0));
+  return unread[0]?.id;
 }
 
 /**

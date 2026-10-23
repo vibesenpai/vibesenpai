@@ -97,6 +97,25 @@ export const STORE_FILE = 'store.db';
  * it. Separated, a stage-B failure re-bills rather than discarding results
  * already paid for, which for an evidence tool is the right way round.
  */
+/** Kept separate so the one migration below can rebuild exactly this. */
+const RUN_DDL = `
+CREATE TABLE IF NOT EXISTS run (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT,
+  status      TEXT,
+  -- Which session the pass is reading. Without it a reader can say that
+  -- something is happening but not whether it is happening to them, which is
+  -- the only version of the question anyone actually asks.
+  session_id  TEXT,
+  -- Real elapsed time from the harness's own envelope, so an estimate can be
+  -- measured rather than asserted. JUDGE_SECONDS_PER_CALL is three runs
+  -- hand-copied into a constant; this is every run, continuously.
+  duration_ms INTEGER
+);
+`;
+
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
@@ -160,13 +179,7 @@ CREATE TABLE IF NOT EXISTS spend (
 
 -- Is analysis in flight, did it finish, what did it cost. Answered directly
 -- rather than inferred, which is what the session-start line needs.
-CREATE TABLE IF NOT EXISTS run (
-  id         TEXT PRIMARY KEY,
-  kind       TEXT NOT NULL,
-  started_at TEXT NOT NULL,
-  ended_at   TEXT,
-  status     TEXT
-);
+${RUN_DDL}
 `;
 
 /**
@@ -220,6 +233,43 @@ export function openStore(archive: string): Db {
   // have.
   //
   // So the existence check is a read, and the write path runs once per store.
+  // ── The one migration this store has needed ─────────────────────────────
+  //
+  // `run` gained `session_id` and `duration_ms`, and `CREATE TABLE IF NOT
+  // EXISTS` does not add columns to a table that already exists. Recreating it
+  // is lossless **because it has never held a row** — it was declared for
+  // progress tracking and nothing ever wrote to it, which is precisely why it
+  // could be changed freely.
+  //
+  // Deliberately not a migration framework. One table, verified empty, with
+  // the reason it is safe stated rather than assumed; a second case would
+  // deserve a real one.
+  try {
+    const cols = (db.prepare('PRAGMA table_info(run)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    // Missing entirely, or present with the old shape. The first case is not
+    // hypothetical: an earlier version of this migration dropped the table and
+    // left nothing behind, because the rebuild lived in a branch that only
+    // runs for a brand-new store.
+    if (cols.length === 0) {
+      db.exec(RUN_DDL);
+    } else if (!cols.includes('session_id')) {
+      const held = (db.prepare('SELECT COUNT(*) c FROM run').get() as { c: number }).c;
+      if (held === 0) {
+        // Dropped **and recreated right here**, not left to the DDL below:
+        // that path runs only when the whole store is uninitialised, which an
+        // existing store is not. The first version of this migration dropped
+        // the table and never rebuilt it, which a check of the real archive
+        // caught — `run columns:` came back empty.
+        db.exec('DROP TABLE run');
+        db.exec(RUN_DDL);
+      }
+    }
+  } catch {
+    // A store we cannot inspect is one `initialised` will rebuild below.
+  }
+
   if (!initialised(db)) {
     db.exec('PRAGMA journal_mode = WAL');
     db.exec(DDL);
@@ -427,4 +477,79 @@ function toOccurrence(r: Record<string, unknown>): OccurrenceRow {
     ...(r['reason'] === null ? {} : { reason: String(r['reason']) }),
     at: String(r['at']),
   };
+}
+
+/**
+ * Record that a pass has started, and what it is reading.
+ *
+ * ── Why a table and not the marker ─────────────────────────────────────────
+ *
+ * `judge.running` answers "is something running" and nothing else: it holds a
+ * timestamp that is never read, carries no session id, is written by the
+ * *spawner* rather than the pass, and is deleted by whichever pass exits
+ * first. A reader cannot learn from it what is being read, how long it has
+ * been going, or whether the thing in flight concerns them.
+ *
+ * This table was declared for exactly that and never written to.
+ */
+export function startRun(db: Db, kind: string, sessionId?: string): string {
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(
+    'INSERT INTO run(id, kind, started_at, status, session_id) VALUES (?, ?, ?, ?, ?)',
+  ).run(id, kind, new Date().toISOString(), 'running', sessionId ?? null);
+  return id;
+}
+
+/** Close a run. Called from a `finally`, so a crash still leaves a record. */
+export function endRun(db: Db, id: string, status: string, durationMs?: number): void {
+  db.prepare('UPDATE run SET ended_at = ?, status = ?, duration_ms = ? WHERE id = ?').run(
+    new Date().toISOString(),
+    status,
+    durationMs ?? null,
+    id,
+  );
+}
+
+/**
+ * The pass in flight, if there is one.
+ *
+ * Bounded by `staleMs` for the same reason the marker is: a killed process
+ * leaves its row open, and a reader must not wait for ever on a corpse.
+ */
+export function currentRun(
+  db: Db,
+  staleMs: number,
+  now = Date.now(),
+): { id: string; kind: string; sessionId?: string; startedAt: string; elapsedMs: number } | undefined {
+  const row = db
+    .prepare("SELECT id, kind, started_at, session_id FROM run WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1")
+    .get() as { id: string; kind: string; started_at: string; session_id: string | null } | undefined;
+  if (row === undefined) return undefined;
+  const started = Date.parse(row.started_at);
+  if (!Number.isFinite(started)) return undefined;
+  const elapsedMs = now - started;
+  if (elapsedMs > staleMs) return undefined;
+  return {
+    id: row.id,
+    kind: row.kind,
+    ...(row.session_id === null ? {} : { sessionId: row.session_id }),
+    startedAt: row.started_at,
+    elapsedMs,
+  };
+}
+
+/**
+ * How long a call really takes on this machine, from completed runs.
+ *
+ * Returns `undefined` until there is enough history to beat the constant,
+ * because a mean of one is not a measurement. The median, not the mean: one
+ * pathological session should not move the estimate everyone else sees.
+ */
+export function measuredCallMs(db: Db, minRuns = 3): number | undefined {
+  const rows = db
+    .prepare('SELECT duration_ms FROM run WHERE duration_ms IS NOT NULL ORDER BY started_at DESC LIMIT 20')
+    .all() as { duration_ms: number }[];
+  if (rows.length < minRuns) return undefined;
+  const sorted = rows.map((r) => r.duration_ms).sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
 }
