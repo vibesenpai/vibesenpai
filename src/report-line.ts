@@ -24,7 +24,6 @@
  * why file churn never appears here and the dimension list is capped.
  */
 
-import { existsSync } from 'node:fs';
 import { approx } from './cost.ts';
 import { basename, join } from 'node:path';
 import type { Standing } from './standing.ts';
@@ -153,10 +152,21 @@ export function commandPath(home: string): string {
  * command did not exist. The one actionable line in the most-seen output the
  * tool has pointed at something that could only fail.
  */
-export function detailLine(repoRoot: string, home: string): string {
-  return existsSync(commandPath(home))
-    ? '/agentsensei:insights for the exact turns'
-    : `node --experimental-strip-types ${repoRoot}/src/cli.ts now`;
+export function detailLine(_repoRoot: string, _home: string): string {
+  // ── Always the slash command, and never a dead one ──────────────────────
+  //
+  // This checked whether `~/.claude/commands/agentsensei/now.md` existed and
+  // otherwise printed `node --experimental-strip-types …/src/cli.ts now`. Two
+  // faults in one line, both live on a real machine:
+  //
+  //   1. under D64 the plugin is the only front door, so the file never exists
+  //      and the fallback is the only branch that runs;
+  //   2. `now` was renamed to `insights`, so the fallback named a subcommand
+  //      that answers `unknown command: now`.
+  //
+  // Every session-start block was therefore ending with an instruction that
+  // fails. Found by diffing the block before and after an unrelated change.
+  return '/agentsensei:insights for the exact turns';
 }
 
 export function fixCommandPath(home: string): string {

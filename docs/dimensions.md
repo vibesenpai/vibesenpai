@@ -172,14 +172,17 @@ turns** (p50; p10 is 1.3%). Concentrated, so the heaviest turns can be named —
 a ranking, needing no threshold.
 
 ```
-  SESSION COST
-    1.9M out · 13.2M re-ingested · ratio 6.8 (corpus median 17.9)
-    heaviest at turns 3586, 3587, 3588 — 11% of it
+  Claude re-read this conversation 7x more than it wrote — about 3x your usual.
+  3 turns account for 11% of it.
 
-  MOST REWRITTEN
-    51 versions  agentsensei/src/archive.ts                1 edit call
-    34 versions  ~/.claude/plans/rosy-seeking-feather.md   81 edit calls
+  Most rewritten: archive.ts, 51 versions across 1 edit (and 7 others).
 ```
+
+Both lines are **stated, not judged**, and the first appears only when the
+session is unlike the reader's others. It used to quote `corpus median 17.9`
+— a figure measured over 1,132 SWE-chat sessions, which is to say other
+people's. The baseline is the reader's own history, excluding the session
+being described.
 
 **`cacheRead` is recorded and never divided.** It re-counts the whole prefix on
 every call, so `read/(read+creation)` runs p10 0.901 → p90 0.985 by

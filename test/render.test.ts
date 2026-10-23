@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { caveatFor, durationOf, renderCompaction, renderJudged, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn, CORPUS } from '../src/render.ts';
+import { caveatFor, durationOf, renderCompaction, renderJudged, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn } from '../src/render.ts';
 import { materialise } from '../src/finding.ts';
 import type { Denominators } from '../src/detect/index.ts';
 import type { Event, Finding } from '../src/types.ts';
@@ -83,7 +83,9 @@ describe('render — what it must never print', () => {
     }).join('\n');
     expect(out).not.toContain('9.0M');
     expect(out).not.toMatch(/hit rate/i);
-    expect(out).toContain('re-ingested');
+    // The block speaks only for an unusual session now, so this asserts what
+      // must never appear rather than what must.
+      expect(out).not.toMatch(/cacheRead|9,000,000/);
   });
 
   it('uses no imperative verb in the subject line', () => {
@@ -187,17 +189,39 @@ describe('render — timestamps and spans', () => {
   });
 });
 
-describe('render — the cost line sits against the corpus', () => {
-  it('quotes the median when the session is ordinary', () => {
-    const out = renderCost({ ...zeros, tokens: { input: 0, output: 1000, cacheRead: 0, cacheCreation: 7000 } }).join('\n');
-    expect(out).toContain('ratio 7.0');
-    expect(out).toContain(`corpus median ${CORPUS.reingestP50.toFixed(1)}`);
+describe('render — the cost line measures you against yourself', () => {
+  // It used to quote `corpus median 17.9` — hand-copied from 1,132 SWE-chat
+  // sessions, which is to say other people's. A reader cannot check it, cannot
+  // find it and has no relationship with it. The baseline is now their own
+  // history, the one yardstick they own.
+  const session = (cacheCreation: number) => ({
+    ...zeros,
+    tokens: { input: 0, output: 1000, cacheRead: 0, cacheCreation },
+  });
+  const usual = { ratio: 5, sessions: 20 };
+
+  it('says nothing when the session is ordinary for this user', () => {
+    // Presence is the signal — D62, applied where it had been waived. A line
+    // reporting "normal" every run teaches people to skip the output.
+    expect(renderCost(session(7000), undefined, usual)).toEqual([]);
   });
 
-  it('says where an outlier sits without calling it bad', () => {
-    const out = renderCost({ ...zeros, tokens: { input: 0, output: 1000, cacheRead: 0, cacheCreation: 200_000 } }).join('\n');
-    expect(out).toContain('90th percentile');
+  it('speaks when the session is unlike their others, and still does not judge it', () => {
+    const out = renderCost(session(200_000), undefined, usual).join('\n');
+    expect(out).toMatch(/your usual/);
     expect(out).not.toMatch(/bad|too high|excessive|warning/i);
+  });
+
+  it('never names a corpus, a percentile or a median', () => {
+    const out = renderCost(session(200_000), undefined, usual).join('\n');
+    expect(out).not.toMatch(/corpus|percentile|median/i);
+  });
+
+  it('stays silent rather than borrow a baseline the reader cannot see', () => {
+    // Too few sessions to have a "usual". The old code printed the corpus
+    // comparison here, which is the defect itself.
+    expect(renderCost(session(200_000), undefined, { ratio: 5, sessions: 2 })).toEqual([]);
+    expect(renderCost(session(200_000), undefined, undefined)).toEqual([]);
   });
 
   it('prints nothing at all when there is no token data', () => {
@@ -292,9 +316,13 @@ describe('render — CONTEXT states compaction without judging it', () => {
     const out = renderCompaction(
       statsWith(1, [{ seq: 1745, preTokens: 1_000_333, postTokens: 31_492 }]) as never,
     ).join('\n');
-    expect(out).toContain('CONTEXT');
+    expect(out).toContain('compacted');
     expect(out).toContain('compacted once');
-    expect(out).toContain('1745');
+    // The per-turn rows (`turn 1745  1.0M → 31k`) were a debug view: a reader
+    // can act on none of them, and eight of them buried the one fact that can
+    // be acted on, which is that it happened at all.
+    expect(out).toContain('969k');
+    expect(out).not.toContain('1745');
     // Stated, not judged: no imperative, no severity word.
     expect(out).not.toMatch(/should|too |avoid|warning|reduce/i);
   });
@@ -305,8 +333,11 @@ describe('render — CONTEXT states compaction without judging it', () => {
     const out = renderCompaction(
       statsWith(3, [{ seq: 10, preTokens: 900, postTokens: 100 }]) as never,
     ).join('\n');
-    expect(out).toContain('compacted 3×');
-    expect(out).toContain('2 without reported sizes');
+    expect(out).toContain('compacted 3 times');
+    // The older record shape carries no figures. That was once stated as its
+    // own line; with the rows gone there is nothing for it to qualify, and the
+    // count it belongs to is already right.
+    expect(out).toContain('compacted 3 times');
   });
 });
 
@@ -319,7 +350,7 @@ describe('render — model findings are kept visibly apart', () => {
       [{ dimension: 'inaccurate_self_report', turns: [412, 460], why: 'said green, 412 failed' }],
       0,
     ).join('\n');
-    expect(out).toContain('FLAGGED BY A MODEL');
+    expect(out).toContain('Flagged by a model');
     expect(out).toContain('inaccurate_self_report');
     expect(out).toContain('412, 460');
   });
@@ -327,15 +358,23 @@ describe('render — model findings are kept visibly apart', () => {
   it('states the lag, because a judged finding is as old as the last pass', () => {
     // Showing stale model findings beside live rule findings without saying so
     // would imply a currency they do not have.
-    expect(renderJudged([], 23).join('\n')).toContain('23 turns since the last pass');
+    // "Since the last pass" implied a pass had happened and fallen 23 turns
+    // behind it. With no findings and a full count, there has never been one.
+    expect(renderJudged([], 23).join('\n')).toContain('Not read yet');
   });
 
   it('says nothing at all when there is nothing and no lag', () => {
     expect(renderJudged([], 0)).toEqual([]);
   });
 
-  it('says "nothing so far" rather than looking broken when only lagging', () => {
-    expect(renderJudged([], 5).join('\n')).toContain('nothing so far');
+  it('does not look broken when it simply has not run yet', () => {
+    // The point of this test is the tone, and the wording that carried it
+    // changed: with no findings and turns outstanding, the session has never
+    // been read, so it says that rather than reporting a lag against a pass
+    // that never happened.
+    const out = renderJudged([], 5).join('\n');
+    expect(out).toContain('Not read yet');
+    expect(out).not.toMatch(/fail|error|behind|stale/i);
   });
 });
 
@@ -357,8 +396,12 @@ describe('the lead line', () => {
     });
     const body = out.split('\n').filter((l) => l.trim() !== '');
     expect(body[0]).toContain('1 finding');
-    expect(body[0]).not.toContain('abcdef12');
-    expect(body.findIndex((l) => l.includes('abcdef12'))).toBeGreaterThan(0);
+    expect(body[1]).toContain('This session');
+    expect(body[1]).toContain('This session');
+    // The id is not merely demoted now, it is gone: it identified the session
+    // to us and never to the reader, who can do nothing with `abcdef12` that
+    // they cannot do with "this session". `--session` still takes it.
+    expect(out).not.toContain('abcdef12');
   });
 
   it('counts both tiers in the lead', () => {

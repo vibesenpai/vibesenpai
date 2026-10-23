@@ -33,7 +33,7 @@ import { renderHtml } from './html.ts';
 import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
 import { detectorsFor, runDetectors, unknownDimensions } from './detect/index.ts';
-import { leadSegments, render as renderFindings } from './render.ts';
+import { leadSegments, render as renderFindings, type Baseline } from './render.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
 import {
@@ -467,6 +467,39 @@ function cmdSkeleton(a: Argv): number {
  * have happened since the last scan, which is to say the ones you just made.
  */
 
+
+/**
+ * What this user's sessions normally look like, minus the one being described.
+ *
+ * The subtraction is the whole point. On the machine this was written for, the
+ * session under examination was 6.8M of a 22.4M total — 30% of the aggregate —
+ * so comparing it against a figure that contains it would have been comparing
+ * it substantially to itself, and the bigger the outlier the more it would
+ * flatter itself.
+ *
+ * Returns `undefined` when there is no history to speak of. The caller then
+ * says the fact and stops; it never falls back to the corpus percentiles,
+ * because a baseline the reader cannot inspect is the thing being removed.
+ */
+/** As many dimensions as the history block shows before it summarises. */
+const HISTORY_DIMENSIONS = 3;
+
+function baselineExcluding(
+  archive: string,
+  session: { output: number; cacheCreation: number },
+): Baseline | undefined {
+  const standing = readStanding(archive);
+  if (standing === undefined) return undefined;
+
+  const output = standing.tokens.output - session.output;
+  const cacheCreation = standing.tokens.cacheCreation - session.cacheCreation;
+  // Both can go non-positive: the standing may predate this session entirely,
+  // in which case the subtraction is removing figures it never added.
+  if (output <= 0 || cacheCreation <= 0) return undefined;
+
+  return { ratio: cacheCreation / output, sessions: Math.max(standing.sessions - 1, 0) };
+}
+
 /**
  * Your history, on demand.
  *
@@ -484,23 +517,33 @@ function printHistory(config: Config): void {
   const standing = readStanding(config.archive);
   if (standing === undefined) {
     console.log('');
-    console.log(`  ${dim('your history: not read yet — it runs in the background after a turn ends')}`);
+    console.log(`  ${dim('Your history has not been read yet. It runs in the background after a turn ends.')}`);
     return;
   }
 
   console.log('');
-  console.log(`  ${bold('YOUR LAST')} ${bold(String(standing.sessions))} ${bold('SESSIONS')}`);
+  console.log(`  ${bold(`Across your last ${standing.sessions} sessions`)}`);
   console.log('');
 
   const judged = tallyByDimension(readJudgeState(config.archive));
   if (standing.dimensions.length === 0 && judged.length === 0) {
-    console.log(`  ${dim('nothing found yet')}`);
+    console.log(`  ${dim('Nothing found yet.')}`);
   } else {
-    for (const d of standing.dimensions) {
+    // ── A cap, which this surface never had ────────────────────────────────
+    //
+    // `reportBlock` caps at MAX_DIMENSIONS and says `+N more`; this loop
+    // printed every dimension there has ever been. Fine at two, and this
+    // project's own plan adds more.
+    for (const d of standing.dimensions.slice(0, HISTORY_DIMENSIONS)) {
       console.log(`  ${dimensionLine(d)}`);
+      // `whereLine` carries its own leading spaces, sized for the block it is
+      // shared with. Adding four more put the filename nine columns in.
       const where = whereLine(d);
-      if (where !== '') console.log(`    ${where}`);
+      if (where !== '') console.log(where);
     }
+    const hidden = standing.dimensions.length - HISTORY_DIMENSIONS;
+    if (hidden > 0) console.log(`  ${dim(`and ${hidden} more`)}`);
+
     for (const { dimension, count } of judged) {
       console.log(`  ${count} ${dimension.replace(/_/g, ' ')} ${dim('— flagged by a model')}`);
     }
@@ -512,8 +555,12 @@ function printHistory(config: Config): void {
     console.log(`  ${dim(cost)}`);
   }
 
+  // ── A timestamp and a command are not one sentence ────────────────────────
+  //
+  // This read `as of 2026-10-23 11:35 · /agentsensei:report for every session`
+  // — two unrelated facts joined by the separator used for related ones.
   console.log('');
-  console.log(`  ${dim(`as of ${computedAtLocal(standing)} · /agentsensei:report for every session`)}`);
+  console.log(`  ${dim(`Last read ${computedAtLocal(standing)}.`)}`);
 }
 
 async function cmdInsights(a: Argv): Promise<number> {
@@ -609,6 +656,10 @@ async function cmdInsights(a: Argv): Promise<number> {
       denominators: res.denominators,
       sessionId: current.sessionId,
       events: parsed.events,
+      ...(() => {
+        const b = baselineExcluding(config.archive, res.denominators.tokens);
+        return b === undefined ? {} : { baseline: b };
+      })(),
       ...(judgeState.settings.enabled
         ? {
             judged: {
@@ -620,11 +671,9 @@ async function cmdInsights(a: Argv): Promise<number> {
             },
           }
         : {}),
-      ...(nextStep !== '' ? { nextStep } : {}),
       ...(config.mute.length > 0 ? { muted: config.mute } : {}),
     }),
   );
-  if (guessNote !== '') console.log(guessNote);
 
   for (const [dim, n] of Object.entries(res.failures)) {
     // Never swallowed: a silent zero would read as "nothing found".
@@ -656,6 +705,20 @@ async function cmdInsights(a: Argv): Promise<number> {
     return printSkeletons(a, current.sessionId, current.source, undefined, true);
   }
     printHistory(config);
+
+    // `nextStep` says "from your history" when the session itself is clean, so
+    // it reads as a non-sequitur above the history and as a conclusion below
+    // it. Printed here rather than passed into `render`, which has no idea the
+    // history section exists.
+    if (nextStep !== '') console.log(`\n  ${nextStep}`);
+
+    // ── Last, and only when it is true ─────────────────────────────────────
+    //
+    // This printed between the session and the history, so the first thing a
+    // reader met after the findings was a parenthetical about transcript
+    // resolution. It is a caveat on everything above it, which is where a
+    // caveat goes.
+    if (guessNote !== '') console.log(`${guessNote}\n`);
   return 0;
 }
 

@@ -12,18 +12,22 @@ Run it:
 ```
   no findings across 2260 edits
 
-  session 46b591a1 · 4617 events · 2260 edits · 2d5h
+  This session · 2 days, 2,260 edits
 
-  SESSION COST
-    1.3M out · 4.9M re-ingested · ratio 3.7 (corpus median 17.9)
-    heaviest at turns 1617, 2800, 2775 — 35% of it
+  Not read yet. This happens in the background once a turn finishes.
 
-  CONTEXT
-    compacted 6× — dropped 2.7M tokens of context
-      turn    5   968k → 67k
-      turn 2042   967k → 63k
-      turn 3851   967k → 61k
-      3 without reported sizes
+  The conversation was compacted 6 times (2.7M tokens of context).
+
+  Most rewritten: cli.ts, 31 versions across 12 edits (and 8 others).
+
+  Across your last 24 sessions
+
+  4 edits were rejected and retried, across 3 files
+     most often rosy-seeking-feather.md
+
+  Last read 2026-10-23 11:48.
+
+  /agentsensei:fix for one thing to try — from your history
 ```
 
 ## "no findings" is a clean bill of health

@@ -30,6 +30,7 @@
  * comes from layout, which survives everything.
  */
 
+import { basename } from 'node:path';
 import type { Denominators } from './detect/index.ts';
 import type { Event, Finding } from './types.ts';
 import { adviceFor, reasonOf, type Reason } from './detect/labels.ts';
@@ -37,7 +38,17 @@ import { sessionStats, type SessionStats } from './stats.ts';
 import { approx, costFor } from './cost.ts';
 import { bold, dim, pad, red, rule, yellow } from './style.ts';
 
-/** Corpus percentiles, so a session's number has something to sit against. */
+/**
+ * Corpus percentiles, kept for the surfaces that still use them.
+ *
+ * **No longer rendered here.** `renderCost` compared a session against these
+ * and printed `corpus median 17.9` at the reader — a figure measured over
+ * 1,132 SWE-chat sessions, which is to say other people's, hand-copied from
+ * `npm run measure`. It is now measured against the reader's own history.
+ *
+ * Still imported by `report-line.ts`, where it is a **silent gate** rather
+ * than a displayed number, and by `html.ts`.
+ */
 export const CORPUS = {
   /**
    * `cacheCreation / output` per session, measured over 1,132 SWE-chat
@@ -75,6 +86,15 @@ function human(n: number): string {
  * Undefined rather than `0m`: a session whose timestamps we could not read is a
  * different thing from a session that took no time.
  */
+/** `3d0h` → `3 days`, `1h30m` → `1h30m`. Prose only; the compact form stays. */
+function proseDuration(d: string | undefined): string | undefined {
+  if (d === undefined) return undefined;
+  const days = /^(\d+)d/.exec(d);
+  if (days === null) return d;
+  const n = Number(days[1]);
+  return `${n} day${n === 1 ? '' : 's'}`;
+}
+
 export function durationOf(from: string | undefined, to: string | undefined): string | undefined {
   if (from === undefined || to === undefined) return undefined;
   const ms = Date.parse(to) - Date.parse(from);
@@ -99,9 +119,33 @@ export function shortenPath(path: string, max = 68): string {
   return `…${path.slice(-(max - 1))}`;
 }
 
+/**
+ * What this user's sessions normally look like, so a number has a reference
+ * point they can actually check.
+ *
+ * `ratio` **excludes the session being described**. On the machine this was
+ * written for, one session was 6.8M of a 22.4M total — 30% — so comparing it
+ * against an aggregate containing it would have been comparing it partly to
+ * itself.
+ */
+export type Baseline = { ratio: number; sessions: number };
+
+/**
+ * How many other sessions it takes before "your usual" means anything.
+ *
+ * Below this we say the fact and stop. We never fall back to the corpus
+ * figures: a baseline the reader cannot inspect is the thing being fixed.
+ */
+export const BASELINE_MIN_SESSIONS = 5;
+
+/** How far above their usual a session has to be before it is worth a sentence. */
+export const NOTABLE_MULTIPLE = 2;
+
 export type RenderInput = {
   findings: Finding[];
   denominators: Denominators;
+  /** This user's own history, minus this session. Absent when too new to have one. */
+  baseline?: Baseline;
   /** Shown so a reader can tell an empty result from an unanalysed one. */
   sessionId: string;
   /** Model-flagged findings for this session, and how stale they are. */
@@ -439,49 +483,59 @@ export function costLines(f: Finding, events: Event[]): string[] {
 }
 
 /**
- * What the session cost, stated and not judged.
+ * What the session cost — a sentence, and only when it is news.
  *
- * Totals only. The *anchored* half — which turns the re-ingestion came from —
- * needs per-turn accounting and arrives with `context_reingest`; printing a
- * placeholder for it would be worse than leaving it out.
+ * ── What this used to print, and why it had to change ──────────────────────
  *
- * `cacheRead` is deliberately absent. It re-counts the whole prefix on every
- * call, so it grows with the square of the turn count and any ratio built on it
- * is pinned near 1 by construction. Showing it would invite exactly the
- * reasoning that GRAVEYARD.md records as the fifth instance of that mistake.
+ *     1.7M out · 6.8M re-ingested · ratio 3.9 (corpus median 17.9)
+ *
+ * Three numbers, a word we invented, and a comparison against **1,132
+ * SWE-chat sessions** — a public dataset the reader has never heard of and
+ * cannot inspect. `report-line.ts` had already exempted this block from D62 on
+ * the grounds that the ratio *"stays in `now`, where there is room to explain
+ * it."* The intent was right; it never explained anything.
+ *
+ * So the baseline is now the reader's **own history**, which is the one
+ * reference point they own, and the block appears only when this session is
+ * genuinely unlike the rest of them. Presence is the signal — D62, applied
+ * where it was previously waived.
+ *
+ * `cacheRead` is still deliberately absent. It re-counts the whole prefix on
+ * every call, so it grows with the square of the turn count and any ratio built
+ * on it is pinned near 1 by construction. Showing it would invite exactly the
+ * reasoning GRAVEYARD.md records as the fifth instance of that mistake.
  */
-export function renderCost(d: Denominators, stats?: SessionStats): string[] {
+export function renderCost(
+  d: Denominators,
+  stats?: SessionStats,
+  baseline?: Baseline,
+): string[] {
   const { output, cacheCreation } = d.tokens;
-  if (output === 0 && cacheCreation === 0) return [];
+  if (output === 0) return [];
 
-  const parts = [
-    `${bold(human(output))} ${dim('out')}`,
-    `${bold(human(cacheCreation))} ${dim('re-ingested')}`,
-  ];
-  if (output > 0) {
-    const ratio = cacheCreation / output;
-    const where =
-      ratio >= CORPUS.reingestP90
-        ? `at or above the corpus 90th percentile of ${CORPUS.reingestP90.toFixed(1)}`
-        : `corpus median ${CORPUS.reingestP50.toFixed(1)}`;
-    parts.push(`${dim('ratio')} ${bold(ratio.toFixed(1))} ${dim(`(${where})`)}`);
-  }
-  const out = [
-    `${INDENT}${dim('SESSION COST')}`,
-    `${INDENT.repeat(2)}${parts.join(dim(' · '))}`,
+  const ratio = cacheCreation / output;
+
+  // No baseline, no claim. A reader with four sessions has no "usual", and
+  // inventing one from someone else's corpus is the defect being removed.
+  if (baseline === undefined || baseline.sessions < BASELINE_MIN_SESSIONS) return [];
+  if (ratio < baseline.ratio * NOTABLE_MULTIPLE) return [];
+
+  const times = Math.round(ratio / baseline.ratio);
+  const lines = [
+    `${INDENT}Claude re-read this conversation ${bold(`${Math.round(ratio)}x`)} more than it wrote` +
+      ` — about ${bold(`${times}x`)} your usual.`,
   ];
 
   // The anchored half. Measured: half a session's re-ingestion comes from 6% of
   // its turns, so naming the heaviest few is a ranking rather than a threshold.
   const heaviest = stats?.reingest.heaviest ?? [];
   if (heaviest.length > 1 && stats !== undefined && stats.reingest.share > 0) {
-    const turns = heaviest.map((t) => t.seq).join(', ');
-    out.push(
-      `${INDENT.repeat(2)}${dim('heaviest at turns')} ${bold(turns)} ${dim('—')} ` +
-        `${bold(`${Math.round(stats.reingest.share * 100)}%`)} ${dim('of it')}`,
+    const share = Math.round(stats.reingest.share * 100);
+    lines.push(
+      `${INDENT}${dim(`${heaviest.length} turns account for ${share}% of it.`)}`,
     );
   }
-  return out;
+  return lines;
 }
 
 /**
@@ -494,22 +548,35 @@ export function renderCost(d: Denominators, stats?: SessionStats): string[] {
  * how a reader tells a regenerated file from a worked one — but it undercounts
  * shell-driven edits, so it informs rather than decides. See `src/stats.ts`.
  */
-export function renderRewritten(stats: SessionStats, max = 4): string[] {
-  const shown = stats.rewritten.slice(0, max);
-  if (shown.length === 0) return [];
-  const width = Math.max(...shown.map((f) => String(f.versions).length));
-  const lines = [`${INDENT}${dim('MOST REWRITTEN')}`];
-  for (const f of shown) {
-    const via =
-      f.editCalls === 0 ? 'no edit-tool calls' : `${f.editCalls} edit call${f.editCalls === 1 ? '' : 's'}`;
-    lines.push(
-      `${INDENT.repeat(2)}${pad(String(f.versions), width, bold, 'right')} ${dim('versions')}  ` +
-        `${pad(shortenPath(f.path, 42), 42, yellow)} ${dim(via)}`,
-    );
-  }
-  const hidden = stats.rewritten.length - shown.length;
-  if (hidden > 0) lines.push(`${INDENT.repeat(2)}${dim(`… ${hidden} more`)}`);
-  return lines;
+export function renderRewritten(stats: SessionStats): string[] {
+  const top = stats.rewritten[0];
+  if (top === undefined) return [];
+
+  // ── One line, and still no threshold ──────────────────────────────────────
+  //
+  // This was a five-row table headed `MOST REWRITTEN`, whose rows read
+  // `93 versions  …/revert-churn.ts  no edit-tool calls` — which contradicts
+  // itself to anyone who has not read `src/stats.ts`. It means the harness
+  // recorded 93 versions of the file while we saw no Edit call for it, so the
+  // writing happened some other way.
+  //
+  // Still a ranking and still no verb: this says what changed most, never that
+  // changing it was wrong. That is why `file_churn` was rejected as a dimension
+  // and this line was kept — see GRAVEYARD.md. Gating it on a threshold would
+  // quietly turn the honest version into the rejected one.
+  const name = basename(top.path);
+  const others = stats.rewritten.length - 1;
+  const alsoOthers = others > 0 ? ` (and ${others} other${others === 1 ? '' : 's'})` : '';
+  const how =
+    top.editCalls === 0
+      ? ', though not through edits we saw'
+      : ` across ${top.editCalls} edit${top.editCalls === 1 ? '' : 's'}`;
+
+  return [
+    `${INDENT}${dim('Most rewritten:')} ${yellow(name)}${dim(
+      `, ${top.versions} versions${how}${alsoOthers}.`,
+    )}`,
+  ];
 }
 
 /**
@@ -525,26 +592,20 @@ export function renderCompaction(stats: SessionStats): string[] {
   const c = stats.compactions;
   if (c.count === 0) return [];
 
-  const times = c.count === 1 ? 'once' : `${c.count}×`;
-  const head =
-    c.dropped > 0
-      ? `compacted ${times} ${dim('— dropped')} ${bold(human(c.dropped))} ${dim('tokens of context')}`
-      : `compacted ${times}`;
-  const out = [`${INDENT}${dim('CONTEXT')}`, `${INDENT.repeat(2)}${head}`];
-
-  const w = Math.max(...c.measured.map((m) => String(m.seq).length), 1);
-  for (const m of c.measured) {
-    out.push(
-      `${INDENT.repeat(2)}  ${dim('turn')} ${pad(String(m.seq), w, bold, 'right')}   ` +
-        `${bold(human(m.preTokens))} ${dim('→')} ${human(m.postTokens)}`,
-    );
-  }
-  // Said rather than hidden: the older record shape carries no figures, so a
-  // count without numbers is a real state and not a bug.
-  if (c.measured.length < c.count) {
-    out.push(`${INDENT.repeat(2)}  ${dim(`${c.count - c.measured.length} without reported sizes`)}`);
-  }
-  return out;
+  // ── The scale, not the audit trail ────────────────────────────────────────
+  //
+  // This printed a row per compaction — `turn 5  968k → 67k` — plus a tally of
+  // the ones whose sizes the older record shape does not carry. True, and a
+  // debug view: the reader cannot act on any individual row, and eight of them
+  // buried the one fact that matters.
+  //
+  // Still stated and not judged. Compacting is the harness working, not a
+  // mistake, and the only honest response — run shorter sessions — is advice
+  // this project does not give. What it adds is the scale, which is otherwise
+  // invisible: one real session dropped 2.8M tokens without ever saying so.
+  const times = c.count === 1 ? 'once' : `${c.count} times`;
+  const scale = c.dropped > 0 ? ` ${dim(`(${human(c.dropped)} tokens of context)`)}` : '';
+  return [`${INDENT}${dim(`The conversation was compacted ${times}`)}${scale}${dim('.')}`];
 }
 
 /**
@@ -609,7 +670,12 @@ export function renderJudged(
 ): string[] {
   if (findings.length === 0 && unjudgedTurns <= 0) return [];
 
-  const out: string[] = [`${INDENT}${dim('FLAGGED BY A MODEL')}`];
+  // Kept as a heading only when there is something under it. With nothing to
+  // show it was a title followed by `nothing so far`, which is two lines to
+  // say none — and CLAUDE.md's rule that a model's claim is never blurred with
+  // a rule's only needs stating when a claim is actually present.
+  const out: string[] =
+    findings.length > 0 ? [`${INDENT}${dim('Flagged by a model')}`] : [];
   for (const f of findings) {
     out.push(
       `${INDENT.repeat(2)}${bold(f.dimension)}  ${dim(`turn${f.turns.length === 1 ? '' : 's'} ${f.turns.join(', ')}`)}`,
@@ -623,16 +689,26 @@ export function renderJudged(
     }
     for (const l of wrapText(firstSentence(f.why, 240), 62)) out.push(`${INDENT.repeat(3)}${dim(l)}`);
   }
-  if (findings.length === 0) out.push(`${INDENT.repeat(2)}${dim('nothing so far')}`);
+  // ── "Since the last pass" when there has never been one ──────────────────
+  //
+  // `unjudgedTurns` equal to the whole session means `judgedBytes === 0`: this
+  // session has **never** been read, which is a different sentence from being
+  // behind. The old wording implied a pass had happened and fallen behind by
+  // six thousand turns, which reads as a broken tool rather than a new one.
+  //
+  // The count alone also does not answer the question people actually have,
+  // which is whether to wait — so the ETA stays wherever we have it.
+  if (findings.length === 0 && unjudgedTurns <= 0) {
+    out.push(`${INDENT.repeat(2)}${dim('nothing so far')}`);
+  }
   if (unjudgedTurns > 0) {
-    // The count alone does not answer the question people actually have,
-    // which is whether to wait. The ETA is what turns this from a status into
-    // something you can act on.
+    const never = findings.length === 0;
+    const wait = eta === undefined ? '' : ` — about ${eta}`;
     out.push(
-      `${INDENT.repeat(2)}${dim(
-        eta === undefined
-          ? `… ${unjudgedTurns} turns since the last pass`
-          : `… ${unjudgedTurns} turns since the last pass · about ${eta} to read them`,
+      `${findings.length > 0 ? INDENT.repeat(2) : INDENT}${dim(
+        never
+          ? `Not read yet${wait}. This happens in the background once a turn finishes.`
+          : `${unjudgedTurns.toLocaleString()} turns have not been read yet${wait}.`,
       )}`,
     );
   }
@@ -758,11 +834,23 @@ export function render(input: RenderInput): string {
   // identifier and two counts, with the actual news several lines below.
   lines.push('', `${INDENT}${leadLine(findings, judgedCount, d, input.events)}`, '');
 
-  const facts = [`${input.events.length} events`, `${d.editCount} edits`];
+  // ── Who we are talking about, in words they can use ──────────────────────
+  //
+  // This read `session 46b591a1 · 6136 events · 2937 edits · 3d0h`: an id the
+  // reader cannot do anything with, a unit we invented (`events`), and four
+  // facts compressed past the point of being read.
+  //
+  // The id stays available — `--session` takes it, and `:report` lists them —
+  // but it is not the first thing a person needs. Duration and edits are,
+  // because they are what the reader already knows about their own afternoon.
   const span = spanOf(input.events);
-  const dur = durationOf(span.first, span.last);
-  if (dur !== undefined) facts.push(dur);
-  lines.push(`${INDENT}${dim(`session ${input.sessionId.slice(0, 8)} · ${facts.join(' · ')}`)}`, '');
+  // `durationOf` is shared with the HTML report and three tests, so the prose
+  // form is built here rather than changing what it returns: `3d0h` is a field
+  // width, not something a person says out loud.
+  const dur = proseDuration(durationOf(span.first, span.last));
+  const edits = `${d.editCount.toLocaleString()} edit${d.editCount === 1 ? '' : 's'}`;
+  const where = dur === undefined ? edits : `${dur}, ${edits}`;
+  lines.push(`${INDENT}${dim(`This session · ${where}`)}`, '');
 
   // ── Both tiers, or the "nothing found" line is a lie ────────────────────
   //
@@ -782,7 +870,7 @@ export function render(input: RenderInput): string {
   for (const f of findings) lines.push(...renderFinding(f, byUuid, input.events));
 
   const stats = sessionStats(input.events);
-  const cost = renderCost(d, stats);
+  const cost = renderCost(d, stats, input.baseline);
   if (cost.length > 0) lines.push(...cost, '');
 
   if (input.judged !== undefined) {
