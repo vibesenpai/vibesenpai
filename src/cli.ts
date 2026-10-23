@@ -23,8 +23,9 @@ import {
 } from './read.ts';
 import { gatherReport, type ReportData } from './gather.ts';
 import {
-  BYTES_PER_TURN, dueForJudging, findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL,
-  type JudgeState, pendingWork, readJudgeState, tallyByDimension, writeJudgeState,
+  dueForJudging, findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL,
+  type JudgeState, judgeRunning, markJudgeRunning, pendingWork, readJudgeState,
+  tallyByDimension, writeJudgeState,
 } from './judge-store.ts';
 import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
@@ -123,7 +124,7 @@ Usage
   agentsensei report             retrospective over a date range
   agentsensei standing          what your history says (the baseline)
   agentsensei fix               one evidence-backed change to try
-  agentsensei judge             the opt-in model pass — OFF by default
+  agentsensei judge             the model pass — status, backlog, or turn it off
   agentsensei install           add the hooks (prints the change first)
   agentsensei uninstall         take them back out
 
@@ -347,7 +348,7 @@ function cmdDoctor(a: Argv): number {
   console.log(`  network    ${judgeOn ? 'the judge is ON and sends session content' : 'no network calls, with one opt-in exception'}`);
   if (judgeOn) {
     console.log('             redacted transcript text leaves this machine when the judge');
-    console.log('             runs. It is off by default and you turned it on.');
+    console.log('             runs, and only when you run a command. --disable to stop it.');
     console.log('             turn it off:  agentsensei judge --disable --apply');
   } else {
     console.log('             the judge would send redacted session content to a model, and');
@@ -502,13 +503,39 @@ async function cmdNow(a: Argv): Promise<number> {
   // what keeps this surface instant.
   const judgeState = readJudgeState(config.archive);
   const judgedFindings = findingsFor(judgeState, current.sessionId);
+  // ── Count real events, not bytes ÷ a constant ───────────────────────────
+  //
+  // This divided unjudged bytes by `BYTES_PER_TURN` (400), which is a fine
+  // estimate for a cadence check in a hook that has milliseconds and no parsed
+  // events to hand. It is not fine on screen: it printed
+  //
+  //     session … · 5011 events
+  //     … 68609 turns since the last pass
+  //
+  // — a number roughly fourteen times the whole session, on the main surface,
+  // next to the real count. `cmdNow` has already parsed; the events are right
+  // there.
+  // ── The judge runs because you asked, and only then ─────────────────────
+  //
+  // Started *before* the render, not after, so the lag line can say whether a
+  // pass is actually running. It used to print "about a minute to read them"
+  // whenever anything was unjudged — including when the pass had been declined
+  // because the breaker was tripped, the cadence was not met, or one was
+  // already in flight. An ETA for work nobody started is a promise the tool
+  // does not keep.
+  const judging = maybeJudgeThisSession(config, current.sessionId, current.source, judgeState);
+
   const judgedBytes = judgeState.ledger[current.sessionId] ?? 0;
   let unjudgedTurns = 0;
   try {
-    unjudgedTurns = Math.max(
-      0,
-      Math.floor((statSync(current.source).size - judgedBytes) / BYTES_PER_TURN),
-    );
+    const size = statSync(current.source).size;
+    if (size > judgedBytes) {
+      // Byte-proportional, but scaled to events that exist rather than to an
+      // assumed turn size. Still an estimate — the resume point is itself
+      // proportional — but it can no longer exceed the session.
+      const share = (size - judgedBytes) / size;
+      unjudgedTurns = Math.min(parsed.events.length, Math.round(parsed.events.length * share));
+    }
   } catch {
     // Unreadable size is not worth failing over; the lag line is simply absent.
   }
@@ -534,10 +561,8 @@ async function cmdNow(a: Argv): Promise<number> {
               findings: judgedFindings,
               unjudgedTurns,
               // Two calls per session — extract then label — at a measured
-              // ~30s each. Only when there is something outstanding.
-              ...(unjudgedTurns > 0
-                ? { eta: humanDuration(2 * JUDGE_SECONDS_PER_CALL) }
-                : {}),
+              // ~30s each. Only when a pass actually started.
+              ...(judging ? { eta: humanDuration(2 * JUDGE_SECONDS_PER_CALL) } : {}),
             },
           }
         : {}),
@@ -557,7 +582,7 @@ async function cmdNow(a: Argv): Promise<number> {
     );
   }
 
-  // ── The judge runs because you asked, and only then ─────────────────────
+  // ── (the pass was started above, before rendering) ──────────────────────
   //
   // This is the trigger that used to live in the `Stop` hook. Moving it here
   // is what lets the judge be on from installation without a detached process
@@ -571,8 +596,6 @@ async function cmdNow(a: Argv): Promise<number> {
   // One session, never the backlog: ~58k input tokens here against ~1.05M for
   // the 18 sessions on this machine. `judge --backlog` exists for that, and
   // asks first.
-  maybeJudgeThisSession(config, current.sessionId, current.source, judgeState);
-
   // The window dump is a debug view, not the product. `agentsensei skeleton`
   // exists for it; `--skeleton` keeps it reachable from here too.
   if (a.flags['skeleton'] === true) {
@@ -639,17 +662,20 @@ function maybeJudgeThisSession(
   sessionId: string,
   source: string,
   state: JudgeState,
-): void {
-  if (!state.settings.enabled) return;
-  if (isTripped(readBreaker(config.archive))) return;
+): boolean {
+  if (!state.settings.enabled) return false;
+  if (isTripped(readBreaker(config.archive))) return false;
+  // A pass takes about a minute and the ledger does not move until stage A
+  // returns, so without this two `now` calls a few seconds apart both spend.
+  if (judgeRunning(config.archive)) return false;
 
   let size: number;
   try {
     size = statSync(source).size;
   } catch {
-    return;
+    return false;
   }
-  if (!dueForJudging(state, sessionId, size)) return;
+  if (!dueForJudging(state, sessionId, size)) return false;
 
   // Said once per machine, not once per run. A user who has seen it does not
   // need telling again, and a line that repeats is a line that gets ignored.
@@ -670,7 +696,9 @@ function maybeJudgeThisSession(
     markDisclosed(config.archive);
   }
 
+  markJudgeRunning(config.archive);
   spawnJudge(sessionId);
+  return true;
 }
 
 /**
@@ -1076,7 +1104,8 @@ function cmdUninstall(a: Argv): number {
  * refuses to do anything without being told twice.
  *
  * `--dry-run` builds a real packet and prints what it would cost, calling
- * nothing. `--enable` shows the same and still writes nothing until `--apply`.
+ * nothing. `--backlog` shows what a full pass would cost and sends nothing
+ * until `--apply`.
  * The shape is `install`'s, because the risk is the same shape: a background
  * process acting on someone's behalf while they are not looking.
  */
@@ -1185,6 +1214,7 @@ function cmdJudge(a: Argv): number {
       console.log('  nothing has been sent. re-run with --apply to start it.');
       return 0;
     }
+    markJudgeRunning(config.archive);
     spawnJudge();
     console.log(`reading ${plural(pending, 'session')} — about ${humanDuration(seconds)}.`);
     console.log(dim('  it runs in the background; findings appear as they land.'));

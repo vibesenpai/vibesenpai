@@ -277,6 +277,42 @@ describe('the plugin is the only front door', () => {
     expect(readFileSync('README.md', 'utf8')).toContain('/plugin disable agentsensei');
   });
 
+  it('no user-facing surface still calls the judge opt-in', () => {
+    // These were all written while the judge was off by default, and the
+    // guards in place only covered the pitch string and the README intro —
+    // so `SECURITY.md`, `CHANGELOG.md`, the site and the CLI's own `--help`
+    // all kept saying "off by default" after it shipped on.
+    //
+    // A page may still *quote* the retired claim to say it is retired, and may
+    // describe a competitor's opt-in cloud sync, so this looks for the claim
+    // being made about us in the present tense.
+    const CLAIMS = [
+      /judge is \*\*off by default\*\*/i,
+      /the opt-in model pass/i,
+      /judge --enable/,
+    ];
+    const files = [...userFacingDocs(), 'SECURITY.md', 'CHANGELOG.md', 'src/cli.ts'];
+    for (const file of files) {
+      if (!existsSync(file)) continue;
+      const text = readFileSync(file, 'utf8');
+      for (const claim of CLAIMS) {
+        expect(text, `${file} still describes the judge as opt-in`).not.toMatch(claim);
+      }
+    }
+  });
+
+  it('shows plugin users the slash commands, not the binary', () => {
+    // `agentsensei now` is not on a plugin user's PATH — the CLI is what the
+    // command file runs on their behalf. Contribute legitimately shows it.
+    for (const file of userFacingDocs()) {
+      if (/contribut/i.test(file)) continue;
+      expect(
+        readFileSync(file, 'utf8'),
+        `${file} tells a user to run the binary directly`,
+      ).not.toMatch(/^\s*agentsensei (now|fix|report|scan|standing|judge)\b/m);
+    }
+  });
+
   it('no doc states a test count, which rots on every commit', () => {
     for (const file of ['README.md', 'CONTRIBUTING.md']) {
       expect(readFileSync(file, 'utf8')).not.toMatch(/\b\d{3,} tests\b/);

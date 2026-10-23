@@ -16,7 +16,7 @@
  * refuses to write anything without `--apply`.
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JudgeDimension } from './judge.ts';
 
@@ -285,6 +285,49 @@ export function tallyByDimension(state: JudgeState): { dimension: string; count:
   const by = new Map<string, number>();
   for (const f of state.findings) by.set(f.dimension, (by.get(f.dimension) ?? 0) + 1);
   return [...by].map(([dimension, count]) => ({ dimension, count }));
+}
+
+/**
+ * A judge pass is slow enough to overlap itself.
+ *
+ * The ledger only advances once stage A returns — about thirty seconds — so
+ * two `/agentsensei:now` calls inside that window both see the same offset,
+ * both decide the session is due, and **both spend ~58k tokens on the same
+ * bytes.** Measured: two invocations produced two independent passes.
+ *
+ * Shaped like `standing.running`: a marker written before the spawn, removed
+ * when the pass exits, and aged out so a crashed pass cannot block the next
+ * one for ever. Five minutes, because a batch is about a minute and the
+ * failure mode of being slightly too cautious is a delayed finding, where the
+ * failure mode of being too eager is a duplicate bill.
+ */
+export const JUDGE_RUNNING_STALE_MS = 5 * 60 * 1000;
+
+const RUNNING = 'judge.running';
+
+export function judgeRunning(archive: string, now = Date.now()): boolean {
+  try {
+    return Math.abs(now - statSync(join(archive, RUNNING)).mtimeMs) < JUDGE_RUNNING_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+export function markJudgeRunning(archive: string): void {
+  try {
+    mkdirSync(archive, { recursive: true, mode: 0o700 });
+    writeFileSync(join(archive, RUNNING), `${new Date().toISOString()}\n`, { mode: 0o600 });
+  } catch {
+    // Worst case two passes overlap once. Never worth failing a command over.
+  }
+}
+
+export function clearJudgeRunning(archive: string): void {
+  try {
+    rmSync(join(archive, RUNNING), { force: true });
+  } catch {
+    // Staleness covers this.
+  }
 }
 
 /** Findings for one session, newest first. */

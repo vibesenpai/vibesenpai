@@ -23,8 +23,8 @@ describe('settings', () => {
     // is one detector — 4 occurrences across 18 real sessions where the judge
     // found 19. What keeps the principle intact is that **the `Stop` hook no
     // longer spawns a pass**: nothing is judged until the user runs a command.
-    // That boundary is asserted in `test/hook-stop.test.ts`, and it is the one
-    // that matters.
+    // That boundary is asserted in `test/spend-boundary.test.ts`, and it is the
+    // one that matters.
     expect(DEFAULT_SETTINGS.enabled).toBe(true);
     expect(readJudgeState(archive()).settings.enabled).toBe(true);
   });

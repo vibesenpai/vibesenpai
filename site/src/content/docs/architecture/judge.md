@@ -75,7 +75,7 @@ fit alone is skipped and recorded as a failure rather than cut in half.
 Not a boolean, and not a parser version:
 
 ```json
-"ledger": { "46b591a1-…": 1048576 }
+"ledger": { "a1b2c3d4-…": 1048576 }
 ```
 
 A live session keeps growing, so "judged" is a **position**, not a state. Key

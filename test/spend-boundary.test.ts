@@ -12,8 +12,12 @@
  * learns to spawn the judge again, these fail.
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { DEFAULT_SETTINGS } from '../src/judge-store.ts';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  clearJudgeRunning, DEFAULT_SETTINGS, JUDGE_RUNNING_STALE_MS, judgeRunning, markJudgeRunning,
+} from '../src/judge-store.ts';
 
 /**
  * Source with comments removed.
@@ -78,5 +82,50 @@ describe('the judge ships on, and the command is what triggers it', () => {
   it('discloses the spend once, and records that it did', () => {
     expect(cli).toMatch(/hasDisclosed\(config\.archive\)/);
     expect(cli).toMatch(/markDisclosed\(config\.archive\)/);
+  });
+});
+
+describe('a pass cannot overlap itself', () => {
+  // Found by reading `pgrep` output during a timing test: two
+  // `/agentsensei:now` calls had produced **two independent judge passes on
+  // the same session**, each ~58k tokens, on the same bytes.
+  //
+  // The cause is that the ledger does not advance until stage A returns —
+  // about thirty seconds — so both calls saw the same offset and both decided
+  // the session was due. Nothing in `scripts/judge.ts` locked anything.
+  const dir = () => mkdtempSync(join(tmpdir(), 'as-lock-'));
+
+  it('reports a fresh marker as running', () => {
+    const d = dir();
+    expect(judgeRunning(d)).toBe(false);
+    markJudgeRunning(d);
+    expect(judgeRunning(d)).toBe(true);
+  });
+
+  it('ages a stale marker out, so a crashed pass does not block for ever', () => {
+    // The failure mode this prevents: a pass dies holding the marker, and
+    // every later invocation silently declines to judge anything.
+    const d = dir();
+    markJudgeRunning(d);
+    expect(judgeRunning(d, Date.now() + JUDGE_RUNNING_STALE_MS + 1)).toBe(false);
+  });
+
+  it('clears on release', () => {
+    const d = dir();
+    markJudgeRunning(d);
+    clearJudgeRunning(d);
+    expect(judgeRunning(d)).toBe(false);
+  });
+
+  it('is taken before every spawn, and released however the pass exits', () => {
+    const cli = code('src/cli.ts');
+    // Both spawn sites: the one `now` uses and the one `--backlog` uses.
+    expect((cli.match(/markJudgeRunning\(config\.archive\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(cli).toMatch(/judgeRunning\(config\.archive\)\) return false;/);
+
+    // `finally`, not a success path — a crash must still release it.
+    const pass = code('scripts/judge.ts');
+    expect(pass).toMatch(/\.finally\(/);
+    expect(pass).toMatch(/clearJudgeRunning/);
   });
 });

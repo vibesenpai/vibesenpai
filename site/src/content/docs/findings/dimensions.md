@@ -36,7 +36,7 @@ The same call made again when nothing had changed between them.
 Real, and it has **no fix** — re-reading a file is cheap and frequently the
 right thing to do. It is reported so you can see it, not so you can act on it.
 
-## The judge — reads conversation, opt-in
+## The judge — reads conversation
 
 These need [the judge](/agentsensei/architecture/judge/) enabled.
 

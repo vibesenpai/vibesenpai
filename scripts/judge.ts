@@ -48,7 +48,9 @@ import {
   buildSession, estimateTokens, openFailuresBefore, parseExtract, parseLabels, renderExtract, renderLabel,
   type JudgeCarry, type JudgePacketSession,
 } from '../src/judge.ts';
-import { readJudgeState, writeJudgeState, type JudgeState } from '../src/judge-store.ts';
+import {
+  clearJudgeRunning, readJudgeState, writeJudgeState, type JudgeState,
+} from '../src/judge-store.ts';
 import type { Event } from '../src/types.ts';
 
 /** Well under any reasonable hook budget, and the model call is the long pole. */
@@ -277,6 +279,21 @@ async function main(): Promise<void> {
   recordSuccess(config.archive);
 }
 
-main().catch(() => {
-  // Principle Zero: a broken analyzer must never break a session.
-});
+// ── Release the in-flight marker, however this exits ──────────────────────
+//
+// The CLI takes it before spawning, because the ledger does not move until
+// stage A returns and two `now` calls inside that window would otherwise both
+// spend ~58k tokens on the same bytes. `finally` rather than a success path:
+// a crashed pass that held the marker would block every later one until it
+// aged out, turning one failure into five minutes of silence.
+main()
+  .catch(() => {
+    // Principle Zero: a broken analyzer must never break a session.
+  })
+  .finally(() => {
+    try {
+      clearJudgeRunning(resolveConfig().config.archive);
+    } catch {
+      // Staleness covers it.
+    }
+  });

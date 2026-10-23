@@ -16,7 +16,7 @@ Pre-alpha. Nothing has been published to npm yet.
   positives** hand-verified.
 - **`redundant_call`** — reported, with no fix offered, because re-reading a
   file is cheap and frequently correct.
-- **The judge** — an opt-in model pass that reads conversation rather than
+- **The judge** — a model pass that reads conversation rather than
   structure, covering `constraint_violation`, `misread_intent`,
   `inaccurate_self_report`, `overreach` and `other`. Off by default.
 - **Two-stage extraction**, which took session-level agreement from 129/232 to

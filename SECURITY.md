@@ -20,8 +20,10 @@ leaving the machine, say which version and whether the judge was enabled.
 
 ## The judge, which is the part that matters
 
-`agentsensei judge` is **off by default** and sends redacted transcript text to
-a model through your own Claude Code CLI.
+The judge is **on from installation** and sends redacted transcript text to a
+model through your own Claude Code CLI — but **only when you run a command.**
+The `Stop` hook does not spawn a pass, which is what keeps nothing unprompted;
+`test/spend-boundary.test.ts` asserts it.
 
 **Redaction is asserted, not attempted.** Immediately before every call the
 packet is checked, and the send is **aborted** if redaction would still change

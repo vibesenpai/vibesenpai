@@ -5,5 +5,11 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["src/**/*.ts", "scripts/hook-stop.ts", "scripts/hook-session-start.ts"]
+  "include": [
+    "src/**/*.ts",
+    "scripts/hook-stop.ts",
+    "scripts/hook-session-start.ts",
+    "scripts/judge.ts",
+    "scripts/compute-standing.ts"
+  ]
 }

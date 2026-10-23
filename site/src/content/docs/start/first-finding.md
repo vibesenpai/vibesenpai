@@ -5,8 +5,8 @@ description: How to read what the tool prints, and why "no findings" is a real r
 
 Run it:
 
-```bash
-agentsensei now
+```
+/agentsensei:now
 ```
 
 ```
@@ -63,10 +63,9 @@ not a verdict.
 
 ## Across your history
 
-```bash
-agentsensei scan && agentsensei standing --refresh
-agentsensei report --last 7d
+```
+/agentsensei:generate-report
 ```
 
-`report --html` writes a self-contained HTML file — no JavaScript, no external
-resources, mode 0600 — if you would rather read it in a browser.
+It writes a self-contained HTML file — no JavaScript, no external resources,
+mode 0600 — and prints the path.

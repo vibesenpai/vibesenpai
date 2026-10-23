@@ -8,7 +8,7 @@ wrong. This page does, and it will probably undersell us.
 
 ## The number
 
-The judge — the opt-in model pass that reads conversation rather than
+The judge — the model pass that reads conversation rather than
 structure — agrees with published, human-validated labels on **165 of 232
 sessions**.
 

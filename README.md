@@ -81,11 +81,15 @@ thing you never notice in the moment and that costs real tokens.
   no fix exists. A tool that hands you six things to fix has handed you nothing
   to do.
 
-Local-first too, of course — `scan` prints `copied nothing` and means it, and
-the optional judge is **off by default**
-([what leaves your machine](#what-leaves-your-machine)). But that is table
-stakes in this ecosystem rather than a reason to pick this one, and
-[`docs/prior-art.md`](docs/prior-art.md) says so at length.
+Your transcripts are read in place — `scan` prints `copied nothing` and means
+it — and when the judge reads a session, what leaves is a **redacted subset of
+what your provider already has**, sent to the model on your own account. No
+third party ([what leaves your machine](#what-leaves-your-machine)).
+
+"Fully local" is not on that list on purpose. It is table stakes in this
+ecosystem rather than a reason to pick this one, and since the judge runs
+through your own harness it is no longer strictly true of us either —
+[`docs/prior-art.md`](docs/prior-art.md) retires it at length.
 
 ## Install
 
@@ -151,7 +155,8 @@ deterministic, and run with no model at all.
 | `redundant_call` | the same call made again when nothing had changed |
 
 **The judge** reads the conversation, because some failures leave no structural
-trace. It is opt-in and off by default.
+trace. It is on from installation and runs **only when you run a command** —
+the `Stop` hook never spawns a pass.
 
 | dimension | what it catches |
 |---|---|
@@ -177,10 +182,14 @@ Short version: **nothing, unless you turn the judge on.**
 |---|---|
 | reads | `~/.claude/projects/**` in place |
 | writes | `~/.local/share/agentsensei` (its own store), and `settings.json` **only** via `agentsensei install`, which prints the change and needs `--apply` |
-| sends | nothing — until `agentsensei judge --enable --apply` |
+| sends | redacted session text to **your own model**, when you run a command. Never unprompted |
 
-With the judge enabled, redacted transcript text goes to a model so it can read
-the conversation. Three things make that defensible rather than a shrug:
+When you run a command, redacted transcript text goes to a model so it can read
+the conversation. Four things make that defensible rather than a shrug:
+
+**Nothing is sent unprompted.** The `Stop` hook does not spawn a pass — that
+boundary is what lets the judge ship on, and it is asserted by a test rather
+than promised.
 
 - **Redaction is asserted, not attempted.** The packet is checked immediately
   before the call, and the send is **aborted** if redaction would still change
@@ -247,7 +256,7 @@ wrong should be able to say what it got wrong itself.
 | **finding** | one instance of a dimension, anchored to specific turns |
 | **standing** | what your history says, computed once and cached |
 | **skeleton** | the compact form a detector reads — structure, no prose |
-| **judge** | the opt-in model pass that reads conversation rather than structure |
+| **judge** | the model pass that reads conversation rather than structure, when you ask |
 
 ## Supported harnesses
 
