@@ -3,7 +3,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -106,5 +107,42 @@ describe('findingsFor', () => {
       { sessionId: 'b', dimension: 'overreach', turns: [3], why: 'other', at: '2026-03-01T00:00:00Z' },
     ];
     expect(findingsFor(s, 'a').map((f) => f.why)).toEqual(['new', 'old']);
+  });
+});
+
+describe('an unreadable store is not an empty one', () => {
+  // `readProgress` catches — it must, Principle Zero outranks a correct count
+  // — but it returned a value **identical to an empty store**. So
+  // `judge --status` printed `judged 0 session(s) · 0 finding(s)` over a
+  // database it had failed to open, which is this project's own
+  // `inaccurate_self_report` dimension appearing in its own status output.
+  const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-unreadable-'));
+
+  it('flags a store that is not a database', () => {
+    const dir = scratch();
+    writeFileSync(join(dir, 'store.db'), randomBytes(4096));
+    const state = readJudgeState(dir);
+    expect(state.storeUnreadable, 'a failed read must be distinguishable').toBe(true);
+  });
+
+  it('does not flag a healthy store, however empty', () => {
+    // The flag means "could not read", never "found nothing" — otherwise the
+    // honest case starts reporting unknown and the warning becomes noise.
+    const dir = scratch();
+    const state = readJudgeState(dir);
+    expect(state.storeUnreadable).toBeUndefined();
+    expect(state.findings).toEqual([]);
+  });
+
+  it('still returns usable settings, so a session can start', () => {
+    const dir = scratch();
+    writeFileSync(join(dir, 'store.db'), randomBytes(4096));
+    expect(readJudgeState(dir).settings.model).toBe(DEFAULT_SETTINGS.model);
+  });
+
+  it('says unknown rather than a number', () => {
+    const src = readFileSync('src/cli.ts', 'utf8');
+    expect(src).toMatch(/storeUnreadable === true/);
+    expect(src).toMatch(/the store could not be read/);
   });
 });

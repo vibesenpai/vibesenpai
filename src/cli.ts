@@ -1096,7 +1096,17 @@ function cmdJudge(a: Argv): number {
 
     console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
     console.log('');
-    console.log(`  judged     ${judged} session(s) · ${state.findings.length} finding(s)`);
+
+    // A count here is a claim about what has been paid for and found. If the
+    // store did not open, we do not have one — and saying `judged 0` would be
+    // the `inaccurate_self_report` this tool detects, printed by the tool.
+    if (state.storeUnreadable === true) {
+      console.log(`  judged     ${bold('unknown')} — the store could not be read`);
+      console.log(`  ${dim(`it is at ${join(config.archive, 'store.db')}`)}`);
+      console.log(`  ${dim('delete it to start a fresh one; findings are re-derived from transcripts')}`);
+    } else {
+      console.log(`  judged     ${judged} session(s) · ${state.findings.length} finding(s)`);
+    }
     if (pending === 0) {
       console.log('  pending    nothing — every session is up to date');
       console.log('');

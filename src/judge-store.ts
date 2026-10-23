@@ -121,6 +121,14 @@ export type JudgeState = {
    * a subscription it is notional. We report what we can actually know.
    */
   usage: { calls: number; inputTokens: number; outputTokens: number };
+  /**
+   * Set when the store could not be opened or read.
+   *
+   * Without it, a failed read is indistinguishable from an empty store, and
+   * every count above reads as a fact. A surface that shows a number must
+   * check this first and say what it does not know.
+   */
+  storeUnreadable?: boolean;
 };
 
 export function emptyState(): JudgeState {
@@ -225,8 +233,23 @@ function readProgress(archive: string): Omit<JudgeState, 'v' | 'settings'> {
       usage: { calls: spend.calls, inputTokens: spend.tokensIn, outputTokens: spend.tokensOut },
     };
   } catch {
-    // Principle Zero: an unreadable store must not stop a session starting.
-    return { ledger: {}, findings: [], usage: { calls: 0, inputTokens: 0, outputTokens: 0 } };
+    // ── Not throwing is correct. Returning a bare zero is not ──────────────
+    //
+    // Principle Zero means an unreadable store must not stop a session, so
+    // this cannot rethrow. But the value it returned was **identical to an
+    // empty store**, so `judge --status` printed `judged 0 session(s) · 0
+    // finding(s)` over a database it had failed to open — turning "I could not
+    // read this" into "there is nothing here".
+    //
+    // That is the project's own `inaccurate_self_report` dimension, in its own
+    // status output, and `unknown` beats guessing: the flag lets a caller say
+    // what is true instead of asserting a count it does not have.
+    return {
+      ledger: {},
+      findings: [],
+      usage: { calls: 0, inputTokens: 0, outputTokens: 0 },
+      storeUnreadable: true,
+    };
   } finally {
     db?.close();
   }
