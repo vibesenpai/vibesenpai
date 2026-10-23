@@ -759,12 +759,17 @@ export function renderJudged(
   // wants that has the docs; a reader looking at their session wants to know
   // whether anything is still coming.
   if (unjudgedTurns > 0) {
-    const wait = eta === undefined ? '' : ` — about ${eta}`;
+    // ── `eta` is the whole statement now, not a suffix ─────────────────────
+    //
+    // It used to be a bare duration appended to a sentence written here — and
+    // that duration was the constant string "60 seconds". It now comes from
+    // `progressLine` and says what is actually happening: reading right now
+    // with time left, or N sessions still queued. Appending a sentence to a
+    // sentence produced "still in progress — about 24 sessions still to read".
+    const status = eta ?? 'Background analysis still in progress.';
     out.push(
       `${INDENT.repeat(2)}${dim(
-        findings.length === 0
-          ? `Nothing flagged yet — background analysis still in progress${wait}`
-          : `Background analysis still in progress${wait}`,
+        findings.length === 0 ? `Nothing flagged yet. ${status}` : status,
       )}`,
     );
   }

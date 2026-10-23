@@ -15,7 +15,14 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closed, isTripped, readBreaker, recordFailure, recordSuccess, TRIP_AFTER } from '../src/breaker.ts';
-import { JUDGE_SECONDS_PER_CALL, humanDuration, oldestUnread, pendingWork, readJudgeState } from '../src/judge-store.ts';
+import {
+  JUDGE_SECONDS_PER_CALL,
+  humanDuration,
+  oldestUnread,
+  pendingWork,
+  progressLine,
+  readJudgeState,
+} from '../src/judge-store.ts';
 import {
   addHook, commandDir, commandFilePath, describeChange, dropOurStatusLine, fixCommandFilePath,
   generateReportCommandBody, generateReportCommandFilePath, legacyCommandFiles, ourCommandFiles,
@@ -511,5 +518,50 @@ describe('the backlog drains, which it did not', () => {
     const hook = readFileSync('scripts/hook-stop.ts', 'utf8');
     expect(hook).toMatch(/dueForJudging\([^)]*\)\s*\?/);
     expect(hook).toMatch(/oldestUnread/);
+  });
+});
+
+describe('the ETA is in the unit that governs it', () => {
+  // Two ETAs existed and both reported compute time to a reader who will hear
+  // wall-clock time. The session one was literally the constant string "60
+  // seconds" — `humanDuration(2 * JUDGE_SECONDS_PER_CALL)` — independent of
+  // elapsed time, batch size, or whether the running pass covered that
+  // session at all. The status one said "about 25 minutes at ~30s per call".
+  //
+  // What paces completion is turn boundaries: the Stop hook reads one session
+  // per idle one, so the same 25 minutes of model time is an afternoon or
+  // three days depending on how much someone works.
+  it('counts queued work in sessions and turns, never minutes', () => {
+    const line = progressLine({ unread: 24 });
+    expect(line).toMatch(/24 sessions/);
+    expect(line).toMatch(/per turn/);
+    expect(line, 'a queue paced by turns must not quote minutes').not.toMatch(/minute|second/);
+  });
+
+  it('gives a real duration only for a pass actually in flight', () => {
+    // The one case where elapsed-against-expected is a fact rather than an
+    // extrapolation.
+    const line = progressLine({ unread: 24, running: { elapsedMs: 20_000 } });
+    expect(line).toMatch(/Reading a session now/);
+    expect(line).toMatch(/40 seconds left/);
+  });
+
+  it('prefers what calls really took here over the constant', () => {
+    const line = progressLine({ unread: 0, running: { elapsedMs: 2_000 }, callMs: 5_000 });
+    expect(line, '2 x 5s measured, 2s elapsed → 8s left').toMatch(/8 seconds left/);
+  });
+
+  it('says so rather than counting past the estimate', () => {
+    expect(progressLine({ unread: 0, running: { elapsedMs: 10 * 60_000 } })).toMatch(/nearly done/);
+  });
+
+  it('covers the window where a pass is spawned but has not recorded itself', () => {
+    // The marker is written by the spawner and the `run` row by the pass, so
+    // between them something is running and nothing can say for how long.
+    expect(progressLine({ unread: 3, spawned: true })).toBe('Reading a session now.');
+  });
+
+  it('says nothing at all when there is nothing outstanding', () => {
+    expect(progressLine({ unread: 0 })).toBe('');
   });
 });

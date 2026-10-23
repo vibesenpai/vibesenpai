@@ -23,9 +23,16 @@ import {
 } from './read.ts';
 import { gatherReport, type ReportData } from './gather.ts';
 import {
-  findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL,
-  judgeRunning, markJudgeRunning, pendingWork, readJudgeState,
-  tallyByDimension, writeSettings,
+  JUDGE_RUNNING_STALE_MS,
+  findingsFor,
+  humanDuration,
+  judgeRunning,
+  markJudgeRunning,
+  pendingWork,
+  progressLine,
+  readJudgeState,
+  tallyByDimension,
+  writeSettings,
 } from './judge-store.ts';
 import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
@@ -34,6 +41,7 @@ import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
 import { detectorsFor, runDetectors, unknownDimensions } from './detect/index.ts';
 import { leadSegments, render as renderFindings, type Baseline } from './render.ts';
+import { currentRun, measuredCallMs, openStore } from './store.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
 import {
@@ -624,7 +632,33 @@ async function cmdInsights(a: Argv): Promise<number> {
   // Producing is the `Stop` hook's job. This renders what exists, and reports
   // whether a pass is running so "nothing yet" is distinguishable from
   // "nothing to find".
+  // Still consulted below to distinguish "nothing found" from "not looked
+  // at yet"; the ETA no longer derives from it.
   const judging = judgeRunning(config.archive);
+
+  // What to say about work that has not finished, in the unit that governs it.
+  // `currentRun` is the only signal that carries *which* session is being read
+  // and for how long; `judge.running` could only ever say "something".
+  const progress = (() => {
+    try {
+      const db = openStore(config.archive);
+      try {
+        const run = currentRun(db, JUDGE_RUNNING_STALE_MS);
+        const measured = measuredCallMs(db);
+        const { unread } = pendingWork(judgeState, sessionSizes(config.sources));
+        return progressLine({
+          unread,
+          ...(run === undefined ? {} : { running: run }),
+          ...(measured === undefined ? {} : { callMs: measured }),
+          ...(judging ? { spawned: true } : {}),
+        });
+      } finally {
+        db.close();
+      }
+    } catch {
+      return '';
+    }
+  })();
 
   const judgedBytes = judgeState.ledger[current.sessionId] ?? 0;
   let unjudgedTurns = 0;
@@ -665,9 +699,16 @@ async function cmdInsights(a: Argv): Promise<number> {
             judged: {
               findings: judgedFindings,
               unjudgedTurns,
-              // Two calls per session — extract then label — at a measured
-              // ~30s each. Only when a pass actually started.
-              ...(judging ? { eta: humanDuration(2 * JUDGE_SECONDS_PER_CALL) } : {}),
+              // ── A measurement, not a constant ──────────────────────────
+              //
+              // This was `humanDuration(2 * JUDGE_SECONDS_PER_CALL)`, which
+              // evaluates to the string "60 seconds" every time — regardless of
+              // elapsed time, batch size, or whether the pass in flight even
+              // covers this session.
+              //
+              // `progressLine` reads the `run` row instead: how long the pass
+              // has really been going, against how long calls really take here.
+              ...(progress === '' ? {} : { eta: progress }),
             },
           }
         : {}),
@@ -1218,7 +1259,7 @@ function cmdJudge(a: Argv): number {
   // nothing". No new state was needed: the ledger already records how far each
   // session has been judged, so pending work is a subtraction.
   if (f['status'] === true) {
-    const { judged, pending, seconds } = pendingWork(state, sessionSizes(config.sources));
+    const { judged, pending, unread, behind } = pendingWork(state, sessionSizes(config.sources));
 
     console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
     console.log('');
@@ -1231,7 +1272,13 @@ function cmdJudge(a: Argv): number {
       console.log(`  ${dim(`it is at ${join(config.archive, 'store.db')}`)}`);
       console.log(`  ${dim('delete it to start a fresh one; findings are re-derived from transcripts')}`);
     } else {
-      console.log(`  judged     ${judged} session(s) · ${state.findings.length} finding(s)`);
+      // `judged` counts only sessions **fully** caught up, which printed
+      // `judged 0` directly above `2 with new turns since` — two true
+      // statements that contradict each other on the page. What a reader
+      // means by "read" is "we have looked at it at all".
+      console.log(
+        `  read       ${judged + behind} session(s) · ${state.findings.length} finding(s)`,
+      );
     }
     if (pending === 0) {
       console.log('  pending    nothing — every session is up to date');
@@ -1239,16 +1286,26 @@ function cmdJudge(a: Argv): number {
       console.log(`  ${dim('`no findings` from `now` or `report` means a clean bill of health,')}`);
       console.log(`  ${dim('not an unfinished pass.')}`);
     } else {
-      console.log(
-        `  pending    ${pending} session(s) · about ${humanDuration(seconds)} at ~${JUDGE_SECONDS_PER_CALL}s per call`,
-      );
+      // ── The honest unit ──────────────────────────────────────────────────
+      //
+      // This said `about 25 minutes at ~30s per call`, which is **compute
+      // time** and will be read as wall-clock time. What actually governs
+      // completion is how many turn boundaries happen: the `Stop` hook reads
+      // one session per idle one, so 25 minutes of model time is an afternoon
+      // or three days depending entirely on how much you work.
+      //
+      // So the count says what it is, and the rate says what paces it.
+      const parts: string[] = [];
+      if (unread > 0) parts.push(`${unread} never read`);
+      if (behind > 0) parts.push(`${behind} with new turns since`);
+      console.log(`  pending    ${parts.join(' · ')}`);
       console.log('');
       // The trigger is the `Stop` hook now, not a command and not "the next
       // turn" in any sense a user controls. Say which thing fires it.
       console.log(
         `  ${dim(
           state.settings.enabled
-            ? 'reads a session in the background when a turn finishes.'
+            ? 'read in the background, about one session per turn as you work.'
             : 'disabled — nothing will be read or sent.',
         )}`,
       );
@@ -1433,7 +1490,7 @@ async function cmdReport(a: Argv): Promise<number> {
   });
 
   if (f['html'] === true || typeof f['out'] === 'string') {
-    return writeHtmlReport(data, config.archive, f);
+    return writeHtmlReport(data, config.archive, f, config.sources);
   }
 
   if (typeof f['project'] === 'string') {
@@ -1559,7 +1616,12 @@ function sessionLookupError(wanted: string, hit: SessionLookup & { ok: false }):
  * range, and the working directory is usually a git repo where one `git add -A`
  * would publish it. `--out` is the deliberate way to put it somewhere shared.
  */
-function writeHtmlReport(data: ReportData, archive: string, f: Argv['flags']): number {
+function writeHtmlReport(
+  data: ReportData,
+  archive: string,
+  f: Argv['flags'],
+  sources: string[],
+): number {
   // `2026-10-20-1234.html` — sortable, and in **local** time. `toISOString` is
   // UTC, so a report written at 12:34 was being named `…-1934.html`, which
   // reads as a different report from the one you just asked for.
@@ -1623,6 +1685,33 @@ function writeHtmlReport(data: ReportData, archive: string, f: Argv['flags']): n
       (opened ? ' — opened in your browser' : ''),
   );
   console.log(`  ${dim(shown)}`);
+
+  // ── Say what it does not cover ───────────────────────────────────────────
+  //
+  // This matters more here than anywhere else. A report is a file somebody
+  // keeps and quotes from; one that silently covers a third of the history is
+  // a report whose every number is wrong without saying so. The count above
+  // has always been honest about how many sessions it *used* — it has never
+  // said how many it could not.
+  try {
+    const db = openStore(archive);
+    let line = '';
+    try {
+      const run = currentRun(db, JUDGE_RUNNING_STALE_MS);
+      const measured = measuredCallMs(db);
+      const { unread } = pendingWork(readJudgeState(archive), sessionSizes(sources));
+      line = progressLine({
+        unread,
+        ...(run === undefined ? {} : { running: run }),
+        ...(measured === undefined ? {} : { callMs: measured }),
+      });
+    } finally {
+      db.close();
+    }
+    if (line !== '') console.log(`  ${dim(line)}`);
+  } catch {
+    // A store that will not open is not a reason to withhold the report.
+  }
   if (wantsOpen && !opened) console.log(`  ${dim(`could not launch ${opener} — run:  ${opener} ${shown}`)}`);
   console.log('');
   console.log(`  ${dim(nextRung('report'))}`);

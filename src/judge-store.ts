@@ -595,3 +595,52 @@ export function findingsFor(state: JudgeState, sessionId: string): JudgedFinding
     .filter((f) => f.sessionId === sessionId)
     .sort((a, b) => b.at.localeCompare(a.at));
 }
+
+/**
+ * What to say about analysis that has not finished, in the unit that governs it.
+ *
+ * ── Why this is not minutes ────────────────────────────────────────────────
+ *
+ * The old line was `about 25 minutes at ~30s per call`, and the one on the
+ * session surface was `humanDuration(2 * JUDGE_SECONDS_PER_CALL)` — which
+ * evaluates to the constant string "60 seconds" whatever is happening.
+ *
+ * Both reported **compute time** to a reader who will hear wall-clock time.
+ * What actually paces completion is turn boundaries: the `Stop` hook reads one
+ * session per idle one, so the same 25 minutes of model time is an afternoon
+ * or three days depending on how much someone works.
+ *
+ * A real duration is given for exactly one case — a pass in flight, where
+ * elapsed-against-expected is a fact rather than an extrapolation.
+ */
+export function progressLine(
+  opts: {
+    unread: number;
+    running?: { sessionId?: string; elapsedMs: number };
+    callMs?: number;
+    /**
+     * A pass has been spawned but has not recorded itself yet.
+     *
+     * The marker is written by the **spawner** and the `run` row by the pass,
+     * so between the two there is a real window where something is running and
+     * nothing can say for how long. Saying so beats saying nothing.
+     */
+    spawned?: boolean;
+  },
+): string {
+  const { unread, running } = opts;
+
+  if (running === undefined && opts.spawned === true) return 'Reading a session now.';
+
+  if (running !== undefined) {
+    const expected = (opts.callMs ?? JUDGE_SECONDS_PER_CALL * 1000) * 2;
+    const left = Math.max(expected - running.elapsedMs, 0);
+    // Past the estimate it says so rather than counting into the negative or
+    // freezing at "any moment now": overrunning is information too.
+    const when = left > 0 ? `about ${humanDuration(Math.round(left / 1000))} left` : 'nearly done';
+    return `Reading a session now — ${when}.`;
+  }
+
+  if (unread === 0) return '';
+  return `${unread} session${unread === 1 ? '' : 's'} still to read, about one per turn as you work.`;
+}
