@@ -550,3 +550,37 @@ describe('the diagrams are committed and current', () => {
     }
   });
 });
+
+describe('the plugin command files are not a stale copy', () => {
+  // `commands/*.md` and the bodies in `install.ts` are two copies of the same
+  // thing, and the copies have now drifted twice: the `:now` rename updated
+  // one, and `--open` was only ever added to the other — so
+  // `/agentsensei:report` wrote a file and handed back a path to copy, while
+  // the installed command opened it.
+  //
+  // `install.ts` is being deleted (D64), which makes these files the only
+  // copy. These assertions are what survives that deletion.
+  const body = (name: string): string => readFileSync(`commands/${name}.md`, 'utf8');
+
+  it('report opens what it just wrote', () => {
+    expect(body('report')).toContain('--html --open');
+  });
+
+  it('every command invokes a subcommand the CLI dispatches', () => {
+    const cli = readFileSync('src/cli.ts', 'utf8');
+    for (const name of ['insights', 'report', 'fix']) {
+      const m = /cli\.ts"\s+(\w[\w-]*)/.exec(body(name));
+      expect(m, `${name}.md invokes nothing`).not.toBeNull();
+      const sub = m?.[1] ?? '';
+      expect(cli, `${name}.md invokes \`${sub}\`, which has no case`).toContain(`case '${sub}'`);
+    }
+  });
+
+  it('runs through CLAUDE_PLUGIN_ROOT, never a hardcoded checkout', () => {
+    // An absolute path baked at install time is what made the old command
+    // files break when the checkout moved.
+    for (const name of ['insights', 'report', 'fix']) {
+      expect(body(name)).toContain('${CLAUDE_PLUGIN_ROOT}');
+    }
+  });
+});

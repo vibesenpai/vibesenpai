@@ -1516,28 +1516,42 @@ function writeHtmlReport(data: ReportData, archive: string, f: Argv['flags']): n
     (n, s) => n + s.findings.reduce((m, f) => m + f.occurrences, 0) + s.judged.length,
     0,
   );
-  console.log(
-    `wrote ${path}\n` +
-      `  ${data.sessions.length} session(s) · ${total} finding(s) · ` +
-      `${(Buffer.byteLength(html) / 1024).toFixed(0)} KB · mode 0600`,
-  );
-
-  if (f['open'] === true) {
-    // `execFile`, never a shell string: the path is interpolated and `--out`
-    // takes it from the command line.
-    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  // ── Opening is opt-in, and the caller opts in ───────────────────────────
+  //
+  // Deliberately not the default: `report --html` can be piped, and a command
+  // that launches a browser mid-pipeline is a command you stop trusting.
+  //
+  // The bug was never here. `/agentsensei:report` printed a 70-character path,
+  // then printed it again inside an `open` command, because `commands/
+  // report.md` is a **second copy** of the installed command body and that
+  // copy never got `--open`. The same two-copies failure as the `:now` rename.
+  //
+  // `execFile`, never a shell string, because the path is interpolated.
+  const wantsOpen = f['open'] === true;
+  const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  let opened = false;
+  if (wantsOpen) {
     try {
       execFileSync(opener, [path], { stdio: 'ignore' });
-      console.log(`  opened with ${opener}`);
+      opened = true;
     } catch {
-      // The fallback has to carry the command, not just the bad news: the
-      // caller asked to open it and would otherwise be left with neither a
-      // window nor anything to copy.
-      console.log(`  could not launch ${opener} — run:  ${opener} ${path}`);
+      opened = false;
     }
-  } else {
-    console.log(`  open it:  ${process.platform === 'darwin' ? 'open' : 'xdg-open'} ${path}`);
   }
+
+  // The home directory is most of the length and none of the information.
+  const shown = path.startsWith(homedir()) ? `~${path.slice(homedir().length)}` : path;
+  const n = data.sessions.length;
+  const plural = (c: number, w: string): string => `${c} ${w}${c === 1 ? '' : 's'}`;
+
+  console.log('');
+  console.log(
+    `  ${plural(n, 'session')} · ${plural(total, 'finding')}` +
+      (opened ? ' — opened in your browser' : ''),
+  );
+  console.log(`  ${dim(shown)}`);
+  if (wantsOpen && !opened) console.log(`  ${dim(`could not launch ${opener} — run:  ${opener} ${shown}`)}`);
+  console.log('');
   return 0;
 }
 
