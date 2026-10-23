@@ -18,7 +18,7 @@ reader.
 ```
   scan, 231 sessions              0.22s
   standing --refresh              0.64s
-  /agentsensei:session                0.41s
+  /agentsensei:insights                0.41s
   a judge pass, one session        ~60s   ← the only slow thing
 ```
 
@@ -37,7 +37,7 @@ indefensible the moment it ships on. A detached process spending your money at
 every turn boundary is precisely the failure this tool exists to detect, and
 shipping it would make the product the thing it criticises.
 
-So the trigger moved to the command. `/agentsensei:session` judges the session you
+So the trigger moved to the command. `/agentsensei:insights` judges the session you
 are asking about, when you ask. The hooks only refresh the local standing,
 which costs nothing.
 
@@ -45,7 +45,7 @@ which costs nothing.
 |---|---|---|
 | `SessionStart` | prints the last pass's report; refreshes standing if stale | no |
 | `Stop` | refreshes standing if stale | **no** |
-| `/agentsensei:session` | renders instantly, then judges **this session** | yes, ~58k tokens |
+| `/agentsensei:insights` | renders instantly, then judges **this session** | yes, ~58k tokens |
 | `judge --backlog` | the rest of your history, after showing the cost | yes, on `--apply` |
 
 `now` judges **one** session. The backlog on a typical machine is eighteen,

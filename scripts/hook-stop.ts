@@ -51,7 +51,7 @@ function main(): void {
   // detached child that prints nothing.
   //
   // It was briefly the other way round — the command spawned and this hook did
-  // not — which made `/agentsensei:session` cost 58k tokens without saying so.
+  // not — which made `/agentsensei:insights` cost 58k tokens without saying so.
   maybeJudge(config.archive, config.sources);
 
   // The freshness window is what makes this affordable at every boundary.

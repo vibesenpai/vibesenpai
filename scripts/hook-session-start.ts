@@ -38,16 +38,32 @@ import { detailLine, reportBlock } from '../src/report-line.ts';
 /**
  * Said once per machine, never again.
  *
- * Deliberately short and factual. It names what will happen, on whose
- * account, roughly what it costs, and how to stop — and nothing else. A notice
- * that argues for itself is a notice people learn to skip.
+ * ── Why this is not a privacy notice ───────────────────────────────────────
+ *
+ * The first version was four lines, three of them defensive: *"nothing is sent
+ * anywhere else"*, *"redacted before it leaves"*, *"to stop it"*. It never said
+ * what the tool was **for**, gave a token figure nobody can calibrate, and the
+ * only command it offered was the off switch — a dead end at the one moment a
+ * new user needs a way in.
+ *
+ * Worse, two of those lines contradict each other on sight: nothing is sent
+ * anywhere else, but text *leaves*? Reassurance against an accusation nobody
+ * made reads as something to hide.
+ *
+ * So: what it does, what it costs in a form the user can **check** rather than
+ * take on faith, and where to go next. The off switch stays, last, where an
+ * off switch belongs.
  */
 const DISCLOSURE = [
   '',
-  'agentsensei reads your sessions with the model on your own account —',
-  'about 58k tokens a session, in the background, after a turn finishes.',
-  'Nothing is sent anywhere else, and the text is redacted before it leaves.',
-  'To stop it: /plugin disable agentsensei',
+  'agentsensei is on — it reads your finished sessions in the background',
+  'and shows where effort went to waste.',
+  '',
+  'It reads them with Claude on your own plan; /usage shows what it spent.',
+  '',
+  '  /agentsensei:insights   what it has found, here and across your history',
+  '  /agentsensei:report     every session, as a file',
+  '  /plugin disable agentsensei   stop it',
   '',
 ].join('\n');
 

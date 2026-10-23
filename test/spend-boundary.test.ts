@@ -4,7 +4,7 @@
  * ── Why this boundary moved, and why it moved back ─────────────────────────
  *
  * The judge used to fire from the `Stop` hook on a cadence. That was replaced
- * by firing from `/agentsensei:session`, on the reasoning that asking about a
+ * by firing from `/agentsensei:insights`, on the reasoning that asking about a
  * session is a fair moment to read it — and it was wrong for a reason the
  * pipeline model made obvious: it put a producer inside a reader. The command
  * said "now", looked like a view, and charged ~58k tokens for it.
@@ -68,12 +68,12 @@ describe('the Stop hook is the producer', () => {
 describe('no command spends', () => {
   const cli = code('src/cli.ts');
 
-  it('`session` renders what exists and starts nothing', () => {
+  it('`insights` renders what exists and starts nothing', () => {
     // The whole reason this surface is worth typing is that it is instant —
     // measured at 0.41s. A command that waits on a model is a different
     // product, and a command that spawns one silently is a worse one.
-    const cmd = /async function cmdSession[\s\S]*?\n}/.exec(cli)?.[0] ?? '';
-    expect(cmd, 'cmdSession not found').not.toBe('');
+    const cmd = /async function cmdInsights[\s\S]*?\n}/.exec(cli)?.[0] ?? '';
+    expect(cmd, 'cmdInsights not found').not.toBe('');
     expect(cmd).not.toMatch(/spawnJudge|spawnDetached|markJudgeRunning/);
   });
 
@@ -159,9 +159,26 @@ describe('the first spend is disclosed once', () => {
   // session start renders in the user's own window, so that is where it goes.
   const hook = code('scripts/hook-session-start.ts');
 
-  it('says what will happen, on whose account, and how to stop', () => {
-    expect(hook).toMatch(/on your own account/);
-    expect(hook).toMatch(/58k tokens/);
+  it('says what it does before what it costs', () => {
+    // The first version opened with mechanism and spent three of four lines on
+    // denial. A notice that argues for itself is one people learn to skip.
+    expect(hook).toMatch(/reads your finished sessions/);
+    expect(hook).toMatch(/where effort went to waste/);
+  });
+
+  it('makes the cost checkable instead of asserting a figure', () => {
+    // `about 58k tokens a session` was exact and useless — nobody can
+    // calibrate it against a plan. `/usage` attributes spend by plugin, so the
+    // user can read the real number instead of trusting ours.
+    expect(hook).toMatch(/on your own plan/);
+    expect(hook).toMatch(/\/usage/);
+    expect(hook, 'no uncalibratable token figure').not.toMatch(/58k/);
+  });
+
+  it('offers a way in, not just a way out', () => {
+    // The old notice's only command was the off switch — a dead end at the one
+    // moment a new user needs somewhere to go.
+    expect(hook).toMatch(/\/agentsensei:insights/);
     expect(hook).toMatch(/plugin disable agentsensei/);
   });
 

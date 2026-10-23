@@ -14,7 +14,7 @@ import { bold, dim } from './style.ts';
 
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
-import { resolveConfig, type Layer } from './config.ts';
+import { resolveConfig, type Config, type Layer } from './config.ts';
 import { describeCatalog, readCatalog, runScan } from './catalog.ts';
 import { parse, registry } from './parsers/index.ts';
 import {
@@ -43,7 +43,9 @@ import {
 } from './install.ts';
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
-import { detailLine, reportBlock, fixLine } from './report-line.ts';
+import {
+  costLine, detailLine, dimensionLine, fixLine, reportBlock, whereLine,
+} from './report-line.ts';
 import { compactionsFor, recommend, renderFix } from './fix.ts';
 import { spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -120,7 +122,7 @@ Usage
   agentsensei doctor             harnesses, paths, parser coverage
   agentsensei config             resolved values and which layer set each
   agentsensei skeleton <id>      print a session's windows as evidence
-  agentsensei session                the session you are in, read live
+  agentsensei insights                the session you are in, read live
   agentsensei report             retrospective over a date range
   agentsensei standing          what your history says (the baseline)
   agentsensei fix               one evidence-backed change to try
@@ -464,7 +466,57 @@ function cmdSkeleton(a: Argv): number {
  * The in-session view. Reads live by definition — the point is the turns that
  * have happened since the last scan, which is to say the ones you just made.
  */
-async function cmdSession(a: Argv): Promise<number> {
+
+/**
+ * Your history, on demand.
+ *
+ * ── The gap this closes ────────────────────────────────────────────────────
+ *
+ * The cross-session rollup existed in exactly one place: the block injected at
+ * session start. Dismiss it, or scroll past it, and there was **no way to ask
+ * for it again** — `:session` answered only for the session you are in, which
+ * on a fresh install is the one place with nothing to say.
+ *
+ * So the first thing a new user saw was a notice about cost, and the only
+ * command it could point them at was the off switch.
+ */
+function printHistory(config: Config): void {
+  const standing = readStanding(config.archive);
+  if (standing === undefined) {
+    console.log('');
+    console.log(`  ${dim('your history: not read yet — it runs in the background after a turn ends')}`);
+    return;
+  }
+
+  console.log('');
+  console.log(`  ${bold('YOUR LAST')} ${bold(String(standing.sessions))} ${bold('SESSIONS')}`);
+  console.log('');
+
+  const judged = tallyByDimension(readJudgeState(config.archive));
+  if (standing.dimensions.length === 0 && judged.length === 0) {
+    console.log(`  ${dim('nothing found yet')}`);
+  } else {
+    for (const d of standing.dimensions) {
+      console.log(`  ${dimensionLine(d)}`);
+      const where = whereLine(d);
+      if (where !== '') console.log(`    ${where}`);
+    }
+    for (const { dimension, count } of judged) {
+      console.log(`  ${count} ${dimension.replace(/_/g, ' ')} ${dim('— flagged by a model')}`);
+    }
+  }
+
+  const cost = costLine(standing);
+  if (cost !== '') {
+    console.log('');
+    console.log(`  ${dim(cost)}`);
+  }
+
+  console.log('');
+  console.log(`  ${dim(`as of ${computedAtLocal(standing)} · /agentsensei:report for every session`)}`);
+}
+
+async function cmdInsights(a: Argv): Promise<number> {
   const { config } = configFromFlags(a);
   const flagSession = a.flags['session'];
   const current = resolveCurrentSession(config.sources, {
@@ -603,6 +655,7 @@ async function cmdSession(a: Argv): Promise<number> {
   if (a.flags['skeleton'] === true) {
     return printSkeletons(a, current.sessionId, current.source, undefined, true);
   }
+    printHistory(config);
   return 0;
 }
 
@@ -741,7 +794,7 @@ function cmdInstall(a: Argv): number {
   // nothing to do. It only escaped notice because `describeChange` also lists
   // untouched keys, which kept the list non-empty by accident.
   const wanted: [string, string, string][] = [
-    [commandFilePath(home), '/agentsensei:session', commandFileBody(repoRoot(), process.execPath, isCompiled())],
+    [commandFilePath(home), '/agentsensei:insights', commandFileBody(repoRoot(), process.execPath, isCompiled())],
     [fixCommandFilePath(home), '/agentsensei:fix', fixCommandBody(repoRoot(), process.execPath, isCompiled())],
     [
       generateReportCommandFilePath(home),
@@ -994,7 +1047,7 @@ function cmdUninstall(a: Argv): number {
   console.log('this would change:');
   for (const l of change) console.log(l);
   for (const [p_, name] of [
-    [commandFilePath(home), '/agentsensei:session'],
+    [commandFilePath(home), '/agentsensei:insights'],
     [fixCommandFilePath(home), '/agentsensei:fix'],
     [generateReportCommandFilePath(home), '/agentsensei:report'],
   ] as const) {
@@ -1500,8 +1553,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdConfig(a);
     case 'skeleton':
       return cmdSkeleton(a);
-    case 'session':
-      return cmdSession(a);
+    case 'insights':
+      return cmdInsights(a);
     case 'report':
       return cmdReport(a);
     case 'standing':

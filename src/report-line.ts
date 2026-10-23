@@ -20,7 +20,7 @@
  * ── Why it is terse ────────────────────────────────────────────────────────
  *
  * This prints at the top of every session. Anything that is not worth reading
- * every single time is worth putting in `agentsensei session` instead, which is
+ * every single time is worth putting in `agentsensei insights` instead, which is
  * why file churn never appears here and the dimension list is capped.
  */
 
@@ -130,7 +130,7 @@ export function costLine(s: Standing): string {
 /**
  * Is a command actually runnable, or would telling someone to type it be a lie?
  *
- * The report used to end with `` `agentsensei session` for this session `` on every
+ * The report used to end with `` `agentsensei insights` for this session `` on every
  * machine. **On the machine it was written on, that command does not exist** —
  * no build, nothing on PATH. The single actionable line in the most-seen output
  * the tool has pointed at something that could only fail, which is the fastest
@@ -140,7 +140,7 @@ export function costLine(s: Standing): string {
  */
 export function commandPath(home: string): string {
   // The namespaced location: `.claude/commands/agentsensei/now.md` is
-  // `/agentsensei:session`. See `src/install.ts`.
+  // `/agentsensei:insights`. See `src/install.ts`.
   return join(home, '.claude', 'commands', 'agentsensei', 'now.md');
 }
 
@@ -149,13 +149,13 @@ export function commandPath(home: string): string {
  *
  * `/agentsensei` when the command file is installed, the working `node …` form
  * when it is not. **Checked, never assumed** — the first version printed
- * `agentsensei session` unconditionally, and on the machine it was written on that
+ * `agentsensei insights` unconditionally, and on the machine it was written on that
  * command did not exist. The one actionable line in the most-seen output the
  * tool has pointed at something that could only fail.
  */
 export function detailLine(repoRoot: string, home: string): string {
   return existsSync(commandPath(home))
-    ? '/agentsensei:session for the exact turns'
+    ? '/agentsensei:insights for the exact turns'
     : `node --experimental-strip-types ${repoRoot}/src/cli.ts now`;
 }
 
@@ -174,11 +174,19 @@ export function fixCommandPath(home: string): string {
  * version of that line named a command that did not exist on the machine it was
  * written on.
  */
-export function fixLine(repoRoot: string, home: string, thisSession: boolean): string {
+export function fixLine(_repoRoot: string, _home: string, thisSession: boolean): string {
+  // ── Always the slash command ────────────────────────────────────────────
+  //
+  // This used to check whether `~/.claude/commands/agentsensei/fix.md` existed
+  // and fall back to printing a hundred-character `node --experimental-strip-
+  // types /Users/…/src/cli.ts fix` at the user. Under D64 the plugin is the
+  // only front door, so the slash command is always there and the path never
+  // is — the fallback could only fire after an uninstall, which is exactly
+  // when nobody wants a raw invocation suggested to them.
+  //
+  // Caught by running `:insights` straight after `uninstall --apply`.
   const where = thisSession ? '' : ' — from your history';
-  return existsSync(fixCommandPath(home))
-    ? `/agentsensei:fix for one thing to try${where}`
-    : `node --experimental-strip-types ${repoRoot}/src/cli.ts fix`;
+  return `/agentsensei:fix for one thing to try${where}`;
 }
 
 /**

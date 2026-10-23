@@ -105,7 +105,7 @@ Claude Code needs it.
 You get three commands:
 
 ```
-/agentsensei:session              what happened in this session
+/agentsensei:insights              what happened in this session
 /agentsensei:fix              the one change worth making
 /agentsensei:report  a self-contained HTML report
 ```
@@ -119,7 +119,7 @@ To stop it: `/plugin disable agentsensei`.
 Then, for the session you are in right now:
 
 ```
-/agentsensei:session
+/agentsensei:insights
 ```
 
 ```

@@ -359,7 +359,7 @@ itself where you already are.
 it needs a consented write, and `setup` is where that gets asked. The optional semantic models are
 offered here too; their download mechanics are in [models.md](models.md).
 
-Everything else is daily use: `/agentsensei:session`, `:fix N`, `:report 7d`, `:why N`, plus the
+Everything else is daily use: `/agentsensei:insights`, `:fix N`, `:report 7d`, `:why N`, plus the
 statusline. The CLI mirrors all of it for CI and scripting.
 
 ---

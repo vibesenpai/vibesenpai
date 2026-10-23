@@ -6,7 +6,7 @@ description: How to read what the tool prints, and why "no findings" is a real r
 Run it:
 
 ```
-/agentsensei:session
+/agentsensei:insights
 ```
 
 ```

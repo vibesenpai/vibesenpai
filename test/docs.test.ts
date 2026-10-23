@@ -263,12 +263,12 @@ describe('the plugin is the only front door', () => {
   });
 
   it('shows the slash commands, not the binary, in user-facing samples', () => {
-    // A plugin user types `/agentsensei:session`. `agentsensei session` is what the
+    // A plugin user types `/agentsensei:insights`. `agentsensei insights` is what the
     // command file runs on their behalf, and showing it invites them to try a
     // binary that is not on their PATH.
     const readme = readFileSync('README.md', 'utf8');
     const intro = readme.slice(0, readme.indexOf('## Contributing'));
-    expect(intro).toContain('/agentsensei:session');
+    expect(intro).toContain('/agentsensei:insights');
   });
 
   it('names a way to turn it off', () => {
@@ -302,7 +302,7 @@ describe('the plugin is the only front door', () => {
   });
 
   it('shows plugin users the slash commands, not the binary', () => {
-    // `agentsensei session` is not on a plugin user's PATH — the CLI is what the
+    // `agentsensei insights` is not on a plugin user's PATH — the CLI is what the
     // command file runs on their behalf. Contribute legitimately shows it.
     for (const file of userFacingDocs()) {
       if (/contribut/i.test(file)) continue;

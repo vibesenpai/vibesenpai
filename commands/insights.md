@@ -1,9 +1,9 @@
 ---
-description: What happened in the session you are in
+description: What agentsensei found — this session and your history
 allowed-tools: Bash(node:*)
 ---
 
-!`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" session`
+!`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" insights`
 
 Reproduce the output above in a code block, preserving every line, number and
 column exactly. Add no summary and no commentary: it is evidence, and

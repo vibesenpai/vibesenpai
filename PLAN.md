@@ -303,7 +303,7 @@ re-scan reads zero redundant bytes, this document is split with no orphaned rati
    an untested elision rule is how a skeleton silently drops the decisive turn.
 4. **Windowing**: 6–12 turn sliding windows along the active path, sidechains excluded from main-thread windows.
 5. **Reader modes** (`src/read.ts`): one incremental offset reader, two modes — `catalogued` (up to
-   the recorded offset) and `live` (tails past it for `agentsensei session`). Same code, a parameter.
+   the recorded offset) and `live` (tails past it for `agentsensei insights`). Same code, a parameter.
 6. **Pinned contracts** (`src/types.ts`): the three from the Contracts section — `TurnRef` keyed on
    `uuid`, `Finding` with subject-based identity, and the versioned `Skeleton`. These are the only
    shapes specified before implementation, because each one is persisted and would be wrong-in-place
@@ -313,7 +313,7 @@ re-scan reads zero redundant bytes, this document is split with no orphaned rati
    The shape is settled now because retrofitting it after the detectors exist is the expensive order.
 
 **M1 is done when:** every catalogued session parses without error, the redactor passes its
-planted-secret suite, skeletons hit the 5–10% target, and `agentsensei session` reads the in-flight transcript
+planted-secret suite, skeletons hit the 5–10% target, and `agentsensei insights` reads the in-flight transcript
 of the session it is run from — all on local data only.
 
 **Status: done.** Verified on 231 public transcripts and 4 local sessions — 0 crashes, 0 malformed
@@ -484,7 +484,7 @@ Two items move **earlier** because M6 depends on them being right:
 - `agentsensei config` — prints resolved paths and which layer (flag / env / file / default) set each
 - `git diff` on `~/.claude/settings.json` after a full run — must be empty; the product never writes it
 - `agentsensei skeleton <local-session>` — prints a readable skeleton of a real catalogued session
-- `agentsensei session` run from inside a live Claude Code session — reads the in-flight transcript and
+- `agentsensei insights` run from inside a live Claude Code session — reads the in-flight transcript and
   reports on turns past the last catalogued offset
 - `agentsensei report --since 2026-01-01` — returns prompt-level depth for the pre-catalog period and
   labels it as such, rather than silently returning nothing

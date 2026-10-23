@@ -24,7 +24,7 @@ Three commands:
 
 | | |
 |---|---|
-| `/agentsensei:session` | what happened in the session you are in |
+| `/agentsensei:insights` | what happened in the session you are in |
 | `/agentsensei:fix` | the one change worth making, with the evidence |
 | `/agentsensei:report` | a self-contained HTML report of your history |
 
@@ -42,7 +42,7 @@ read 55.7 MB · copied nothing
 catalog · 16 sessions · ~/.local/share/agentsensei
 ```
 
-The first time you run `/agentsensei:session`, it will also read that session with
+The first time you run `/agentsensei:insights`, it will also read that session with
 the model on your own account and tell you it is doing so. That is the judge,
 it is on from installation, and
 [what it sends and what it costs](/agentsensei/start/sends-and-costs/) is a page
