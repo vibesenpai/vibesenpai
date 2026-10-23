@@ -941,9 +941,18 @@ export function render(input: RenderInput): string {
   // `Findings so far` section at all, and suppressing the lead as well left a
   // session reporting neither findings nor their absence — caught by the test
   // that asserts the nothing-found case is always stated somewhere.
-  const saidBelow = input.judged !== undefined;
-  const nothingFound =
-    saidBelow && findings.length === 0 && judgedCount === 0 && d.editCount > 0;
+  // Suppressed when something else already says it. Two things can:
+  //
+  //   the `Findings so far` block, when the judge is enabled
+  //   the session line itself, when there were no edits — `0 edits` IS the
+  //   statement, and "nothing to analyse — this session made no edits" above
+  //   "under a minute, 0 edits" above "Nothing flagged in this session yet"
+  //   is the same nothing, reported three times
+  //
+  // With the judge off and edits present, neither does, and the lead stays:
+  // "N edits" alone cannot distinguish "found nothing" from "did not look".
+  const saidBelow = input.judged !== undefined || d.editCount === 0;
+  const nothingFound = saidBelow && findings.length === 0 && judgedCount === 0;
   if (!nothingFound) {
     lines.push('', `${INDENT}${leadLine(findings, judgedCount, d, input.events)}`, '');
   } else {

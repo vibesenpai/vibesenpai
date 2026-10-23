@@ -724,10 +724,14 @@ async function cmdInsights(a: Argv): Promise<number> {
   // authoritative-looking output about somebody else's session. Printed *after*
   // the findings, though — it qualifies which session this was, and as the
   // first line it pushed the actual news down the screen.
-  const guessNote =
-    current.via === 'latest'
-      ? `  ${dim('(guessed the most recently written transcript — override with --session)')}`
-      : '';
+  // ── The guess note is gone, and it was a dead end ───────────────────────
+  //
+  // It read `(guessed the most recently written transcript — override with
+  // --session)`. Under D64 the plugin is the only front door: there is no
+  // prompt to pass `--session` from, so the line named a remedy the reader
+  // could not take. A caveat nobody can act on is noise with a hedge on it.
+  //
+  // `--session` still exists on the CLI for anyone debugging the engine.
 
   process.stdout.write(
     renderFindings({
@@ -803,7 +807,6 @@ async function cmdInsights(a: Argv): Promise<number> {
     // the ways out follow everything, because a way out that is not last is
     // not a way out. Both hooks had been printed on either side of the note,
     // which left it sandwiched between them.
-    if (guessNote !== '') console.log(`\n${guessNote}`);
 
     const ways = [
       ...(nextStep === '' ? [] : [['/agentsensei:fix', 'one thing to try, from your history']]),

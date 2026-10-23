@@ -140,8 +140,13 @@ describe('render — evidence is checkable in place', () => {
 
 describe('render — an empty result is not an unanalysed one', () => {
   it('distinguishes "nothing found" from "nothing to analyse"', () => {
+    // The lead used to say `nothing to analyse — this session made no edits`
+    // directly above `This session · 0 edits` and `Nothing flagged in this
+    // session yet` — the same nothing, three times. The denominator on the
+    // session line is the statement now, which is what this test was always
+    // really about: its own comment says so.
     const noEdits = render({ findings: [], denominators: zeros, sessionId: 's', events: [] });
-    expect(noEdits).toContain('no edits');
+    expect(noEdits).toContain('0 edits');
 
     const clean = render({ findings: [], denominators: { ...zeros, editCount: 155 }, sessionId: 's', events: [] });
     // The denominator is what makes the difference legible.
@@ -537,8 +542,7 @@ describe('a mechanism is not a behaviour, sixth instance', () => {
   // mechanism, one of them cache hit rate. This was the sixth, from the same
   // family of numbers.
   const d = (output: number, cacheCreation: number) => ({
-    editCount: 0,
-    unclassifiedTouchCount: 0,
+    ...zeros,
     tokens: { input: 0, output, cacheRead: 0, cacheCreation },
   });
 
