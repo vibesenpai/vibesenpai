@@ -25,7 +25,7 @@ import { gatherReport, type ReportData } from './gather.ts';
 import {
   dueForJudging, findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL,
   type JudgeState, judgeRunning, markJudgeRunning, pendingWork, readJudgeState,
-  tallyByDimension, writeJudgeState,
+  tallyByDimension, writeSettings,
 } from './judge-store.ts';
 import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
@@ -1226,8 +1226,7 @@ function cmdJudge(a: Argv): number {
       console.log('would disable the judge. re-run with --apply.');
       return 0;
     }
-    state.settings.enabled = false;
-    writeJudgeState(config.archive, state);
+    writeSettings(config.archive, { ...state.settings, enabled: false });
     console.log('judge disabled. nothing further will be sent.');
     return 0;
   }
@@ -1290,8 +1289,7 @@ function cmdJudge(a: Argv): number {
     return 0;
   }
 
-  state.settings.enabled = true;
-  writeJudgeState(config.archive, state);
+  writeSettings(config.archive, { ...state.settings, enabled: true });
   console.log('\n  judge enabled. it runs detached, after your turn ends.');
   console.log('  `agentsensei judge --disable --apply` stops it.');
   return 0;

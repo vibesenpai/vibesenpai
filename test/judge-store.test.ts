@@ -8,109 +8,72 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BYTES_PER_TURN, DEFAULT_SETTINGS, dueForJudging, emptyState, findingsFor,
-  readJudgeState, writeJudgeState,
+  readJudgeState, recordPass, recordSpend, writeSettings,
 } from '../src/judge-store.ts';
 
 const archive = (): string => mkdtempSync(join(tmpdir(), 'as-judge-'));
 
-describe('settings', () => {
+describe('settings live alone, and that is the point', () => {
   it('is ON, because the trigger moved rather than the consent', () => {
-    // This asserted `false`, and the reasoning held for a CLI installed from
-    // npm: a detached process spending money while the user is absent is the
-    // Self-Initiated Overreach this tool exists to detect.
-    //
-    // The entry point is now `/plugin install`, and the structural tier alone
-    // is one detector — 4 occurrences across 18 real sessions where the judge
-    // found 19. What keeps the principle intact is that **the `Stop` hook no
-    // longer spawns a pass**: nothing is judged until the user runs a command.
-    // That boundary is asserted in `test/spend-boundary.test.ts`, and it is the
-    // one that matters.
     expect(DEFAULT_SETTINGS.enabled).toBe(true);
     expect(readJudgeState(archive()).settings.enabled).toBe(true);
   });
 
-  it('reads back what was written', () => {
+  it('round-trips', () => {
     const dir = archive();
-    const s = emptyState();
-    s.settings.enabled = true;
-    s.usage = { calls: 2, inputTokens: 80_000, outputTokens: 12_000 };
-    expect(writeJudgeState(dir, s)).toBe(true);
-    const back = readJudgeState(dir);
-    expect(back.settings.enabled).toBe(true);
-    expect(back.usage.inputTokens).toBe(80_000);
+    expect(writeSettings(dir, { ...DEFAULT_SETTINGS, enabled: false, model: 'sonnet' })).toBe(true);
+    const back = readJudgeState(dir).settings;
+    expect(back.enabled).toBe(false);
+    expect(back.model).toBe('sonnet');
   });
 
-  it('falls back to a fresh state rather than throwing on a bad file', () => {
-    // A corrupt store must not stop a session starting — Principle Zero.
+  it('falls back to defaults rather than throwing on a bad file', () => {
+    // Principle Zero: a corrupt file must not stop a session starting.
     const dir = archive();
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'judge.json'), '{ this is not json');
-    const back = readJudgeState(dir);
-    expect(back.settings).toEqual(DEFAULT_SETTINGS);
-    expect(back.findings).toEqual([]);
+    writeFileSync(join(dir, 'judge-settings.json'), '{ this is not json');
+    expect(readJudgeState(dir).settings).toEqual(DEFAULT_SETTINGS);
   });
 
-  // ── A version bump must not cost the user anything ─────────────────────
+  // ── The consent race, which used to be real ──────────────────────────────
   //
-  // The previous code returned `emptyState()` on any version mismatch, which
-  // would have turned the judge OFF for a user who had explicitly enabled it,
-  // and wiped the ledger so every session was re-judged and re-billed from
-  // byte 0. Both are things this project would refuse to do on purpose, so it
-  // must not do them by accident either.
-
-  it('keeps consent and the ledger across a version bump', () => {
+  // Settings shared `judge.json` with the ledger, the findings and the usage
+  // counters. A pass holds whole state in memory for up to six minutes and
+  // rewrote all of it on the way out — so a user who ran `judge --disable
+  // --apply` mid-pass had it silently set back to `true`. The user turns the
+  // model off and the tool turns it on.
+  //
+  // The fix is structural rather than a lock: **no producer opens the settings
+  // file**, so a pass cannot undo a decision it never reads.
+  it('survives a pass that started before the user disabled it', () => {
     const dir = archive();
-    const old = {
-      v: 1,
-      settings: { enabled: true, model: 'haiku', cadence: 50, maxBatchTokens: 60_000 },
-      ledger: { 'session-a': 412_000, 'session-b': 9_100 },
-      findings: [],
-      usage: { calls: 7, inputTokens: 900_000, outputTokens: 40_000 },
-    };
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'judge.json'), JSON.stringify(old));
+    writeSettings(dir, { ...DEFAULT_SETTINGS, enabled: true });
 
-    const back = readJudgeState(dir);
-    expect(back.settings.enabled).toBe(true);
-    expect(back.ledger).toEqual({ 'session-a': 412_000, 'session-b': 9_100 });
-    expect(back.usage.inputTokens).toBe(900_000);
-    expect(back.v).toBe(2);
+    // A pass reads state, including `enabled: true`.
+    const passCopy = readJudgeState(dir);
+    expect(passCopy.settings.enabled).toBe(true);
+
+    // The user disables it while that pass is still running.
+    writeSettings(dir, { ...passCopy.settings, enabled: false });
+
+    // The pass finishes and records everything it produced.
+    recordPass(dir, [], new Map([['some-session', 50_000]]));
+
+    expect(readJudgeState(dir).settings.enabled, 'the user decided; the pass does not get a vote').toBe(false);
   });
 
-  it('keeps a v1 finding that is still anchorable, and drops one that is not', () => {
+  it('records what a call cost even when the work after it fails', () => {
+    // Spend is not conditional on success: the money left the account when the
+    // call returned. The watermark is conditional, because it means "we have
+    // results", and advancing it first is how this project lost paid-for
+    // episodes whenever stage B threw.
     const dir = archive();
-    const old = {
-      v: 1,
-      settings: { enabled: true },
-      ledger: {},
-      // The first has no `name`/`description` — v1 never had them — but it can
-      // still be rendered and pointed at, so discarding it would be a loss for
-      // a cosmetic reason.
-      findings: [
-        { sessionId: 's1', dimension: 'constraint_violation', turns: [42], quote: 'no new deps', why: 'added one', at: 'x' },
-        { sessionId: 's2', dimension: 'misread_intent', why: 'no anchor at all' },
-      ],
-      usage: { calls: 1, inputTokens: 10, outputTokens: 2 },
-    };
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'judge.json'), JSON.stringify(old));
+    recordSpend(dir, { calls: 1, tokensIn: 58_161, tokensOut: 3_962 });
 
     const back = readJudgeState(dir);
-    expect(back.findings).toHaveLength(1);
-    expect(back.findings[0]?.sessionId).toBe('s1');
-    expect(back.settings.enabled).toBe(true);
-  });
-
-  it('does not overwrite the state of a NEWER version of the tool', () => {
-    const dir = archive();
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'judge.json'), JSON.stringify({
-      v: 99, settings: { enabled: true }, ledger: { s: 5 }, findings: [],
-      usage: { calls: 0, inputTokens: 0, outputTokens: 0 },
-    }));
-    const back = readJudgeState(dir);
-    expect(back.settings.enabled).toBe(true);
-    expect(back.ledger).toEqual({ s: 5 });
+    expect(back.usage.calls).toBe(1);
+    expect(back.usage.inputTokens).toBe(58_161);
+    expect(back.ledger, 'no results, so no progress').toEqual({});
   });
 });
 

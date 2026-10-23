@@ -19,6 +19,10 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JudgeDimension } from './judge.ts';
+import {
+  addSpend, advanceLedger, openStore, putEvidence, putOccurrences, readSpend, transact, type Db,
+} from './store.ts';
+import { createHash } from 'node:crypto';
 
 /**
  * v2 carries the extraction record — `quote`, `name`, `description`,
@@ -127,8 +131,19 @@ export function emptyState(): JudgeState {
   };
 }
 
-function pathFor(archive: string): string {
-  return join(archive, 'judge.json');
+/**
+ * Settings live alone, and that is the fix for the consent race.
+ *
+ * They used to share `judge.json` with the ledger, the findings and the usage
+ * counters — so a pass, which holds whole state in memory for up to six
+ * minutes, would rewrite a user's `enabled: false` back to `true` on the way
+ * out. The user turns the model off and the tool turns it on, silently.
+ *
+ * **No producer opens this file.** A pass cannot undo a decision it never
+ * reads, which is a stronger guarantee than any amount of locking.
+ */
+function settingsPath(archive: string): string {
+  return join(archive, 'judge-settings.json');
 }
 
 /**
@@ -157,64 +172,202 @@ function pathFor(archive: string): string {
  * overwriting a newer tool's state.
  */
 export function readJudgeState(archive: string): JudgeState {
+  return {
+    v: VERSION,
+    settings: readSettings(archive),
+    ...readProgress(archive),
+  };
+}
+
+/** Just the consent half. Cheap, and the only part a hook needs synchronously. */
+export function readSettings(archive: string): JudgeSettings {
   try {
-    const raw = JSON.parse(readFileSync(pathFor(archive), 'utf8')) as Partial<JudgeState>;
-    const state = {
-      ...emptyState(),
-      ...raw,
-      v: VERSION,
-      settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
-      ledger: { ...(raw.ledger ?? {}) },
-      usage: { ...emptyState().usage, ...(raw.usage ?? {}) },
-      findings: Array.isArray(raw.findings) ? raw.findings.filter(isReadableFinding) : [],
-    } as JudgeState;
-    return state;
+    const raw = JSON.parse(readFileSync(settingsPath(archive), 'utf8')) as Partial<JudgeSettings>;
+    return { ...DEFAULT_SETTINGS, ...raw };
   } catch {
-    return emptyState();
+    return { ...DEFAULT_SETTINGS };
   }
 }
 
 /**
- * The fields every version has had, and which `renderJudged` needs.
+ * Write the settings, and only the settings.
  *
- * Deliberately minimal: a v1 finding has no `name` or `description`, and
- * dropping it for that would discard sound findings over a cosmetic absence.
- * What cannot be rendered is what cannot be *anchored* — no session, no turns,
- * no quote.
+ * The one write in the judge path that a user initiates, so it is the one
+ * write that must never be clobbered by a background pass.
  */
-function isReadableFinding(f: unknown): boolean {
-  if (typeof f !== 'object' || f === null) return false;
-  const r = f as Record<string, unknown>;
-  return (
-    typeof r['sessionId'] === 'string' &&
-    typeof r['dimension'] === 'string' &&
-    Array.isArray(r['turns']) &&
-    typeof r['quote'] === 'string'
-  );
-}
-
-/** Temp-then-rename, so a crash cannot leave half a ledger. */
-export function writeJudgeState(archive: string, s: JudgeState): boolean {
+export function writeSettings(archive: string, settings: JudgeSettings): boolean {
   try {
     mkdirSync(archive, { recursive: true, mode: 0o700 });
-    const tmp = `${pathFor(archive)}.${process.pid}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(s, null, 2)}\n`, { mode: 0o600 });
-    renameSync(tmp, pathFor(archive));
+    const tmp = `${settingsPath(archive)}.${process.pid}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+    renameSync(tmp, settingsPath(archive));
     return true;
   } catch {
     return false;
   }
 }
 
+/** The ledger, findings and spend, read out of the store. */
+function readProgress(archive: string): Omit<JudgeState, 'v' | 'settings'> {
+  let db: Db | undefined;
+  try {
+    db = openStore(archive);
+    const spend = readSpend(db);
+    const ledger: Record<string, number> = {};
+    for (const row of db.prepare('SELECT session_id, judged_bytes FROM ledger').all()) {
+      ledger[String(row['session_id'])] = Number(row['judged_bytes']);
+    }
+    return {
+      ledger,
+      findings: readJudgedFindings(db),
+      usage: { calls: spend.calls, inputTokens: spend.tokensIn, outputTokens: spend.tokensOut },
+    };
+  } catch {
+    // Principle Zero: an unreadable store must not stop a session starting.
+    return { ledger: {}, findings: [], usage: { calls: 0, inputTokens: 0, outputTokens: 0 } };
+  } finally {
+    db?.close();
+  }
+}
+
 /**
- * Has enough new transcript arrived to be worth an invocation?
+ * Judge findings, reassembled from the fact table.
  *
- * Compared in **bytes**, because that is what the ledger stores and what is
- * cheap to check in a hook that must finish in milliseconds. The cadence is in
- * turns, so this converts with a deliberately rough constant — being slightly
- * early or late costs nothing, while reading the file to count turns would
- * cost the thing the hook cannot spend.
+ * Grouped by occurrence id, because one finding cites several turns and the
+ * store keeps one row per anchored turn — which is the grain that lets the
+ * same data answer "how many files" and "which sessions" as well.
  */
+function readJudgedFindings(db: Db): JudgedFinding[] {
+  const rows = db
+    .prepare(
+      `SELECT o.id, o.session_id, o.dimension, o.reason, o.at, e.anchor, e.quote
+       FROM occurrence o LEFT JOIN evidence e ON e.occurrence_id = o.id
+       WHERE o.tier = 'judge' ORDER BY o.at DESC`,
+    )
+    .all();
+
+  const by = new Map<string, JudgedFinding & { turns: number[] }>();
+  for (const r of rows) {
+    const id = String(r['id']);
+    let f = by.get(id);
+    if (f === undefined) {
+      f = {
+        sessionId: String(r['session_id']),
+        dimension: String(r['dimension']) as JudgedFinding['dimension'],
+        turns: [],
+        why: r['reason'] === null ? '' : String(r['reason']),
+        at: String(r['at']),
+        ...(r['quote'] === null || r['quote'] === undefined ? {} : { quote: String(r['quote']) }),
+      };
+      by.set(id, f);
+    }
+    const seq = Number(r['anchor']);
+    if (Number.isFinite(seq)) f.turns.push(seq);
+  }
+  return [...by.values()];
+}
+
+/**
+ * Record a pass's results: findings and the watermark, together.
+ *
+ * ── Why these two and nothing else ─────────────────────────────────────────
+ *
+ * The function this replaces wrote **whole state** — settings, ledger,
+ * findings and usage — four times per pass, from a copy read up to six
+ * minutes earlier. That is where every race came from. A producer now writes
+ * only what it produced:
+ *
+ * - **not settings**, so a user's `--disable` cannot be undone
+ * - **not spend**, which is recorded separately the moment a call returns,
+ *   because we paid whether or not anything downstream succeeded
+ *
+ * Findings and the watermark go in one transaction, because a watermark means
+ * *"we have results for these bytes"*. Advancing it first — which this project
+ * did, with a comment accepting the cost — loses paid-for episodes whenever
+ * the stage after it throws.
+ */
+export function recordPass(
+  archive: string,
+  findings: JudgedFinding[],
+  offsets: Map<string, number>,
+): boolean {
+  let db: Db | undefined;
+  try {
+    db = openStore(archive);
+    transact(db, () => {
+      if (findings.length > 0) {
+        putOccurrences(
+          db as Db,
+          findings.map((f) => ({
+            id: judgedFindingId(f),
+            sessionId: f.sessionId,
+            dimension: f.dimension,
+            tier: 'judge' as const,
+            subject: f.name ?? f.dimension,
+            confidence: f.confidence ?? 'likely',
+            reason: f.why,
+            at: f.at,
+          })),
+        );
+        putEvidence(
+          db as Db,
+          findings.flatMap((f) =>
+            f.turns.map((t) => ({
+              occurrenceId: judgedFindingId(f),
+              anchor: String(t),
+              // The judge cites turn numbers; its quote is what validates the
+              // citation. Rule findings anchor by uuid instead — see D24.
+              kind: 'turn' as const,
+              ...(f.quote === undefined ? {} : { quote: f.quote }),
+            })),
+          ),
+        );
+      }
+      for (const [id, off] of offsets) advanceLedger(db as Db, id, off);
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
+}
+
+/**
+ * Record what a call cost, on its own.
+ *
+ * Deliberately outside any transaction that could roll back: the money left
+ * the account when the call returned, and a figure that under-reports what we
+ * charged someone is worse than no figure.
+ */
+export function recordSpend(
+  archive: string,
+  delta: { calls?: number; tokensIn?: number; tokensOut?: number },
+): void {
+  let db: Db | undefined;
+  try {
+    db = openStore(archive);
+    addSpend(db, delta);
+  } catch {
+    // Never worth failing a pass over.
+  } finally {
+    db?.close();
+  }
+}
+
+/**
+ * A stable id for a judge finding.
+ *
+ * Content-hashed, which is what makes a retried pass idempotent: the same
+ * episode produces the same id and upserts over itself instead of duplicating.
+ */
+function judgedFindingId(f: JudgedFinding): string {
+  return createHash('sha256')
+    .update(`judge\0${f.sessionId}\0${f.dimension}\0${f.quote ?? f.why.slice(0, 120)}`)
+    .digest('hex')
+    .slice(0, 16);
+}
+
 export const BYTES_PER_TURN = 400;
 
 export function dueForJudging(state: JudgeState, sessionId: string, sizeBytes: number): boolean {

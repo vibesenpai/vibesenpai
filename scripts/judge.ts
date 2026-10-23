@@ -49,7 +49,7 @@ import {
   type JudgeCarry, type JudgePacketSession,
 } from '../src/judge.ts';
 import {
-  clearJudgeRunning, readJudgeState, writeJudgeState, type JudgeState,
+  clearJudgeRunning, readJudgeState, recordPass, recordSpend, type JudgeState,
 } from '../src/judge-store.ts';
 import type { Event } from '../src/types.ts';
 
@@ -158,8 +158,8 @@ async function main(): Promise<void> {
 
   if (sessions.length === 0) {
     if (offsets.size > 0) {
-      for (const [id, off] of offsets) state.ledger[id] = off;
-      writeJudgeState(config.archive, state);
+      // Nothing was sent, so nothing was spent — only the watermark moves.
+      recordPass(config.archive, [], offsets);
     }
     return;
   }
@@ -228,13 +228,20 @@ async function main(): Promise<void> {
 
   // Ledger and usage first. If anything below throws, the batch is still marked
   // paid for, because it was.
-  for (const [id, off] of offsets) state.ledger[id] = off;
-  state.usage = {
-    calls: state.usage.calls + 1,
-    inputTokens: state.usage.inputTokens + extracted.inputTokens,
-    outputTokens: state.usage.outputTokens + extracted.outputTokens,
-  };
-  writeJudgeState(config.archive, state);
+  // ── Spend now; progress later ────────────────────────────────────────────
+  //
+  // The call returned, so we paid — that is true whatever stage B does, and a
+  // spend figure conditional on later success under-reports what we charged.
+  //
+  // The watermark deliberately does **not** move here. It used to, with a
+  // comment accepting that a stage-B failure then loses these episodes
+  // permanently. It advances with the findings instead, so a failure re-bills
+  // rather than silently discarding results already paid for.
+  recordSpend(config.archive, {
+    calls: 1,
+    tokensIn: extracted.inputTokens,
+    tokensOut: extracted.outputTokens,
+  });
 
   const { episodes } = parseExtract(extracted.reply, batch);
   if (episodes.length === 0) {
@@ -265,17 +272,17 @@ async function main(): Promise<void> {
     recordFailure(config.archive, `judge label call failed; ${episodes.length} episode(s) unlabelled`);
     return;
   }
-  state.usage = {
-    calls: state.usage.calls + 1,
-    inputTokens: state.usage.inputTokens + labelled.inputTokens,
-    outputTokens: state.usage.outputTokens + labelled.outputTokens,
-  };
-  writeJudgeState(config.archive, state);
+  recordSpend(config.archive, {
+    calls: 1,
+    tokensIn: labelled.inputTokens,
+    tokensOut: labelled.outputTokens,
+  });
 
   const { findings } = parseLabels(labelled.reply, episodes);
   const at = new Date().toISOString();
-  state.findings = [...state.findings, ...findings.map((f) => ({ ...f, at }))];
-  writeJudgeState(config.archive, state);
+  // Findings and the watermark in one transaction. Either we have results for
+  // these bytes and say so, or we do not and they are judged again.
+  recordPass(config.archive, findings.map((f) => ({ ...f, at })), offsets);
   recordSuccess(config.archive);
 }
 

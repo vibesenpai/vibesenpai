@@ -128,11 +128,21 @@ CREATE TABLE IF NOT EXISTS occurrence (
 CREATE INDEX IF NOT EXISTS occurrence_session ON occurrence(session_id);
 CREATE INDEX IF NOT EXISTS occurrence_dim     ON occurrence(dimension, subject);
 
+-- What an occurrence points at. The two tiers anchor differently and the
+-- column names say so rather than pretending otherwise:
+--
+--   rule tier   a uuid, per D24 - a seq is a position on the active path and
+--               moves when a rewind changes which branch is live
+--   judge tier  a turn number, because that is what the model cites, and its
+--               quote is what actually validates the citation
+--
+-- Storing a turn in a column named uuid would have been a quiet lie.
 CREATE TABLE IF NOT EXISTS evidence (
   occurrence_id TEXT NOT NULL,
-  uuid          TEXT NOT NULL,
+  anchor        TEXT NOT NULL,   -- a uuid or a turn number, per kind
+  kind          TEXT NOT NULL,   -- 'uuid' | 'turn'
   quote         TEXT,
-  PRIMARY KEY (occurrence_id, uuid)
+  PRIMARY KEY (occurrence_id, anchor)
 );
 
 -- How far we have results. Advances only with the data it describes.
@@ -327,6 +337,18 @@ export function putOccurrences(db: Db, rows: OccurrenceRow[]): void {
       r.at,
     );
   }
+}
+
+/** The turns a finding cites. One row per turn, keyed by the occurrence. */
+export function putEvidence(
+  db: Db,
+  rows: { occurrenceId: string; anchor: string; kind: 'uuid' | 'turn'; quote?: string }[],
+): void {
+  const put = db.prepare(
+    `INSERT INTO evidence(occurrence_id, anchor, kind, quote) VALUES (?, ?, ?, ?)
+     ON CONFLICT(occurrence_id, anchor) DO UPDATE SET quote = excluded.quote`,
+  );
+  for (const r of rows) put.run(r.occurrenceId, r.anchor, r.kind, r.quote ?? null);
 }
 
 /** Occurrences for one session, newest first. */
