@@ -19,8 +19,12 @@
  * SessionStart → spawn detached, print NOTHING, exit
  *                      ↓ (parses every transcript, ~500ms for 4)
  *                writes standing.json
- * Stop (often)  → notices it, and the statusline renders it
+ * next SessionStart → reads it, renders the block
  * ```
+ *
+ * The reader is the session-start block, one session later. That lag is the
+ * design, not a shortfall: the thing being described is your history, which
+ * does not change while you read it.
  *
  * Nothing is computed in a hook and nothing is printed from one. That last part
  * is a deliberate improvement on the original design, which had `SessionStart`
@@ -30,9 +34,20 @@
  *
  * ── Why a stored file rather than computing on demand ────────────────────
  *
- * Parsing is 95% of the cost and scales with history, so a statusline could
- * never do it. The file is the handoff between a slow producer and a fast
- * reader, exactly like the queue.
+ * Parsing is 95% of the cost and scales with history, so no synchronous
+ * surface could do it. The file is the handoff between a slow producer and an
+ * instant reader — the pattern the whole pipeline now follows.
+ *
+ * ── Why this one stayed a flat file when findings moved to SQLite ────────
+ *
+ * It is a **full recompute**: every pass reads all of history and writes the
+ * whole answer, so two passes converge and last-writer-wins is *correct* here
+ * rather than a lost update. It is also under a kilobyte, and four of its
+ * fields — `edits`, `tokens`, `wastedTokens`, `unreadable` — are session
+ * aggregates with no row in the occurrence table to derive them from.
+ *
+ * The atomic findings moved to the store because **that** is where losing a
+ * subject was silent and permanent. This file lost nothing.
  */
 
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
