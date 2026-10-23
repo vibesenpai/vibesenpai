@@ -28,10 +28,28 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { isTripped, readBreaker } from '../src/breaker.ts';
-import { readJudgeState, tallyByDimension } from '../src/judge-store.ts';
+import {
+  hasDisclosed, markDisclosed, readJudgeState, tallyByDimension,
+} from '../src/judge-store.ts';
 import { resolveConfig } from '../src/config.ts';
 import { isFresh, markStarted, readStanding } from '../src/standing.ts';
 import { detailLine, reportBlock } from '../src/report-line.ts';
+
+/**
+ * Said once per machine, never again.
+ *
+ * Deliberately short and factual. It names what will happen, on whose
+ * account, roughly what it costs, and how to stop — and nothing else. A notice
+ * that argues for itself is a notice people learn to skip.
+ */
+const DISCLOSURE = [
+  '',
+  'agentsensei reads your sessions with the model on your own account —',
+  'about 58k tokens a session, in the background, after a turn finishes.',
+  'Nothing is sent anywhere else, and the text is redacted before it leaves.',
+  'To stop it: /plugin disable agentsensei',
+  '',
+].join('\n');
 
 function main(): void {
   if (process.env['AGENTSENSEI_DISABLE'] === '1') return;
@@ -43,12 +61,26 @@ function main(): void {
   // degrading to stale is better than degrading to silent.
   // The hook knows where this checkout is, which is what lets the detail line
   // name a command that actually runs here.
+  const state = readJudgeState(config.archive);
   const block = reportBlock(
     readStanding(config.archive),
     detailLine(join(import.meta.dirname, '..'), homedir()),
-    tallyByDimension(readJudgeState(config.archive)),
+    tallyByDimension(state),
   );
-  if (block !== '') process.stdout.write(JSON.stringify({ systemMessage: block }));
+
+  // ── The one-time disclosure, on the only channel that reaches a user ─────
+  //
+  // The judge ships on, so the first time it is about to spend, the user is
+  // told once. It cannot be said by the producer: the `Stop` hook spends, and
+  // hooks print nothing (Principle One). `systemMessage` at session start is
+  // the one surface that renders in the user's own window, so the notice
+  // belongs here — prepended to the report rather than sent on its own, so it
+  // is one message and not two.
+  const notice = state.settings.enabled && !hasDisclosed(config.archive) ? DISCLOSURE : '';
+  if (notice !== '') markDisclosed(config.archive);
+
+  const message = `${notice}${block}`;
+  if (message !== '') process.stdout.write(JSON.stringify({ systemMessage: message }));
 
   if (isTripped(readBreaker(config.archive))) return;
 

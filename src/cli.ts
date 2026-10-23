@@ -1107,7 +1107,15 @@ function cmdJudge(a: Argv): number {
         `  pending    ${pending} session(s) · about ${humanDuration(seconds)} at ~${JUDGE_SECONDS_PER_CALL}s per call`,
       );
       console.log('');
-      console.log(`  ${dim(state.settings.enabled ? 'runs detached after your next turn ends.' : 'nothing will run until you enable it.')}`);
+      // The trigger is the `Stop` hook now, not a command and not "the next
+      // turn" in any sense a user controls. Say which thing fires it.
+      console.log(
+        `  ${dim(
+          state.settings.enabled
+            ? 'reads a session in the background when a turn finishes.'
+            : 'disabled — nothing will be read or sent.',
+        )}`,
+      );
     }
     if (state.usage.calls > 0) {
       console.log('');

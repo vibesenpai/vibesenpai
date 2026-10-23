@@ -151,3 +151,35 @@ describe('a pass cannot overlap itself', () => {
     expect(pass).toMatch(/clearJudgeRunning/);
   });
 });
+
+describe('the first spend is disclosed once', () => {
+  // The judge ships on, so a user must be told before it spends — and told by
+  // something they can actually see. The producer cannot do it: the `Stop`
+  // hook spends, and hooks print nothing (Principle One). `systemMessage` at
+  // session start renders in the user's own window, so that is where it goes.
+  const hook = code('scripts/hook-session-start.ts');
+
+  it('says what will happen, on whose account, and how to stop', () => {
+    expect(hook).toMatch(/on your own account/);
+    expect(hook).toMatch(/58k tokens/);
+    expect(hook).toMatch(/plugin disable agentsensei/);
+  });
+
+  it('goes out through systemMessage, not the model channel', () => {
+    // `additionalContext` would put the tool inside the session it measures,
+    // which is the observer effect this project refuses — see D11/D58.
+    expect(hook).toMatch(/systemMessage/);
+    expect(hook).not.toMatch(/additionalContext/);
+  });
+
+  it('is gated on having not said it before, and records that it did', () => {
+    expect(hook).toMatch(/!hasDisclosed\(config\.archive\)/);
+    expect(hook).toMatch(/markDisclosed\(config\.archive\)/);
+  });
+
+  it('is one message, not two', () => {
+    // Prepended to the report rather than written separately: two
+    // `systemMessage` writes from one hook is one of them being discarded.
+    expect(hook).toMatch(/\$\{notice\}\$\{block\}/);
+  });
+});

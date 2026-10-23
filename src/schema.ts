@@ -15,18 +15,19 @@ export const SCHEMA = {
   event: 1,
   /** `Skeleton` — also the verdict cache key and the future team wire format. */
   skeleton: 1,
-  /** `Finding` — persisted in SQLite, read back by the running score. */
+  /** `Finding` — persisted as atomic occurrences; see `src/store.ts`. */
   finding: 1,
   /** The catalog's `index.json`. Bump forces a full re-read of all sources. */
   catalog: 1,
-  /** SQLite migrations. Bump on every forward migration. */
-  store: 1,
   /**
-   * The learned verification registry — which commands check code in which
-   * project. Bump discards what was learned and forces rediscovery, which costs
-   * a cold start rather than wrong findings.
+   * The SQLite store. Bump on every forward migration.
+   *
+   * Written to `meta.schema_version` when the store is created. There is no
+   * migration from the flat files it replaced, deliberately: nothing was
+   * published, and everything in it is re-derived from transcripts we do not
+   * own, so the cost of discarding a v0 archive is one re-scan.
    */
-  verification: 1,
+  store: 1,
 } as const;
 
 export type SchemaName = keyof typeof SCHEMA;
