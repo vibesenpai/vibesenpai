@@ -56,19 +56,9 @@ Nine terms do most of the work in this document.
 
 Five stages, in order. Everything in Part II is one of these explained properly.
 
-```mermaid
-flowchart LR
-  A["transcripts<br/>on disk"] --> B["catalog<br/>track, never copy"]
-  B --> C["parse<br/>into events"]
-  C --> D["detect<br/>into findings"]
-  D --> E["surface<br/>to you"]
-
-  classDef done fill:#1a4d2e,stroke:#2d8659,color:#fff
-  classDef next fill:#4d3a1a,stroke:#997a2d,color:#fff
-  classDef plan fill:#2a2a35,stroke:#555,color:#aaa
-  class A,B,C done
-  class D,E plan
-```
+> **The pipeline shape diagram was deleted** — it greyed out `detect` and `surface` as unbuilt — both ship — and had no judge stage at all.
+>
+> Redrawn from the code in [`site/.../architecture/overview.md`](../site/src/content/docs/architecture/overview.md).
 
 **One rule governs the whole flow: nothing is ever copied.** Sources are read in place, from the
 offset the catalog remembers, and only derived data is persisted.
@@ -251,34 +241,9 @@ Each of the 40 [dimensions](dimensions.md) is a detector that looks at a window 
 a finding, with evidence, or stays silent. They are tried in order of cost, and escalation happens
 only when cheaper methods cannot answer.
 
-```mermaid
-flowchart TD
-  E["window"] --> R{"rules · M2a<br/>free, under 5ms"}
-  R -->|"certain"| F["Finding"]
-  R -->|"no signal"| N["no finding"]
-  R -->|"needs similarity"| EM{"embeddings · M5<br/>EmbeddingGemma-300m"}
-
-  EM -->|"candidates only<br/>NEVER decides"| NL{"NLI cross-encoder · M5<br/>entailment / contradiction"}
-  EM -->|"needs a judgment"| CL{"SetFit head · M5<br/>kilobytes"}
-  CL --> F
-
-  NL -->|"contradiction"| F
-  NL -->|"neutral / entailment"| N
-  NL -->|"no model installed"| UN["report unknown<br/>never guess"]
-
-  NL -.-> J{"local LLM judge"}
-  J -.-> F
-  J -.- JN["contingency only · not built<br/>built only if NLI fails on the gold set"]
-
-  classDef free fill:#1a4d2e,stroke:#2d8659,color:#fff
-  classDef paid fill:#1a3a4d,stroke:#2d6686,color:#fff
-  classDef unbuilt fill:#2a2a35,stroke:#777,color:#999,stroke-dasharray: 5 4
-  classDef note fill:#1c1c22,stroke:#555,color:#999
-  class R free
-  class EM,NL,CL paid
-  class J unbuilt
-  class JN note
-```
+> **The detection cascade diagram was deleted** — it rendered the full NLI cascade — embeddings, a cross-encoder, SetFit, a local LLM — **none of which was built**, directly above its own SUPERSEDED banner.
+>
+> Redrawn from the code in [`site/.../architecture/two-tiers.md`](../site/src/content/docs/architecture/two-tiers.md).
 
 > ⚠ **SUPERSEDED.** The three paragraphs that stood here described an
 > embeddings → NLI cross-encoder → local-LLM cascade, with the local model as a
@@ -319,19 +284,7 @@ Four edits to the same file with tests failing in between looks identical whethe
 flailing or converging. The only thing that separates them is **how it ended** — so the loop-shaped
 dimensions cannot be judged until the outcome is known.
 
-```mermaid
-stateDiagram-v2
-  [*] --> analysing
-  analysing --> converged: failures to zero<br/>or terminal pass<br/>or files committed
-  analysing --> reverted: snapshot restore<br/>or destructive git
-  analysing --> abandoned: ends failing,<br/>no commit
-  analysing --> unknown: no verification signal<br/>not a git repo<br/>tests run elsewhere
-
-  converged --> [*]: credited as a strength
-  reverted --> [*]: rework confirmed
-  abandoned --> [*]: rework confirmed
-  unknown --> [*]: SILENT
-```
+> **The outcome classifier diagram was deleted** — it described `outcome.ts`, which does not exist; the reasoning survives in `src/types.ts`.
 
 **The fourth state is the entire safety mechanism.** `rework_loop` fires only on `abandoned` or
 `reverted`. On `unknown` it does not fire at all.
@@ -355,40 +308,9 @@ Under one hard constraint: **nothing may interrupt you.** The worst acceptable o
 nudge goes unnoticed. Analysis therefore never runs inside a hook — a hook's job is to move bytes and
 exit.
 
-```mermaid
-sequenceDiagram
-  participant U as You
-  participant H as Harness
-  participant K as Hooks
-  participant W as Detached worker
-  participant S as Store
-  participant L as Statusline
-
-  Note over K: every hook: timeout set, exits 0 unconditionally
-
-  H->>K: SessionStart
-  K->>S: read pre-computed aggregate
-  K-->>H: statistics only, no instructions
-  H-->>U: "last 7d: 14 sessions, 72% verified ↑5%"
-
-  U->>H: prompt
-  H-->>U: response
-  H->>K: Stop
-  K->>S: drain findings the worker finished
-  K->>L: update the nudge
-  K->>S: append new transcript bytes
-  K->>W: spawn, if a window just closed
-  K-->>H: exit 0, under 10ms
-  W->>S: write findings as each window completes
-
-  H->>K: PreCompact
-  K->>S: capture state BEFORE context is summarised away
-  Note over K,S: the only irreplaceable capture
-
-  H->>K: SessionEnd
-  K->>S: finalise, resolve provisional findings
-  Note over S: nothing surfaces — nobody is watching
-```
+> **The hook lifecycle diagram was deleted** — it showed a Statusline participant (removed, D58), a queue (deleted, D57), and `PreCompact`/`SessionEnd` hooks that were never built.
+>
+> Redrawn from the code in [`site/.../architecture/phases.md`](../site/src/content/docs/architecture/phases.md).
 
 **The queue is what keeps hooks fast.** A `Stop` hook runs after every single response, so running
 detectors inside it would add latency to all of them. Instead it drains whatever the previous worker
@@ -424,26 +346,7 @@ The harness is the primary surface; the CLI is secondary. Installation is two sl
 **Claude Code writes its own configuration** — which is why this path is preferred over any installer
 of ours.
 
-```mermaid
-sequenceDiagram
-  participant U as You
-  participant H as Claude Code
-  participant A as agentsensei
-
-  U->>H: /plugin marketplace add crozzfire/agentsensei
-  U->>H: /plugin install agentsensei
-  Note over H: the HARNESS registers the commands<br/>and hooks. we write nothing.
-
-  H->>A: SessionStart, first run
-  A-->>H: "34 sessions found, not yet analysed"
-  H-->>U: relayed by the model
-  Note over U,H: discovery happens where you already are
-
-  U->>H: /agentsensei:setup
-  A->>A: catalog and analyse, rules only
-  A-->>U: your first report — no download needed
-  A-->>U: optional: statusline nudge? semantic models?
-```
+> **The install flow diagram was deleted** — it showed `/plugin marketplace add` driving an `/agentsensei:setup` command that does not exist.
 
 Two things about this flow are deliberate.
 
@@ -467,38 +370,7 @@ statusline. The CLI mirrors all of it for CI and scripting.
 
 Layers, top to bottom. Arrows are dependency direction.
 
-```mermaid
-flowchart TD
-  subgraph entry["Entry"]
-    CLI["cli.ts ✅"]
-    HOOK["scripts/*.sh 📋"]
-  end
-  subgraph core["Analysis"]
-    PAR["parsers/claude-code.ts ✅"]
-    RED["redact.ts 🔨"]
-    SKE["skeleton.ts 📋"]
-    DET["detectors/*.ts 📋"]
-    OUT["outcome.ts 📋"]
-    SCO["score.ts 📋"]
-  end
-  subgraph infra["Foundation"]
-    CFG["config.ts ✅"]
-    CAT["catalog.ts ✅"]
-    STO["store.ts 📋"]
-    TYP["types.ts ✅"]
-    BAK["backends/*.ts 📋"]
-  end
-
-  entry --> core
-  core --> infra
-
-  classDef done fill:#1a4d2e,stroke:#2d8659,color:#fff
-  classDef next fill:#4d3a1a,stroke:#997a2d,color:#fff
-  classDef plan fill:#2a2a35,stroke:#555,color:#aaa
-  class CLI,CFG,CAT,TYP,PAR done
-  class RED next
-  class HOOK,SKE,DET,OUT,SCO,STO,BAK plan
-```
+> **The module map diagram was deleted** — four of its eleven modules do not exist, and it omits more than twenty that do.
 
 | Module | Owns | Must not |
 |---|---|---|
