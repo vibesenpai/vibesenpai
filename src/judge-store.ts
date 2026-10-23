@@ -446,7 +446,7 @@ export function tallyByDimension(state: JudgeState): { dimension: string; count:
  * A judge pass is slow enough to overlap itself.
  *
  * The ledger only advances once stage A returns — about thirty seconds — so
- * two `/agentsensei:now` calls inside that window both see the same offset,
+ * two `/agentsensei:session` calls inside that window both see the same offset,
  * both decide the session is due, and **both spend ~58k tokens on the same
  * bytes.** Measured: two invocations produced two independent passes.
  *

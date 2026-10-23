@@ -20,7 +20,7 @@
  * ── Why it is terse ────────────────────────────────────────────────────────
  *
  * This prints at the top of every session. Anything that is not worth reading
- * every single time is worth putting in `agentsensei now` instead, which is
+ * every single time is worth putting in `agentsensei session` instead, which is
  * why file churn never appears here and the dimension list is capped.
  */
 
@@ -130,7 +130,7 @@ export function costLine(s: Standing): string {
 /**
  * Is a command actually runnable, or would telling someone to type it be a lie?
  *
- * The report used to end with `` `agentsensei now` for this session `` on every
+ * The report used to end with `` `agentsensei session` for this session `` on every
  * machine. **On the machine it was written on, that command does not exist** —
  * no build, nothing on PATH. The single actionable line in the most-seen output
  * the tool has pointed at something that could only fail, which is the fastest
@@ -140,7 +140,7 @@ export function costLine(s: Standing): string {
  */
 export function commandPath(home: string): string {
   // The namespaced location: `.claude/commands/agentsensei/now.md` is
-  // `/agentsensei:now`. See `src/install.ts`.
+  // `/agentsensei:session`. See `src/install.ts`.
   return join(home, '.claude', 'commands', 'agentsensei', 'now.md');
 }
 
@@ -149,13 +149,13 @@ export function commandPath(home: string): string {
  *
  * `/agentsensei` when the command file is installed, the working `node …` form
  * when it is not. **Checked, never assumed** — the first version printed
- * `agentsensei now` unconditionally, and on the machine it was written on that
+ * `agentsensei session` unconditionally, and on the machine it was written on that
  * command did not exist. The one actionable line in the most-seen output the
  * tool has pointed at something that could only fail.
  */
 export function detailLine(repoRoot: string, home: string): string {
   return existsSync(commandPath(home))
-    ? '/agentsensei:now for the exact turns'
+    ? '/agentsensei:session for the exact turns'
     : `node --experimental-strip-types ${repoRoot}/src/cli.ts now`;
 }
 

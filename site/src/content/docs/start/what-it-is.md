@@ -24,7 +24,7 @@ place, and copies nothing.
 
 Three things, in order of how much you will use them:
 
-**`agentsensei now`** — what happened in the session you are in. Findings with
+**`agentsensei session`** — what happened in the session you are in. Findings with
 the turns they came from, plus what the session cost in tokens and how that
 compares to the corpus median.
 

@@ -383,7 +383,7 @@ describe('standing — "sit tight" while the first pass runs', () => {
 });
 
 describe('install — commands are namespaced by their directory', () => {
-  it('nests them so they read as /agentsensei:now and :fix', () => {
+  it('nests them so they read as /agentsensei:session and :fix', () => {
     // A command at `.claude/commands/agentsensei/fix.md` is `/agentsensei:fix`;
     // the same file flat is `/agentsensei-fix`. From the harness changelog:
     // "Restored namespacing in command names based on subdirectories".

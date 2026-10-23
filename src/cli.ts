@@ -120,7 +120,7 @@ Usage
   agentsensei doctor             harnesses, paths, parser coverage
   agentsensei config             resolved values and which layer set each
   agentsensei skeleton <id>      print a session's windows as evidence
-  agentsensei now                the session you are in, read live
+  agentsensei session                the session you are in, read live
   agentsensei report             retrospective over a date range
   agentsensei standing          what your history says (the baseline)
   agentsensei fix               one evidence-backed change to try
@@ -464,7 +464,7 @@ function cmdSkeleton(a: Argv): number {
  * The in-session view. Reads live by definition — the point is the turns that
  * have happened since the last scan, which is to say the ones you just made.
  */
-async function cmdNow(a: Argv): Promise<number> {
+async function cmdSession(a: Argv): Promise<number> {
   const { config } = configFromFlags(a);
   const flagSession = a.flags['session'];
   const current = resolveCurrentSession(config.sources, {
@@ -741,11 +741,11 @@ function cmdInstall(a: Argv): number {
   // nothing to do. It only escaped notice because `describeChange` also lists
   // untouched keys, which kept the list non-empty by accident.
   const wanted: [string, string, string][] = [
-    [commandFilePath(home), '/agentsensei:now', commandFileBody(repoRoot(), process.execPath, isCompiled())],
+    [commandFilePath(home), '/agentsensei:session', commandFileBody(repoRoot(), process.execPath, isCompiled())],
     [fixCommandFilePath(home), '/agentsensei:fix', fixCommandBody(repoRoot(), process.execPath, isCompiled())],
     [
       generateReportCommandFilePath(home),
-      '/agentsensei:generate-report',
+      '/agentsensei:report',
       generateReportCommandBody(repoRoot(), process.execPath, isCompiled()),
     ],
   ];
@@ -994,9 +994,9 @@ function cmdUninstall(a: Argv): number {
   console.log('this would change:');
   for (const l of change) console.log(l);
   for (const [p_, name] of [
-    [commandFilePath(home), '/agentsensei:now'],
+    [commandFilePath(home), '/agentsensei:session'],
     [fixCommandFilePath(home), '/agentsensei:fix'],
-    [generateReportCommandFilePath(home), '/agentsensei:generate-report'],
+    [generateReportCommandFilePath(home), '/agentsensei:report'],
   ] as const) {
     console.log(`  ${existsSync(p_) ? 'command (exists)' : 'command (new)   '}  ${name.padEnd(17)} ${p_}`);
   }
@@ -1482,8 +1482,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdConfig(a);
     case 'skeleton':
       return cmdSkeleton(a);
-    case 'now':
-      return cmdNow(a);
+    case 'session':
+      return cmdSession(a);
     case 'report':
       return cmdReport(a);
     case 'standing':

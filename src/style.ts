@@ -6,7 +6,7 @@
  * There are two paths out of this tool and they need different things:
  *
  *   `node src/cli.ts now`   a real terminal. ANSI renders.
- *   `/agentsensei:now`      the command body says "show the output exactly as
+ *   `/agentsensei:session`      the command body says "show the output exactly as
  *                           it is", so the text reaches the reader *through
  *                           the model*. Escape codes would arrive as literal
  *                           `^[[1m` and the reproduction would be garbage.

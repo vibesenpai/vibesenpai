@@ -1,5 +1,5 @@
 ---
-description: Write a self-contained HTML report of your sessions
+description: A self-contained HTML report of your history
 allowed-tools: Bash(node:*)
 ---
 

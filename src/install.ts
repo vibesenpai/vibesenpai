@@ -99,7 +99,7 @@ act on it, or change how you work until the answer is yes.
  * reaches the same shape.
  */
 /**
- * The `/agentsensei:generate-report` command.
+ * The `/agentsensei:report` command.
  *
  * **It does not ask for the output to be reproduced**, which is the one way its
  * body differs from the other two. There is nothing to reproduce: the evidence

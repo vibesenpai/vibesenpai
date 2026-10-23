@@ -9,9 +9,9 @@ Typed in Claude Code, once the plugin is installed.
 
 | | |
 |---|---|
-| `/agentsensei:now` | What happened in the session you are in. Renders instantly from what has already been analysed, then reads this session with the model. |
+| `/agentsensei:session` | What happened in the session you are in. Renders instantly from what has already been analysed, then reads this session with the model. |
 | `/agentsensei:fix` | One change worth making, with the evidence for it — or a plain statement that no fix exists. |
-| `/agentsensei:generate-report` | Writes a self-contained HTML report of your history and prints the path. No JavaScript, no external resources, mode 0600. |
+| `/agentsensei:report` | Writes a self-contained HTML report of your history and prints the path. No JavaScript, no external resources, mode 0600. |
 
 `/plugin disable agentsensei` turns everything off.
 

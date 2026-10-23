@@ -5,7 +5,7 @@
  *
  * `catalogued` reads up to the byte offset the catalog recorded, and nothing
  * past it. `live` reads whatever is on disk right now, including bytes written
- * since the last scan — that is what makes `agentsensei now` able to say
+ * since the last scan — that is what makes `agentsensei session` able to say
  * anything about the session you are sitting in.
  *
  * They are the same code with a different end offset, deliberately. Two readers

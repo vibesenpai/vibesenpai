@@ -6,7 +6,7 @@ description: How to read what the tool prints, and why "no findings" is a real r
 Run it:
 
 ```
-/agentsensei:now
+/agentsensei:session
 ```
 
 ```
@@ -64,7 +64,7 @@ not a verdict.
 ## Across your history
 
 ```
-/agentsensei:generate-report
+/agentsensei:report
 ```
 
 It writes a self-contained HTML file — no JavaScript, no external resources,

@@ -87,7 +87,7 @@ agentsensei/
   hooks/
     hooks.json                 # Claude Code   — ${extensionPath}
   scripts/                     # ONE set of entrypoints, harness-agnostic by design
-  commands/                    # /agentsensei:now|why|fix|report  (+ optional bare /sensei)
+  commands/                    # /agentsensei:session|why|fix|report  (+ optional bare /sensei)
 
   # later, verified as mostly-manifest work:
   # .codex-plugin/plugin.json  + hooks/codex-hooks.json   — ${PLUGIN_ROOT}, statusMessage
@@ -412,7 +412,7 @@ disables live surfacing entirely, leaving `/sensei:now` and `report`. For many u
 right setting, and the tool loses nothing essential — the value proposition does not depend on
 nudging anyone.
 
-### `/agentsensei:now` and `/agentsensei:fix` — slash commands, without a plugin
+### `/agentsensei:session` and `/agentsensei:fix` — slash commands, without a plugin
 
 Custom commands live in `.claude/commands/`, and `` !`cmd` `` in the body runs a
 shell command and injects its output, gated by `allowed-tools` in the
@@ -422,7 +422,7 @@ frontmatter — verified in Anthropic's own `commit-commands`.
 `commit-commands:commit` are plugin commands, but the harness namespaces nested
 user commands the same way: *"Restored namespacing in command names based on
 subdirectories … `.claude/commands/frontend/component.md` is now
-`/frontend:component`"*. So `commands/agentsensei/now.md` is `/agentsensei:now`,
+`/frontend:component`"*. So `commands/agentsensei/now.md` is `/agentsensei:session`,
 written by `agentsensei install` and removed by `uninstall` — **no plugin
 packaging**, which is what makes it affordable before M3.
 
@@ -440,7 +440,7 @@ breaks it until re-install.
 
 ```
   agentsensei init                    detect harnesses, install plugins (asks first)
-  agentsensei now                     report on the current / most recent session
+  agentsensei session                     report on the current / most recent session
   agentsensei report --last 7d        retrospective; --since/--until/--project
   agentsensei trends --weekly         improvement over time
   agentsensei explain <id>            the evidence: exact turns, verbatim
@@ -469,7 +469,7 @@ Earlier drafts of this document wrote `/sensei`, which was simply wrong.
 
 Two consequences, and the audience decides them:
 
-- **The plugin is named `agentsensei`, not `sensei`** — giving `/agentsensei:now`. Shipping to
+- **The plugin is named `agentsensei`, not `sensei`** — giving `/agentsensei:session`. Shipping to
   strangers means the plugin namespace is shared with everything else they install, and a generic
   `sensei` invites collision. The npm package and plugin name match, which also avoids explaining a
   discrepancy in the README.
@@ -480,7 +480,7 @@ Two consequences, and the audience decides them:
 The plugin ships these (shown with the shortcut installed; otherwise `/agentsensei:*`):
 
 ```
-/sensei:now              report on the current session        → agentsensei now
+/sensei:now              report on the current session        → agentsensei session
 /sensei:why <id>         the evidence, verbatim turns         → agentsensei explain <id>
 /sensei:report [7d|30d]  retrospective over recent history    → agentsensei report --last
 /sensei:fix              the one next action + evidence       → agentsensei fix
@@ -628,13 +628,13 @@ as the unit.
 These are different products sharing a detector core, and a flat command list
 (`scan`/`report`/`dashboard`) hides that. Separating them changes what M1 must support.
 
-### A. Live — `agentsensei now`
+### A. Live — `agentsensei session`
 
-Run it mid-session, in another terminal or via `!agentsensei now`, and get a report on the session you are
+Run it mid-session, in another terminal or via `!agentsensei session`, and get a report on the session you are
 in right now. This is the habit loop: feedback while it can still change the session's outcome.
 
 ```
-$ agentsensei now
+$ agentsensei session
 
 agentsensei · current session · 47 turns, 2h14m
 

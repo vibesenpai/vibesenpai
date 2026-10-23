@@ -4,7 +4,7 @@
  * ── Why this boundary moved, and why it moved back ─────────────────────────
  *
  * The judge used to fire from the `Stop` hook on a cadence. That was replaced
- * by firing from `/agentsensei:now`, on the reasoning that asking about a
+ * by firing from `/agentsensei:session`, on the reasoning that asking about a
  * session is a fair moment to read it — and it was wrong for a reason the
  * pipeline model made obvious: it put a producer inside a reader. The command
  * said "now", looked like a view, and charged ~58k tokens for it.
@@ -68,12 +68,12 @@ describe('the Stop hook is the producer', () => {
 describe('no command spends', () => {
   const cli = code('src/cli.ts');
 
-  it('`now` renders what exists and starts nothing', () => {
+  it('`session` renders what exists and starts nothing', () => {
     // The whole reason this surface is worth typing is that it is instant —
     // measured at 0.41s. A command that waits on a model is a different
     // product, and a command that spawns one silently is a worse one.
-    const cmd = /async function cmdNow[\s\S]*?\n}/.exec(cli)?.[0] ?? '';
-    expect(cmd, 'cmdNow not found').not.toBe('');
+    const cmd = /async function cmdSession[\s\S]*?\n}/.exec(cli)?.[0] ?? '';
+    expect(cmd, 'cmdSession not found').not.toBe('');
     expect(cmd).not.toMatch(/spawnJudge|spawnDetached|markJudgeRunning/);
   });
 
