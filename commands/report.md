@@ -3,7 +3,7 @@ description: A self-contained HTML report of your history
 allowed-tools: Bash(node:*)
 ---
 
-!`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" report --html --open`
+!`NODE_NO_WARNINGS=1 node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" report --html --open`
 
 Show the output above exactly as it is, and add nothing.
 

@@ -689,6 +689,28 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
           push('system', { systemKind: 'compaction', textSummary: 'compaction:summary' });
           break;
         }
+
+        // ── `isMeta` is the harness saying "not a human speaking" ───────────
+        //
+        // Same class of signal as `isCompactSummary` above, and it was not
+        // being read. The harness writes a slash command's **own stdout** back
+        // as a `type: 'user'` record with `isMeta: true` and array content —
+        // and because the array branch below recognises only `tool_result`,
+        // text blocks fell through and became `user_prompt`.
+        //
+        // Measured on a real session (`d372b7c1`, 2026-10-23): two of its four
+        // user-side turns were agentsensei's own output, counted as the
+        // developer's prompts. The judge then anchored a `constraint_violation`
+        // on turn 8 — our own report text — and reported that the agent had
+        // violated an instruction nobody ever gave.
+        //
+        // That is this project analysing itself and billing for it: the
+        // observer effect CLAUDE.md exists to prevent, arriving through the
+        // data rather than through the context window.
+        if (r.isMeta === true) {
+          push('local_command', { ...sum(toolResultText(content) ?? '') });
+          break;
+        }
         if (typeof content === 'string') {
           // A slash-command echo is not a human speaking.
           // ── The prompt is the signal, so it gets a bigger cap ───────────

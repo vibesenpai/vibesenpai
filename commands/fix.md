@@ -3,7 +3,7 @@ description: One evidence-backed change to try, from your own sessions
 allowed-tools: Bash(node:*)
 ---
 
-!`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" fix`
+!`NODE_NO_WARNINGS=1 node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" fix`
 
 Reproduce the recommendation above in a code block, preserving every line and
 figure exactly. You may bold the figures and nothing else — the command cannot

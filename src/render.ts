@@ -86,6 +86,41 @@ function human(n: number): string {
  * Undefined rather than `0m`: a session whose timestamps we could not read is a
  * different thing from a session that took no time.
  */
+/**
+ * A gap longer than this is someone having lunch, not working slowly.
+ *
+ * Half an hour is deliberately generous: the cost of over-counting a long
+ * think is a minute or two, and the cost of under-counting is telling someone
+ * their afternoon took ten minutes.
+ */
+export const IDLE_GAP_MS = 30 * 60 * 1000;
+
+/**
+ * Time actually spent in a session, as `durationOf` would format it.
+ *
+ * Returns `undefined` when there is nothing to measure, which the caller
+ * renders by saying nothing rather than by saying zero.
+ */
+export function activeDuration(events: Event[]): string | undefined {
+  const ts = events
+    .map((e) => Date.parse(e.ts ?? ''))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+  if (ts.length < 2) return undefined;
+
+  let active = 0;
+  for (let i = 1; i < ts.length; i++) {
+    const gap = (ts[i] as number) - (ts[i - 1] as number);
+    if (gap < IDLE_GAP_MS) active += gap;
+  }
+  if (active === 0) return undefined;
+  // `durationOf` floors to whole minutes, so twenty seconds of real work came
+  // back as `0m` — which reads as a bug rather than as a short session.
+  if (active < 60_000) return 'under a minute';
+  const start = new Date(0).toISOString();
+  return durationOf(start, new Date(active).toISOString());
+}
+
 /** `3d0h` → `3 days`, `1h30m` → `1h30m`. Prose only; the compact form stays. */
 function proseDuration(d: string | undefined): string | undefined {
   if (d === undefined) return undefined;
@@ -880,11 +915,18 @@ export function render(input: RenderInput): string {
   // The id stays available — `--session` takes it, and `:report` lists them —
   // but it is not the first thing a person needs. Duration and edits are,
   // because they are what the reader already knows about their own afternoon.
-  const span = spanOf(input.events);
-  // `durationOf` is shared with the HTML report and three tests, so the prose
-  // form is built here rather than changing what it returns: `3d0h` is a field
-  // width, not something a person says out loud.
-  const dur = proseDuration(durationOf(span.first, span.last));
+  // ── Time worked, not time elapsed ────────────────────────────────────────
+  //
+  // This read `durationOf(first, last)` — wall clock between the first and
+  // last event. A session opened at 06:14, left alone, and returned to at
+  // 18:35 therefore reported **12h20m** across 59 lines, and the user's
+  // reaction was the correct one: *"this session cannot be 12h long! I had
+  // just started it."*
+  //
+  // It was never wrong, only useless: nobody counts the hours a tab sat open
+  // as time spent. Gaps longer than `IDLE_GAP_MS` are dropped, so what is
+  // reported is time engaged.
+  const dur = proseDuration(activeDuration(input.events));
   const edits = `${d.editCount.toLocaleString()} edit${d.editCount === 1 ? '' : 's'}`;
   const where = dur === undefined ? edits : `${dur}, ${edits}`;
   lines.push(`${INDENT}${dim(`This session · ${where}`)}`, '');

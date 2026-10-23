@@ -8,7 +8,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { caveatFor, durationOf, renderCompaction, renderJudged, headlineFor, render, renderCost, renderFinding, shortenPath, spanOf, describeTurn } from '../src/render.ts';
+import { parse } from '../src/parsers/index.ts';
+import { activeDuration, caveatFor, describeTurn, durationOf, headlineFor, render, renderCompaction, renderCost, renderFinding, renderJudged, shortenPath, spanOf } from '../src/render.ts';
 import { materialise } from '../src/finding.ts';
 import type { Denominators } from '../src/detect/index.ts';
 import type { Event, Finding } from '../src/types.ts';
@@ -439,5 +440,77 @@ describe('the lead line', () => {
     });
     expect(out.split('\n')[1]).toContain('1 finding');
     expect(out.split('\n')[1]).not.toContain('finding(s)');
+  });
+});
+
+describe('duration is time worked, not time elapsed', () => {
+  // A session opened at 06:14, left alone, and returned to at 18:35 reported
+  // `12h20m` across 59 lines. Never wrong, and useless: nobody counts the
+  // hours a tab sat open as time spent.
+  const at = (iso: string) => ({ ts: iso }) as unknown as Parameters<typeof activeDuration>[0][number];
+
+  it('drops a gap nobody was present for', () => {
+    const out = activeDuration([
+      at('2026-10-23T06:14:00.000Z'),
+      at('2026-10-23T06:24:00.000Z'),
+      at('2026-10-23T18:30:00.000Z'), // twelve hours later
+      at('2026-10-23T18:40:00.000Z'),
+    ]);
+    expect(out, 'two ten-minute bursts are twenty minutes of work').toBe('20m');
+  });
+
+  it('keeps a long think, which is work', () => {
+    // The threshold is deliberately generous: over-counting a long think costs
+    // a minute, under-counting an afternoon costs the number's credibility.
+    const out = activeDuration([
+      at('2026-10-23T06:00:00.000Z'),
+      at('2026-10-23T06:29:00.000Z'),
+    ]);
+    expect(out).toBe('29m');
+  });
+
+  it('says so rather than rounding a short session to zero', () => {
+    // `durationOf` floors to whole minutes, so twenty seconds came back as
+    // `0m`, which reads as a bug rather than as a short session.
+    expect(
+      activeDuration([at('2026-10-23T06:00:00.000Z'), at('2026-10-23T06:00:20.000Z')]),
+    ).toBe('under a minute');
+  });
+
+  it('has nothing to say about a single event', () => {
+    expect(activeDuration([at('2026-10-23T06:00:00.000Z')])).toBeUndefined();
+    expect(activeDuration([])).toBeUndefined();
+  });
+});
+
+describe('the harness says when a turn is not a human speaking', () => {
+  // `isMeta` was not read. The harness writes a slash command's own stdout
+  // back as a `type: 'user'` record with `isMeta: true`, and because the array
+  // branch recognised only `tool_result`, text blocks became `user_prompt`.
+  //
+  // Measured on `d372b7c1`: two of four user-side turns were agentsensei's own
+  // output counted as the developer's prompts, and the judge anchored a
+  // `constraint_violation` on one of them — reporting that the agent had
+  // violated an instruction nobody gave.
+  it('classifies a meta record as a command, never a prompt', () => {
+    const line = JSON.stringify({
+      type: 'user',
+      uuid: 'u1',
+      isMeta: true,
+      timestamp: '2026-10-23T06:15:07.000Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'wrote /tmp/report.html' }] },
+    });
+    const events = parse('x.jsonl', line, 's1').events;
+    expect(events.map((e) => e.turnType)).not.toContain('user_prompt');
+  });
+
+  it('still counts a real prompt as one', () => {
+    const line = JSON.stringify({
+      type: 'user',
+      uuid: 'u2',
+      timestamp: '2026-10-23T06:15:07.000Z',
+      message: { role: 'user', content: 'please fix the parser' },
+    });
+    expect(parse('x.jsonl', line, 's1').events.map((e) => e.turnType)).toContain('user_prompt');
   });
 });
