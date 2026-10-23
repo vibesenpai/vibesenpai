@@ -1,44 +1,40 @@
 ---
 title: Install
-description: Two ways in — as a Claude Code plugin, or as a CLI.
+description: One command in Claude Code. There is nothing else to set up.
 ---
-
-:::caution[Not published yet]
-`agentsensei` is not on npm or the plugin marketplace yet. Until it is,
-[from source](#from-source) is the install that works.
-
-The **CLI** path is built and verified end to end — the tarball is installed
-globally in CI and its hooks are run — so it works the day this is published.
-The **plugin** path has a manifest and commands that have not yet been
-exercised through a real plugin install, so treat it as untested.
-:::
-
-## As a Claude Code plugin
 
 ```
 /plugin marketplace add crozzfire/agentsensei
 /plugin install agentsensei
 ```
 
-This gives you `/agentsensei:now`, `/agentsensei:fix` and
-`/agentsensei:generate-report` inside Claude Code, plus the hooks that keep your
-history indexed in the background.
+That is the whole thing. No npm, no clone, nothing to bootstrap — agentsensei
+ships with **zero runtime dependencies**, and Node is already on your machine
+because Claude Code requires it.
 
-## As a CLI
+:::caution[Not published yet]
+The marketplace entry is built and the plugin runs from a clone, but it has not
+been exercised through a real `/plugin install`. Until it has,
+[Contribute](/agentsensei/contribute/) has the from-source path.
+:::
 
-```bash
-npm install -g agentsensei
-```
+## What you get
 
-Then three commands, in this order:
+Three commands:
 
-```bash
-agentsensei scan                # index your transcripts — copies nothing
-agentsensei standing --refresh  # compute findings across your history
-agentsensei fix                 # the one thing worth changing
-```
+| | |
+|---|---|
+| `/agentsensei:now` | what happened in the session you are in |
+| `/agentsensei:fix` | the one change worth making, with the evidence |
+| `/agentsensei:generate-report` | a self-contained HTML report of your history |
 
-What the first one prints:
+And two hooks, which keep your history indexed in the background. Both are
+local and cost nothing — see [Phases of a run](/agentsensei/architecture/phases/).
+
+## What it does on first run
+
+It reads the transcripts Claude Code already writes to `~/.claude/projects`.
+Nothing is copied:
 
 ```
 scanned 16 transcripts · 16 new, 0 grown, 0 unchanged
@@ -46,20 +42,11 @@ read 55.7 MB · copied nothing
 catalog · 16 sessions · ~/.local/share/agentsensei
 ```
 
-The order matters: `fix` reads what `standing` computes, and will tell you so if
-you skip it. All three finish in about a second on a few hundred sessions —
-there is no long indexing phase to wait through.
-
-## From source
-
-```bash
-git clone https://github.com/crozzfire/agentsensei && cd agentsensei
-npm install
-npm run cli -- now       # or: npm run build && npm link, for `agentsensei` on PATH
-```
-
-Node 22.13 or later. Zero runtime dependencies — `npm install` is pulling test
-and build tooling only.
+The first time you run `/agentsensei:now`, it will also read that session with
+the model on your own account and tell you it is doing so. That is the judge,
+it is on from installation, and
+[what it sends and what it costs](/agentsensei/start/sends-and-costs/) is a page
+of its own because you should not have to go looking for it.
 
 ## Where it keeps things
 
@@ -67,17 +54,20 @@ and build tooling only.
 |---|---|
 | `~/.claude/projects/**` | **read in place.** Never modified, never copied |
 | `~/.local/share/agentsensei` | its own store: the catalog, findings, reports |
-| `~/.claude/settings.json` | **only** via `agentsensei install`, which prints the change and needs `--apply` |
+| `~/.claude/settings.json` | untouched — the plugin carries its own hooks |
 
 Override the store with `AGENTSENSEI_ARCHIVE`, and the transcript sources with
 `AGENTSENSEI_SOURCES`.
 
 ## Turning it off
 
-```bash
-AGENTSENSEI_DISABLE=1          # stops everything, including hooks, immediately
-agentsensei uninstall          # removes the hooks it added
+```
+/plugin disable agentsensei
 ```
 
-The first one is a hard kill switch that every entry point checks on its first
-line. If you are trying this on a work machine, that is the thing to know.
+Harness-native, and it stops everything — hooks included. There is deliberately
+no "keep the rules but stop the model" switch: without the judge this is a
+one-detector tool, so all-or-nothing is the honest offer.
+
+`AGENTSENSEI_DISABLE=1` also works if you would rather kill it from the
+environment.

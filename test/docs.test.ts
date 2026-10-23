@@ -237,29 +237,47 @@ describe('the one command that sends data off the machine is discoverable', () =
   });
 });
 
-describe('the docs do not promise an install that does not exist', () => {
-  // The README's first quickstart line was `npm install -g agentsensei`, which
-  // fails with E404 — the package is not published. That is the same class of
-  // error as the fictional dimensions this file was written to catch: the
-  // difference between "we built this" and "you can run this".
+describe('the plugin is the only front door', () => {
+  // This guard used to require that an `npm install -g agentsensei` shown in
+  // the docs be marked "not published yet". It now forbids it outright.
   //
-  // This guard does not forbid documenting the published install. It requires
-  // that wherever a doc shows one, the page also says it is not available yet.
-  const UNPUBLISHED = [/npm i(?:nstall)? -g agentsensei/, /\/plugin install agentsensei/];
-
-  for (const file of ['README.md', 'site/src/content/docs/start/install.md']) {
-    it(`${file} marks the unpublished installs as unavailable`, () => {
+  // The entry point is `/plugin install`. Nobody installs an analyzer for
+  // Claude Code from npm, and `package.json` is `private: true` so the command
+  // would fail anyway. The CLI still exists — it is what the plugin's hooks
+  // and slash commands invoke — it is simply never typed by a human.
+  it('tells nobody to install from npm', () => {
+    for (const file of userFacingDocs()) {
       const text = readFileSync(file, 'utf8');
-      const shown = UNPUBLISHED.filter((re) => re.test(text));
-      if (shown.length === 0) return;
-      // Any wording will do; what matters is that the page says so somewhere.
-      expect(text).toMatch(/not published yet|not on npm|not yet reachable|once published/i);
-    });
-  }
+      // Contributing legitimately explains the from-source path.
+      if (/contribut/i.test(file)) continue;
+      expect(
+        text,
+        `${file} still sends a user to npm; the plugin is the install`,
+      ).not.toMatch(/npm i(?:nstall)? -g agentsensei/);
+    }
+  });
+
+  it('cannot be published to npm by accident', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { private?: boolean };
+    expect(pkg.private).toBe(true);
+  });
+
+  it('shows the slash commands, not the binary, in user-facing samples', () => {
+    // A plugin user types `/agentsensei:now`. `agentsensei now` is what the
+    // command file runs on their behalf, and showing it invites them to try a
+    // binary that is not on their PATH.
+    const readme = readFileSync('README.md', 'utf8');
+    const intro = readme.slice(0, readme.indexOf('## Contributing'));
+    expect(intro).toContain('/agentsensei:now');
+  });
+
+  it('names a way to turn it off', () => {
+    // The judge is on from installation, so the off switch has to be findable.
+    // It is harness-native — nothing of ours to build.
+    expect(readFileSync('README.md', 'utf8')).toContain('/plugin disable agentsensei');
+  });
 
   it('no doc states a test count, which rots on every commit', () => {
-    // `README:252` said "519 tests" while the suite had 525. The count is not
-    // the useful part of that line — "no network" is.
     for (const file of ['README.md', 'CONTRIBUTING.md']) {
       expect(readFileSync(file, 'utf8')).not.toMatch(/\b\d{3,} tests\b/);
     }
@@ -400,8 +418,12 @@ describe('one pitch, not five', () => {
   //
   // The point is not that one wording is better. It is that a reader who sees
   // the tool in three places should recognise it as one thing.
+  // The last clause changed when the judge became on-by-default: "on your own
+  // machine" stopped being true the moment redacted excerpts started going to
+  // the model. The replacement is the stronger claim — no new trust
+  // relationship — and it is what the egress page now argues.
   const PITCH =
-    "See what your coding agent's mistakes cost you — in tokens, with the exact turns, on your own machine.";
+    "See what your coding agent's mistakes cost you — in tokens, with the exact turns, using the AI you already pay for.";
 
   it('is identical in every manifest', () => {
     const json = (p: string) => JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
@@ -431,6 +453,10 @@ describe('one pitch, not five', () => {
         readFileSync(file, 'utf8'),
         `${file} still carries the old tagline`,
       ).not.toContain('Find the turns where you and your coding agent wasted effort');
+      expect(
+        readFileSync(file, 'utf8'),
+        `${file} still says the work happens only on your own machine`,
+      ).not.toContain('with the exact turns, on your own machine');
     }
   });
 

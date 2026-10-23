@@ -1,7 +1,7 @@
 {
   "name": "agentsensei",
   "version": "0.1.0",
-  "description": "See what your coding agent's mistakes cost you \u2014 in tokens, with the exact turns, on your own machine.",
+  "description": "See what your coding agent's mistakes cost you \u2014 in tokens, with the exact turns, using the AI you already pay for.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -56,5 +56,6 @@
     "transcript-analysis",
     "developer-tools",
     "agent-evaluation"
-  ]
+  ],
+  "private": true
 }

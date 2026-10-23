@@ -5,7 +5,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen.svg)](package.json)
 
 **See what your coding agent's mistakes cost you — in tokens, with the exact
-turns, on your own machine.**
+turns, using the AI you already pay for.**
 
 Your agent edits a file it hasn't read. The harness refuses. It reads the file
 and tries again. That round trip cost you tokens, it happens in **one session in
@@ -87,40 +87,35 @@ the optional judge is **off by default**
 stakes in this ecosystem rather than a reason to pick this one, and
 [`docs/prior-art.md`](docs/prior-art.md) says so at length.
 
-## Quickstart
-
-**Not published yet.** Clone is the only install that works today. `npm install
--g agentsensei` is built and verified end to end against a real global install
-of the tarball — it will work the day this is published. `/plugin install
-agentsensei` has a manifest and commands that have **not been exercised through
-a real plugin install**, so treat that one as untested until it is.
-
-```bash
-git clone https://github.com/crozzfire/agentsensei && cd agentsensei
-npm install && npm run build
-npm link                        # puts `agentsensei` on your PATH
-
-agentsensei scan                # index your transcripts — copies nothing
-agentsensei standing --refresh  # compute findings across your history
-agentsensei fix                 # the one thing worth changing
-```
-
-Real output from the first command:
+## Install
 
 ```
-scanned 16 transcripts · 16 new, 0 grown, 0 unchanged
-read 55.7 MB · copied nothing
-catalog · 16 sessions · ~/.local/share/agentsensei
+/plugin marketplace add crozzfire/agentsensei
+/plugin install agentsensei
 ```
 
-The order matters: `fix` reads the standing that step two computes, and will
-tell you to run it if you skip ahead. All three finish in under two seconds on a
-few hundred sessions.
+That is the whole thing. No npm, no clone, nothing to bootstrap — this ships
+with **zero runtime dependencies**, and Node is already on your machine because
+Claude Code needs it.
+
+You get three commands:
+
+```
+/agentsensei:now              what happened in this session
+/agentsensei:fix              the one change worth making
+/agentsensei:generate-report  a self-contained HTML report
+```
+
+To stop it: `/plugin disable agentsensei`.
+
+> **Not published yet.** The marketplace entry is built and the plugin runs from
+> a clone, but it has not been exercised through a real `/plugin install`. Until
+> it is, [Contributing](#contributing) has the from-source path.
 
 Then, for the session you are in right now:
 
 ```
-agentsensei now
+/agentsensei:now
 ```
 
 ```
