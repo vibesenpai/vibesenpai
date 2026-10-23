@@ -1,0 +1,25 @@
+flowchart LR
+  T["transcripts<br/>~/.claude/projects"]
+
+  subgraph spine["the shared spine"]
+    direction LR
+    R["read<br/><small>byte ranges, in place</small>"]
+    P["parse<br/><small>JSONL → events</small>"]
+    D["detect<br/><small>structure only</small>"]
+    F["findings"]
+  end
+
+  T --> R --> P --> D --> F
+  F --> OUT["now · fix · report"]
+
+  P -. "redacted here,<br/>at construction" .-> P
+
+  C["catalog<br/><small>offsets + hashes</small>"]
+  R -. "scan / doctor only" .-> C
+
+  J["the judge<br/><small>opt-in, invoked</small>"]
+  P -- "full text,<br/>when you ask" --> J
+  J --> F
+
+  classDef side stroke-dasharray:4 4,color:#666
+  class C side

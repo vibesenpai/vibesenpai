@@ -1,0 +1,25 @@
+sequenceDiagram
+  autonumber
+  participant You
+  participant CC as Claude Code
+  participant H as agentsensei hooks
+  participant W as detached worker
+  participant M as the model
+
+  Note over H: nothing here spends
+
+  CC->>H: SessionStart
+  H-->>You: last pass's report (instant)
+  H->>W: refresh standing, if stale
+  W-->>W: parse + detect (local, free)
+
+  CC->>H: Stop
+  Note right of H: no judge pass.<br/>standing only.
+  H->>W: refresh standing, if stale
+
+  You->>CC: /agentsensei:now
+  CC-->>You: findings so far (0.4s)
+  CC->>W: judge THIS session
+  W->>M: redacted packet
+  M-->>W: episodes → labels
+  Note over You,M: findings appear next time you ask

@@ -65,9 +65,6 @@ Override the store with `AGENTSENSEI_ARCHIVE`, and the transcript sources with
 /plugin disable agentsensei
 ```
 
-Harness-native, and it stops everything — hooks included. There is deliberately
-no "keep the rules but stop the model" switch: without the judge this is a
-one-detector tool, so all-or-nothing is the honest offer.
-
-`AGENTSENSEI_DISABLE=1` also works if you would rather kill it from the
-environment.
+Harness-native, and it stops everything — hooks included.
+[What it sends, and what it costs](/agentsensei/start/sends-and-costs/) has the
+rest, including why there is no "keep the rules, stop the model" switch.

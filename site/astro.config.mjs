@@ -23,39 +23,41 @@ export default defineConfig({
         {
           label: 'Start here',
           items: [
-            { label: 'What it is', slug: 'start/what-it-is' },
+            { label: 'What it does', slug: 'start/what-it-is' },
             { label: 'Install', slug: 'start/install' },
             { label: 'Your first finding', slug: 'start/first-finding' },
-            { label: 'Turning the judge on', slug: 'start/the-judge' },
+            { label: 'What it sends, and what it costs', slug: 'start/sends-and-costs' },
           ],
         },
         {
-          label: 'What it finds',
+          label: 'Findings & fixes',
           items: [
-            { label: 'The dimensions', slug: 'finds/dimensions' },
-            { label: 'What we do not detect', slug: 'finds/not-detected' },
+            { label: 'The dimensions', slug: 'findings/dimensions' },
+            { label: 'What a fix looks like', slug: 'findings/fixes' },
+            { label: 'What we do not detect', slug: 'findings/not-detected' },
           ],
         },
         {
-          label: 'Fixes',
+          label: 'Architecture',
           items: [
-            { label: 'Config, a tool, or nothing', slug: 'fixes/kinds' },
-          ],
-        },
-        {
-          label: 'Trust',
-          items: [
-            { label: 'What leaves your machine', slug: 'trust/egress' },
-            { label: 'Limits', slug: 'trust/limits' },
+            { label: 'Overview', slug: 'architecture/overview' },
+            { label: 'Phases of a run', slug: 'architecture/phases' },
+            { label: 'Reading a transcript', slug: 'architecture/reading' },
+            { label: 'The two tiers', slug: 'architecture/two-tiers' },
+            { label: 'The judge pipeline', slug: 'architecture/judge' },
+            { label: 'Design decisions', slug: 'architecture/decisions' },
           ],
         },
         {
           label: 'Showing our work',
           items: [
             { label: 'Measuring ourselves', slug: 'work/measuring' },
+            { label: 'Limits', slug: 'work/limits' },
+            { label: 'What else is out there', slug: 'work/prior-art' },
             { label: 'The graveyard', slug: 'work/graveyard' },
           ],
         },
+        { label: 'Reference', slug: 'reference' },
         { label: 'Contribute', slug: 'contribute' },
       ],
     }),

@@ -25,7 +25,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -177,7 +177,7 @@ describe('the README describes the tool that exists', () => {
       ),
     );
     // Words that follow "agentsensei" in prose rather than as a command.
-    const prose = new Set(['is', 'does', 'reads', 'finds', 'runs', 'and', 'to', 'the', 'a', 'in', 'on', 'for', 'as', 'at', 'from', 'with', 'you', 'your', 'it', 'its', 'can', 'will', 'has', 'have', 'was', 'were', 'needs', 'copies', 'writes', 'never', 'only', 'also', 'how', 'what', 'why', 'generate-report', 'looks']);
+    const prose = new Set(['is', 'does', 'reads', 'finds', 'runs', 'and', 'to', 'the', 'a', 'in', 'on', 'for', 'as', 'at', 'from', 'with', 'you', 'your', 'it', 'its', 'can', 'will', 'has', 'have', 'was', 'were', 'needs', 'copies', 'writes', 'never', 'only', 'also', 'how', 'what', 'why', 'generate-report', 'looks', 'pipeline', 'itself']);
     const missing = [...claimed].filter((c) => !dispatch.has(c) && !prose.has(c));
     expect(missing, `docs advertise commands the CLI does not have: ${missing.join(', ')}`).toEqual([]);
   });
@@ -388,10 +388,13 @@ describe('documented output samples match the shape the code produces', () => {
     const real = run('judge', '--status');
     const produced = new Set(real.split('\n').map(shape).filter((l) => l !== ''));
 
-    // The documented sample, from the judge page.
-    const doc = readFileSync('site/src/content/docs/start/the-judge.md', 'utf8');
+    // Wherever a page shows this sample. `judge --status` is a CLI command and
+    // the CLI is no longer a user-facing surface, so no page may show it at
+    // all — that is a correct state, not a missing sample.
+    const pages = userFacingDocs().filter((f) => f.startsWith('site/'));
+    const doc = pages.map((f) => readFileSync(f, 'utf8')).join('\n');
     const block = /judged {2,}[^\n]*\n(?:[^\n]*\n)*?[^\n]*spent[^\n]*/.exec(doc)?.[0] ?? '';
-    expect(block, 'the judge page no longer shows a --status sample').not.toBe('');
+    if (block === '') return;
 
     const drifted = block
       .split('\n')
@@ -464,5 +467,50 @@ describe('one pitch, not five', () => {
     // package.json said 0.0.0 while plugin.json said 0.1.0.
     const v = (p: string) => (JSON.parse(readFileSync(p, 'utf8')) as { version: string }).version;
     expect(v('package.json')).toBe(v('.claude-plugin/plugin.json'));
+  });
+});
+
+describe('the diagrams are committed and current', () => {
+  // Diagrams are rendered once by `npm run diagrams` and both files are
+  // committed: a reader downloads ~5 KB of SVG and no JavaScript, and the
+  // diagram is there when the page is. Client-side mermaid was measured at
+  // **1,536 KB gzipped** against a site that ships 192 KB of JS in total.
+  //
+  // The cost of that choice is a step someone can forget, which is what these
+  // guard.
+  const dir = 'site/src/diagrams';
+
+  it('every source has a rendered output', () => {
+    const sources = readdirSync(dir).filter((f) => f.endsWith('.mmd'));
+    expect(sources.length, 'no diagram sources found').toBeGreaterThan(0);
+    for (const src of sources) {
+      const svg = join(dir, src.replace(/\.mmd$/, '.svg'));
+      expect(existsSync(svg), `${src} has no committed .svg — run \`npm run diagrams\``).toBe(true);
+    }
+  });
+
+  it('no rendered output is older than its source', () => {
+    // A stale picture is worse than no picture: it describes a system that
+    // changed, with all the authority of a diagram.
+    for (const src of readdirSync(dir).filter((f) => f.endsWith('.mmd'))) {
+      const svg = join(dir, src.replace(/\.mmd$/, '.svg'));
+      if (!existsSync(svg)) continue;
+      expect(
+        statSync(svg).mtimeMs,
+        `${src} is newer than its .svg — run \`npm run diagrams\``,
+      ).toBeGreaterThanOrEqual(statSync(join(dir, src)).mtimeMs);
+    }
+  });
+
+  it('ships no embedded fonts', () => {
+    // `mmdc` embeds a webfont as base64 by default — 161 KB inside a 190 KB
+    // style block, for a five-node flowchart. Passing any config file avoids
+    // it; `scripts/diagrams.mjs` strips it as well, as a safety net.
+    for (const svg of readdirSync(dir).filter((f) => f.endsWith('.svg'))) {
+      const text = readFileSync(join(dir, svg), 'utf8');
+      expect(text, `${svg} has an embedded font`).not.toContain('@font-face');
+      expect(text, `${svg} has a base64 blob`).not.toContain('base64');
+      expect(text.length, `${svg} is over 50 KB`).toBeLessThan(50_000);
+    }
   });
 });

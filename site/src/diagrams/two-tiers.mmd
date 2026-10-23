@@ -1,0 +1,18 @@
+flowchart TD
+  E["Event<br/><small>command · pattern · textSummary · failureKind · hashes</small>"]
+
+  E -- "Omit&lt;command, pattern, textSummary&gt;" --> S["StructuralEvent"]
+  E -- "full text" --> J["the judge"]
+
+  S --> R1["edit_retry"]
+  S --> R2["redundant_call"]
+
+  R1 --> CERT["certain<br/><small>the harness said so</small>"]
+  R2 --> CERT
+
+  J --> MOD["flagged by a model<br/><small>a reading, not a fact</small>"]
+
+  X["reading text<br/>in a detector"] -. "is a compile error" .-> S
+
+  classDef gone stroke-dasharray:4 4,color:#888
+  class X gone

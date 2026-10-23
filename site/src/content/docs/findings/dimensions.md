@@ -38,7 +38,7 @@ right thing to do. It is reported so you can see it, not so you can act on it.
 
 ## The judge — reads conversation, opt-in
 
-These need [the judge](/agentsensei/start/the-judge/) enabled.
+These need [the judge](/agentsensei/architecture/judge/) enabled.
 
 | dimension | what it catches |
 |---|---|
@@ -59,7 +59,7 @@ dimension can be *discovered* rather than guessed at.
 
 **2 of 38** against labelled data, across two models and three pipeline
 versions. Established, not provisional. Treat any `overreach` finding as a
-reason to look rather than a conclusion. [Why it stays](/agentsensei/trust/limits/).
+reason to look rather than a conclusion. [Why it stays](/agentsensei/work/limits/).
 
 ## Confidence
 

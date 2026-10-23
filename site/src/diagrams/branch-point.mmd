@@ -1,0 +1,14 @@
+flowchart TD
+  U["user prompt"]
+  U --> A1["Edit src/api.ts"]
+  U --> A2["Read src/api.ts"]
+
+  A1 --> R1["result: FAILED<br/><small>file has not been read</small>"]
+  A2 --> R2["result: ok"]
+
+  N["walking the longest path<br/>drops 46 records —<br/>39 of them tool_results"]
+
+  R1 -.-> N
+
+  classDef warn color:#8a6d1f
+  class N warn

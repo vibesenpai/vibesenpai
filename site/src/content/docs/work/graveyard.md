@@ -43,7 +43,7 @@ Built on structure — look for a success claim near a failed tool result — it
 produced **zero true positives and five false positives**. Every one of the five
 was an agent honestly describing partial progress.
 
-It works now, and it is one of the better dimensions, because [the judge](/agentsensei/start/the-judge)
+It works now, and it is one of the better dimensions, because [the judge](/agentsensei/architecture/judge/)
 reads what was actually said instead of pattern-matching around it. Same
 dimension, different tier, opposite outcome.
 

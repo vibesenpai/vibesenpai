@@ -46,7 +46,7 @@ lot of the spend went on re-reading rather than producing.
 
 **`compacted 4×`** is worth knowing on its own: a compaction discards context,
 and an instruction given before one may simply not be there afterwards. If you
-later see a `constraint_violation`, [this is why](/agentsensei/fixes/kinds/).
+later see a `constraint_violation`, [this is why](/agentsensei/findings/fixes/).
 
 ## When something does fire
 
