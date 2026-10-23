@@ -26,6 +26,9 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { isTripped, readBreaker } from '../src/breaker.ts';
+import { statSync } from 'node:fs';
+import { dueForJudging, judgeRunning, markJudgeRunning, readJudgeState } from '../src/judge-store.ts';
+import { resolveCurrentSession } from '../src/read.ts';
 import { resolveConfig } from '../src/config.ts';
 import { isFresh, readStanding } from '../src/standing.ts';
 
@@ -35,24 +38,21 @@ function main(): void {
   const { config } = resolveConfig();
   if (isTripped(readBreaker(config.archive))) return;
 
-  // ── This hook spends nothing, and that is the whole design ──────────────
+  // ── This hook is the producer ───────────────────────────────────────────
   //
-  // It used to call `maybeJudge`, which spawned a model pass on a cadence
-  // whenever the live session had grown enough. That was defensible only
-  // while the judge was off by default — the user had enabled it in an
-  // explicit act, so the cadence was something they had asked for.
+  // `Stop` fires when the main agent has finished responding — exactly when a
+  // turn's work exists to analyse and nothing is waiting on us. That makes it
+  // the right trigger, and the commands the wrong one: a command that both
+  // shows findings and spends money to make them is two things wearing one
+  // name, and the name hides the half that costs.
   //
-  // The judge is now on from installation, so the same cadence would mean a
-  // detached process spending someone's money at every turn boundary without
-  // them asking. That is precisely the Self-Initiated Overreach this tool
-  // exists to detect, and shipping it would make the product the thing it
-  // criticises.
+  // So the split is: **producers write, readers read.** `:session`, `:fix` and
+  // `:report` are readers and spend nothing. This spends, on a cadence, in a
+  // detached child that prints nothing.
   //
-  // So the trigger moved to the commands: `cmdNow` spawns a pass for the
-  // session the user is asking about, when they ask. Nothing here does.
-  //
-  // What remains is the standing refresh, which is local, free, and the
-  // reason the next session can open with a report instead of a spinner.
+  // It was briefly the other way round — the command spawned and this hook did
+  // not — which made `/agentsensei:session` cost 58k tokens without saying so.
+  maybeJudge(config.archive, config.sources);
 
   // The freshness window is what makes this affordable at every boundary.
   if (isFresh(readStanding(config.archive))) return;
@@ -60,6 +60,34 @@ function main(): void {
   spawnDetached('compute-standing.ts');
 }
 
+
+/**
+ * Spawn a pass for the live session, if it is due.
+ *
+ * Every gate here is a reason not to spend: the judge is off, the breaker is
+ * tripped, a pass is already running, or too little has changed since the last
+ * one. `dueForJudging` compares bytes rather than parsing, because this hook
+ * has milliseconds and a `stat` is free where a parse is not.
+ */
+function maybeJudge(archive: string, sources: string[]): void {
+  const state = readJudgeState(archive);
+  if (!state.settings.enabled) return;
+  if (judgeRunning(archive)) return;
+
+  const current = resolveCurrentSession(sources);
+  if (current === undefined) return;
+
+  let size: number;
+  try {
+    size = statSync(current.source).size;
+  } catch {
+    return;
+  }
+  if (!dueForJudging(state, current.sessionId, size)) return;
+
+  markJudgeRunning(archive);
+  spawnDetached('judge.ts', current.sessionId);
+}
 
 /** Spawn and forget. The hook never waits for analysis — see docs/surfaces.md. */
 function spawnDetached(script: string, ...args: string[]): void {

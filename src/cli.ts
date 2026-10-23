@@ -23,8 +23,8 @@ import {
 } from './read.ts';
 import { gatherReport, type ReportData } from './gather.ts';
 import {
-  dueForJudging, findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL,
-  type JudgeState, judgeRunning, markJudgeRunning, pendingWork, readJudgeState,
+  findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL,
+  judgeRunning, markJudgeRunning, pendingWork, readJudgeState,
   tallyByDimension, writeSettings,
 } from './judge-store.ts';
 import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
@@ -515,15 +515,17 @@ async function cmdNow(a: Argv): Promise<number> {
   // — a number roughly fourteen times the whole session, on the main surface,
   // next to the real count. `cmdNow` has already parsed; the events are right
   // there.
-  // ── The judge runs because you asked, and only then ─────────────────────
+  // ── This command spends nothing ─────────────────────────────────────────
   //
-  // Started *before* the render, not after, so the lag line can say whether a
-  // pass is actually running. It used to print "about a minute to read them"
-  // whenever anything was unjudged — including when the pass had been declined
-  // because the breaker was tripped, the cadence was not met, or one was
-  // already in flight. An ETA for work nobody started is a promise the tool
-  // does not keep.
-  const judging = maybeJudgeThisSession(config, current.sessionId, current.source, judgeState);
+  // It briefly spawned a judge pass, on the reasoning that asking about a
+  // session is a fair moment to read it. The trouble is that it made one
+  // command both a reader and a producer, and the name said only "session" —
+  // so a user typed what looked like a view and was charged 58k tokens.
+  //
+  // Producing is the `Stop` hook's job. This renders what exists, and reports
+  // whether a pass is running so "nothing yet" is distinguishable from
+  // "nothing to find".
+  const judging = judgeRunning(config.archive);
 
   const judgedBytes = judgeState.ledger[current.sessionId] ?? 0;
   let unjudgedTurns = 0;
@@ -609,26 +611,6 @@ function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
-/**
- * Has the one-time disclosure been shown on this machine?
- *
- * A marker file rather than a field in `judge.json`, for the same reason
- * `standing.running` is one: it is a fact about this installation, not part of
- * the judge's persisted state, and it must not be lost to a schema migration
- * or re-shown because a store was rebuilt.
- */
-function hasDisclosed(archive: string): boolean {
-  return existsSync(join(archive, 'disclosed'));
-}
-
-function markDisclosed(archive: string): void {
-  try {
-    mkdirSync(archive, { recursive: true, mode: 0o700 });
-    writeFileSync(join(archive, 'disclosed'), new Date().toISOString(), { mode: 0o600 });
-  } catch {
-    // Worst case the notice shows twice. Never worth failing a command over.
-  }
-}
 
 /**
  * Spawn the judge for one session and do not wait.
@@ -648,57 +630,6 @@ function spawnJudge(sessionId?: string): void {
   } catch {
     // Principle Zero: a judge that cannot start must not break the command.
   }
-}
-
-/**
- * Spawn a judge pass for one session, if it has unjudged turns.
- *
- * Returns without doing anything when the judge is off, the breaker is
- * tripped, or there is nothing new — all three are normal, and none is worth
- * telling the user about.
- */
-function maybeJudgeThisSession(
-  config: { archive: string },
-  sessionId: string,
-  source: string,
-  state: JudgeState,
-): boolean {
-  if (!state.settings.enabled) return false;
-  if (isTripped(readBreaker(config.archive))) return false;
-  // A pass takes about a minute and the ledger does not move until stage A
-  // returns, so without this two `now` calls a few seconds apart both spend.
-  if (judgeRunning(config.archive)) return false;
-
-  let size: number;
-  try {
-    size = statSync(source).size;
-  } catch {
-    return false;
-  }
-  if (!dueForJudging(state, sessionId, size)) return false;
-
-  // Said once per machine, not once per run. A user who has seen it does not
-  // need telling again, and a line that repeats is a line that gets ignored.
-  if (!hasDisclosed(config.archive)) {
-    console.log('');
-    console.log(`  ${dim('─'.repeat(64))}`);
-    console.log(
-      `  agentsensei reads this session with the model on ${bold('your own account')}`,
-    );
-    console.log(
-      `  ${dim('— about 58k tokens, roughly a minute. Nothing is sent anywhere else,')}`,
-    );
-    console.log(
-      `  ${dim('and the text is redacted before it leaves. To stop it for good:')}`,
-    );
-    console.log(`  ${dim('/plugin disable agentsensei')}`);
-    console.log(`  ${dim('─'.repeat(64))}`);
-    markDisclosed(config.archive);
-  }
-
-  markJudgeRunning(config.archive);
-  spawnJudge(sessionId);
-  return true;
 }
 
 /**

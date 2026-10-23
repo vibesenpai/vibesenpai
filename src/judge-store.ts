@@ -16,7 +16,9 @@
  * refuses to write anything without `--apply`.
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { JudgeDimension } from './judge.ts';
 import {
@@ -480,6 +482,31 @@ export function clearJudgeRunning(archive: string): void {
     rmSync(join(archive, RUNNING), { force: true });
   } catch {
     // Staleness covers this.
+  }
+}
+
+/**
+ * Has the one-time spend disclosure been shown on this machine?
+ *
+ * Lives here rather than in the CLI because the producer moved: the first
+ * spend now happens in a hook, and the notice has to surface through the
+ * session-start block, which is the one channel that reaches a user.
+ *
+ * A marker file rather than a field in `judge.json`, for the same reason
+ * `standing.running` is one: it is a fact about this installation, not part of
+ * the judge's persisted state, and it must not be lost to a schema migration
+ * or re-shown because a store was rebuilt.
+ */
+export function hasDisclosed(archive: string): boolean {
+  return existsSync(join(archive, 'disclosed'));
+}
+
+export function markDisclosed(archive: string): void {
+  try {
+    mkdirSync(archive, { recursive: true, mode: 0o700 });
+    writeFileSync(join(archive, 'disclosed'), new Date().toISOString(), { mode: 0o600 });
+  } catch {
+    // Worst case the notice shows twice. Never worth failing a command over.
   }
 }
 
