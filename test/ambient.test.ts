@@ -233,7 +233,7 @@ describe('standing — history is processed so day one is not blank', () => {
   };
 
   it('aggregates occurrences and session spread across history', async () => {
-    const s = await computeStanding(
+    const { standing: s } = await computeStanding(
       [session('a', retryPair('/x.ts')), session('b', retryPair('/y.ts')), session('c', [])],
       [editRetry()],
       { now: '2026-10-19T12:00:00.000Z' },
@@ -252,12 +252,12 @@ describe('standing — history is processed so day one is not blank', () => {
   });
 
   it('reports sessions it could not read rather than dropping them', async () => {
-    const s = await computeStanding([session('a', retryPair('/x.ts'))], [editRetry()], { unreadable: 4 });
+    const { standing: s } = await computeStanding([session('a', retryPair('/x.ts'))], [editRetry()], { unreadable: 4 });
     expect(s.unreadable).toBe(4);
   });
 
   it('gives the statusline a past-tense baseline, not a nudge about now', async () => {
-    const s = await computeStanding([session('a', retryPair('/x.ts'))], [editRetry()]);
+    const { standing: s } = await computeStanding([session('a', retryPair('/x.ts'))], [editRetry()]);
     const line = standingLine(s);
     expect(line).toContain('1 edit refused then retried');
     expect(line).toContain('past session');
@@ -270,7 +270,7 @@ describe('standing — history is processed so day one is not blank', () => {
   it('says nothing when history is clean', async () => {
     // "No findings across 174 edits" is a real result but not worth a permanent
     // line in someone's status bar.
-    const s = await computeStanding([session('a', [])], [editRetry()]);
+    const { standing: s } = await computeStanding([session('a', [])], [editRetry()]);
     expect(standingLine(s)).toBe('');
   });
 
@@ -285,7 +285,7 @@ describe('standing — history is processed so day one is not blank', () => {
 
   it('round-trips through the archive', async () => {
     const dir = scratch();
-    const s = await computeStanding([session('a', retryPair('/x.ts'))], [editRetry()]);
+    const { standing: s } = await computeStanding([session('a', retryPair('/x.ts'))], [editRetry()]);
     expect(writeStanding(dir, s)).toBe(true);
     expect(readStanding(dir)).toEqual(s);
   });
@@ -302,7 +302,7 @@ describe('standing — history is processed so day one is not blank', () => {
   it('shows the computed time in local, not UTC', async () => {
     // Printing the stored UTC raw showed 01:46 to someone whose clock said
     // 18:46 — a number that reads as wrong rather than as another zone.
-    const s = await computeStanding([session('a', [])], [editRetry()], { now: '2026-10-19T12:00:00.000Z' });
+    const { standing: s } = await computeStanding([session('a', [])], [editRetry()], { now: '2026-10-19T12:00:00.000Z' });
     const local = computedAtLocal(s);
     expect(local).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(local).not.toContain('T');

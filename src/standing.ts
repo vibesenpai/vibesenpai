@@ -38,6 +38,8 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countDenominators, runDetectors, type Detector } from './detect/index.ts';
+import { occurrencesOf } from './finding.ts';
+import type { OccurrenceRow } from './store.ts';
 import { reasonOf } from './detect/labels.ts';
 import { costFor } from './cost.ts';
 import type { Event, Finding } from './types.ts';
@@ -279,8 +281,9 @@ export async function computeStanding(
   sessions: SessionInput[],
   detectors: Detector[],
   opts: { unreadable?: number; now?: string } = {},
-): Promise<Standing> {
+): Promise<{ standing: Standing; occurrences: OccurrenceRow[] }> {
   const acc = newStandingAccumulator();
+  const occurrences: OccurrenceRow[] = [];
   for (const s of sessions) {
     const res = await runDetectors({
       events: s.events,
@@ -288,8 +291,16 @@ export async function computeStanding(
       detectors,
     });
     accumulateSession(acc, { sessionId: s.sessionId, events: s.events, findings: res.findings });
+    // ── Hand the atomic rows back, rather than only the rollup ─────────────
+    //
+    // This used to return a `Standing` and nothing else, so every rule finding
+    // it computed was discarded the moment the rollup was written. The rollup
+    // keeps one subject per dimension, which is how a dimension touching three
+    // files came to report one. The caller persists these; this function still
+    // does no I/O.
+    occurrences.push(...occurrencesOf(res.findings));
   }
-  return finishStanding(acc, opts);
+  return { standing: finishStanding(acc, opts), occurrences };
 }
 
 /**

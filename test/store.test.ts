@@ -8,6 +8,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
+import { occurrencesOf } from '../src/finding.ts';
+import { stamp } from '../src/schema.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -214,5 +216,65 @@ describe('a reader is never blocked by a writer', () => {
     writer.exec('ROLLBACK');
     reader.close();
     writer.close();
+  });
+});
+
+describe('the rule tier is persisted at all', () => {
+  // It was not. The standing pass re-derived every rule finding from scratch
+  // each run and wrote only a rollup — which keeps **one subject per
+  // dimension**, so a dimension touching three files reported one. Measured on
+  // a real archive before this change:
+  //
+  //   rollup:  edit_retry, 4 occurrences, 1 subject kept
+  //   store:   edit_retry, 4 rows, 3 distinct subjects
+  it('maps a finding to one row per anchor', () => {
+    const f = {
+      ...stamp('finding'),
+      id: 'f1',
+      subjectId: 'sub1',
+      dimension: 'edit_retry',
+      subject: 'src/api.ts',
+      sessionId: 's1',
+      project: 'demo',
+      evidence: [],
+      anchors: [
+        { uuid: 'u1', sessionId: 's1' },
+        { uuid: 'u2', sessionId: 's1' },
+      ],
+      occurrences: 2,
+      confidence: 'certain' as const,
+      method: 'RULE' as const,
+      requiresOutcome: false,
+      polarity: 'negative' as const,
+      denominator: 'per-edit' as const,
+      firstSeen: '2026-10-23T00:00:00.000Z',
+      lastSeen: '2026-10-23T01:00:00.000Z',
+      reasons: { 'not-read-first': 2, 'string-not-found': 1 },
+    } as unknown as Parameters<typeof occurrencesOf>[0][number];
+
+    const rows = occurrencesOf([f]);
+    expect(rows, 'one row per anchor, not one per finding').toHaveLength(2);
+    expect(rows.map((r) => r.anchorUuid).sort()).toEqual(['u1', 'u2']);
+    expect(rows[0]?.tier).toBe('rule');
+    expect(rows[0]?.reason, 'the commonest harness reason labels the row').toBe('not-read-first');
+  });
+
+  it('gives each anchor a distinct, stable id', () => {
+    // Distinct, or the two rows collapse into one on upsert and the count is
+    // wrong. Stable, or a re-run duplicates them.
+    const base = {
+      ...stamp('finding'),
+      id: 'f1', subjectId: 's', dimension: 'edit_retry', subject: 'a.ts',
+      sessionId: 's1', project: 'p', evidence: [], occurrences: 2,
+      confidence: 'certain', method: 'RULE', requiresOutcome: false,
+      polarity: 'negative', denominator: 'per-edit',
+      firstSeen: 'x', lastSeen: 'y',
+      anchors: [{ uuid: 'u1', sessionId: 's1' }, { uuid: 'u2', sessionId: 's1' }],
+    } as unknown as Parameters<typeof occurrencesOf>[0][number];
+
+    const first = occurrencesOf([base]).map((r) => r.id);
+    const again = occurrencesOf([base]).map((r) => r.id);
+    expect(new Set(first).size, 'ids must differ per anchor').toBe(2);
+    expect(again, 'ids must be stable across runs').toEqual(first);
   });
 });

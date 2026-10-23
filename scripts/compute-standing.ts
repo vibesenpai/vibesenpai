@@ -20,6 +20,7 @@ import {
   clearStarted, computeStanding, isFresh, readStanding, writeStanding, type SessionInput,
 } from '../src/standing.ts';
 import { recordFailure, recordSuccess } from '../src/breaker.ts';
+import { openStore, putOccurrences, transact, type Db } from '../src/store.ts';
 // One enumeration, shared with `report`. This file used to shell out to `find`.
 import { discoverTranscripts } from '../src/read.ts';
 
@@ -48,12 +49,31 @@ async function main(): Promise<void> {
       }
     }
 
-    const standing = await computeStanding(
+    const { standing, occurrences } = await computeStanding(
       sessions,
       detectorsFor(config.preset, undefined, config.mute),
       { unreadable },
     );
     writeStanding(config.archive, standing);
+
+    // ── Persist the rule tier ───────────────────────────────────────────────
+    //
+    // Rule findings were never stored: this pass re-derived every one of them
+    // from scratch each time, and wrote only a rollup that keeps one subject
+    // per dimension. One transaction, upserted by content hash, so running
+    // twice is a no-op and a crash leaves nothing half-written.
+    if (occurrences.length > 0) {
+      let db: Db | undefined;
+      try {
+        db = openStore(config.archive);
+        transact(db, () => putOccurrences(db as Db, occurrences));
+      } catch {
+        // Principle Zero: a store that will not open must not fail the pass.
+        // The rollup is already written, so the session still gets a report.
+      } finally {
+        db?.close();
+      }
+    }
     recordSuccess(config.archive);
   } catch (err) {
     recordFailure(config.archive, err instanceof Error ? err.message : 'standing pass failed');

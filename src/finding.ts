@@ -37,6 +37,7 @@
 
 import { createHash } from 'node:crypto';
 import { stamp } from './schema.ts';
+import type { OccurrenceRow } from './store.ts';
 import type {
   Confidence,
   Finding,
@@ -217,4 +218,55 @@ export function collect(
     byId.set(f.id, existing === undefined ? f : mergeFindings(existing, f));
   }
   return [...byId.values()];
+}
+
+/** The commonest harness reason in a tally, or none when there is no tally. */
+function topReason(reasons: Record<string, number> | undefined): string | undefined {
+  if (reasons === undefined) return undefined;
+  const best = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0];
+  return best?.[0];
+}
+
+/**
+ * A finding, flattened to the atomic rows a store can hold.
+ *
+ * ── Why one row per anchor ─────────────────────────────────────────────────
+ *
+ * `anchors` is already defined as **one ref per instance** — the turn that
+ * identifies a single occurrence, distinct from `evidence`, which may cite
+ * supporting turns. So the atomic fact exists in this module already; it has
+ * simply never been persisted.
+ *
+ * Rule findings are not stored at all today. The standing pass re-derives
+ * every one of them from scratch every ten minutes, which is why nothing can
+ * contribute findings between passes — and why the rolled-up file it writes
+ * keeps only the single worst subject per dimension, losing the rest.
+ *
+ * Pure on purpose: this module does no I/O, so it maps and the caller writes.
+ */
+export function occurrencesOf(findings: Finding[]): OccurrenceRow[] {
+  const rows: OccurrenceRow[] = [];
+  for (const f of findings) {
+    const reason = topReason(f.reasons);
+    for (const anchor of f.anchors) {
+      rows.push({
+        // Content-hashed from the finding's own identity plus the anchor, so a
+        // re-run upserts over itself rather than duplicating. The anchor is in
+        // the key because it is what makes the row atomic.
+        id: createHash('sha256').update(`rule\0${f.id}\0${anchor.uuid}`).digest('hex').slice(0, 16),
+        sessionId: f.sessionId,
+        dimension: f.dimension,
+        tier: 'rule' as const,
+        subject: f.subject,
+        anchorUuid: anchor.uuid,
+        confidence: f.confidence,
+        // `reasons` is a tally keyed by the harness's own reason. The
+        // commonest one labels the row; the full tally stays answerable from
+        // the rows themselves, which is the point of the atomic grain.
+        ...(reason === undefined ? {} : { reason }),
+        at: f.lastSeen,
+      });
+    }
+  }
+  return rows;
 }

@@ -210,7 +210,7 @@ describe('gatherReport — the standing it builds equals the one computeStanding
       const id = basename(f, '.jsonl');
       return { sessionId: id, project: 'x', events: parse(f, readFileSync(f, 'utf8'), id).events };
     });
-    const direct = await computeStanding(inputs, detectors, { now: now.toISOString() });
+    const { standing: direct } = await computeStanding(inputs, detectors, { now: now.toISOString() });
 
     // Compare the arithmetic, not the session set (gather sees every file).
     expect(Object.keys(gathered.standing.wastedTokens).sort()).toEqual(
