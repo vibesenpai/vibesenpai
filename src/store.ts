@@ -112,7 +112,26 @@ CREATE TABLE IF NOT EXISTS run (
   -- Real elapsed time from the harness's own envelope, so an estimate can be
   -- measured rather than asserted. JUDGE_SECONDS_PER_CALL is three runs
   -- hand-copied into a constant; this is every run, continuously.
-  duration_ms INTEGER
+  duration_ms INTEGER,
+  -- How much the pass actually read. Without it, duration is uninterpretable:
+  -- the first three recorded runs took ~3s each and were reading packets of
+  -- ~1,700 tokens, which says nothing about a 60,000-token one. A median over
+  -- them produced an ETA calibrated on the smallest quartile of the queue.
+  packet_tokens INTEGER
+);
+`;
+
+/** Extracted so the one migration below can rebuild exactly this. */
+const SESSION_DDL = `
+CREATE TABLE IF NOT EXISTS session (
+  id            TEXT PRIMARY KEY,
+  project       TEXT NOT NULL,
+  first_ts      TEXT,
+  last_ts       TEXT,
+  size_bytes    INTEGER NOT NULL DEFAULT 0,
+  gone          INTEGER NOT NULL DEFAULT 0,
+  updated_at    TEXT NOT NULL,
+  packet_tokens INTEGER
 );
 `;
 
@@ -132,13 +151,23 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE TABLE IF NOT EXISTS session (
-  id         TEXT PRIMARY KEY,
-  project    TEXT NOT NULL,
-  first_ts   TEXT,
-  last_ts    TEXT,
-  size_bytes INTEGER NOT NULL DEFAULT 0,
-  gone       INTEGER NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL
+  id            TEXT PRIMARY KEY,
+  project       TEXT NOT NULL,
+  first_ts      TEXT,
+  last_ts       TEXT,
+  size_bytes    INTEGER NOT NULL DEFAULT 0,
+  gone          INTEGER NOT NULL DEFAULT 0,
+  updated_at    TEXT NOT NULL,
+  -- What the judge will actually have to read, measured rather than guessed.
+  --
+  -- Nothing cheap predicts it. Measured across 29 real sessions, tokens per
+  -- KB spans 1.5 to 9.4, and tokens against event count is not even
+  -- monotonic: 6,067 events render to 66,196 tokens while 7,013 render to
+  -- 55,691, because consecutive same-role turns merge.
+  --
+  -- So it is computed instead of modelled, by the pass that already parses
+  -- every transcript: +195ms on top of 1,442ms, and free of model tokens.
+  packet_tokens INTEGER
 );
 
 -- The fact table, at atomic grain: one anchored occurrence.
@@ -264,7 +293,24 @@ export function openStore(archive: string): Db {
     // runs for a brand-new store.
     if (cols.length === 0) {
       db.exec(RUN_DDL);
-    } else if (!cols.includes('session_id')) {
+    } else if (!cols.includes('session_id') || !cols.includes('packet_tokens')) {
+      // ── Add columns when there are rows worth keeping ──────────────────
+      //
+      // The drop-and-recreate below is lossless only while the table is
+      // empty, which it no longer is once passes have recorded themselves.
+      // Refusing to drop was right and stopping there was not: the column
+      // never arrived, every read of it threw, and the whole Analysis block
+      // vanished behind a catch. Found by looking at the output.
+      for (const col of ['session_id TEXT', 'duration_ms INTEGER', 'packet_tokens INTEGER']) {
+        const name = col.split(' ')[0] as string;
+        if (cols.includes(name)) continue;
+        try {
+          db.exec(`ALTER TABLE run ADD COLUMN ${col}`);
+        } catch {
+          // Already there, or a shape we cannot repair — the drop below is
+          // the fallback for an empty table.
+        }
+      }
       const held = (db.prepare('SELECT COUNT(*) c FROM run').get() as { c: number }).c;
       if (held === 0) {
         // Dropped **and recreated right here**, not left to the DDL below:
@@ -278,6 +324,21 @@ export function openStore(archive: string): Db {
     }
     // Added after `run`, so an existing store has neither.
     db.exec(SKIPPED_DDL);
+
+    // `session` gained `packet_tokens` the same way, and is empty for the same
+    // reason `run` was: declared early, wired late.
+    const scols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    if (scols.length === 0) {
+      db.exec(SESSION_DDL);
+    } else if (!scols.includes('packet_tokens')) {
+      const held = (db.prepare('SELECT COUNT(*) c FROM session').get() as { c: number }).c;
+      if (held === 0) {
+        db.exec('DROP TABLE session');
+        db.exec(SESSION_DDL);
+      }
+    }
   } catch {
     // A store we cannot inspect is one `initialised` will rebuild below.
   }
@@ -513,13 +574,16 @@ export function startRun(db: Db, kind: string, sessionId?: string): string {
 }
 
 /** Close a run. Called from a `finally`, so a crash still leaves a record. */
-export function endRun(db: Db, id: string, status: string, durationMs?: number): void {
-  db.prepare('UPDATE run SET ended_at = ?, status = ?, duration_ms = ? WHERE id = ?').run(
-    new Date().toISOString(),
-    status,
-    durationMs ?? null,
-    id,
-  );
+export function endRun(
+  db: Db,
+  id: string,
+  status: string,
+  durationMs?: number,
+  packetTokens?: number,
+): void {
+  db.prepare(
+    'UPDATE run SET ended_at = ?, status = ?, duration_ms = ?, packet_tokens = ? WHERE id = ?',
+  ).run(new Date().toISOString(), status, durationMs ?? null, packetTokens ?? null, id);
 }
 
 /**
@@ -567,6 +631,39 @@ export function measuredCallMs(db: Db, minRuns = 3): number | undefined {
 }
 
 /**
+ * How long a pass takes **per token read**, from this machine's own history.
+ *
+ * ── Why a rate rather than a median ────────────────────────────────────────
+ *
+ * `measuredCallMs` took the median duration across recent runs regardless of
+ * what they read, and the first three recorded were ~3s each on packets of
+ * ~1,700 tokens. Multiplying that across a queue whose largest session is
+ * 66,196 tokens produced an estimate calibrated on its smallest members —
+ * which is how the surface came to claim "about 3 minutes" for a backlog of
+ * 217,567 tokens.
+ *
+ * Duration is only interpretable against the size it was spent on, so the two
+ * are recorded together and divided.
+ *
+ * Returns `undefined` until two runs of **different** sizes exist: a rate from
+ * one point, or from several of the same size, is the same mistake again.
+ */
+export function measuredMsPerToken(db: Db, minRuns = 2): number | undefined {
+  const rows = db
+    .prepare(
+      'SELECT duration_ms, packet_tokens FROM run ' +
+        'WHERE duration_ms IS NOT NULL AND packet_tokens IS NOT NULL AND packet_tokens > 0 ' +
+        'ORDER BY started_at DESC LIMIT 20',
+    )
+    .all() as { duration_ms: number; packet_tokens: number }[];
+  if (rows.length < minRuns) return undefined;
+  if (new Set(rows.map((r) => r.packet_tokens)).size < 2) return undefined;
+
+  const rates = rows.map((r) => r.duration_ms / r.packet_tokens).sort((a, b) => a - b);
+  return rates[Math.floor(rates.length / 2)];
+}
+
+/**
  * Mark a session no packet can hold.
  *
  * ── Why this is not a breaker failure ──────────────────────────────────────
@@ -596,4 +693,33 @@ export function skippedSessions(db: Db): { sessionId: string; reason: string }[]
       reason: string;
     }[]
   ).map((r) => ({ sessionId: r.session_id, reason: r.reason }));
+}
+
+/**
+ * Record what a session will cost the judge to read.
+ *
+ * Written by the **standing** pass, which parses every transcript anyway and
+ * spends no model tokens doing it. The judge then needs no estimate, and
+ * neither does the surface that reports how long the queue will take.
+ */
+export function putSessionCost(
+  db: Db,
+  rows: { id: string; project: string; sizeBytes: number; packetTokens: number }[],
+): void {
+  const put = db.prepare(
+    'INSERT INTO session(id, project, size_bytes, updated_at, packet_tokens) ' +
+      'VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET ' +
+      'size_bytes = excluded.size_bytes, packet_tokens = excluded.packet_tokens, ' +
+      'updated_at = excluded.updated_at',
+  );
+  const at = new Date().toISOString();
+  for (const r of rows) put.run(r.id, r.project, r.sizeBytes, at, r.packetTokens);
+}
+
+/** What each session will cost, for sizing the queue. */
+export function sessionCosts(db: Db): Map<string, number> {
+  const rows = db
+    .prepare('SELECT id, packet_tokens FROM session WHERE packet_tokens IS NOT NULL')
+    .all() as { id: string; packet_tokens: number }[];
+  return new Map(rows.map((r) => [r.id, r.packet_tokens]));
 }

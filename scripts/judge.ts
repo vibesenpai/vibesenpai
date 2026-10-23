@@ -338,6 +338,8 @@ async function main(): Promise<void> {
   // the choice moved out of extraction, which is exactly the dimension hardest
   // to pick while reading.
   const extractPacket = renderExtract(batch);
+  // What this pass reads, paired with how long it takes — see `lastPacketTokens`.
+  lastPacketTokens = estimateTokens(extractPacket);
   if (refuseIfUnredacted(extractPacket, batch.map((b) => b.sessionId))) return;
 
   const extracted = callModel(extractPacket, state.settings.model, { timeoutMs: TIMEOUT_MS, maxBufferBytes: 32 * 1024 * 1024 });
@@ -450,6 +452,16 @@ async function main(): Promise<void> {
  */
 let lastCallMs: number | undefined;
 
+/**
+ * How many tokens this pass actually sent.
+ *
+ * Recorded beside the duration, because one without the other cannot be read:
+ * three seconds on 1,700 tokens and three seconds on 60,000 are different
+ * facts, and a median over the first kind produced an ETA for a queue made
+ * mostly of the second.
+ */
+let lastPacketTokens: number | undefined;
+
 const runArchive = (() => {
   try {
     return resolveConfig().config.archive;
@@ -486,7 +498,7 @@ main()
       try {
         const db = openStore(runArchive);
         try {
-          endRun(db, runId, 'done', lastCallMs);
+          endRun(db, runId, 'done', lastCallMs, lastPacketTokens);
         } finally {
           db.close();
         }

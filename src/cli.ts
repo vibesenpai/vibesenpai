@@ -42,7 +42,9 @@ import { buildSkeletons, render } from './skeleton.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from './report.ts';
 import { detectorsFor, runDetectors, unknownDimensions } from './detect/index.ts';
 import { leadSegments, render as renderFindings, type Baseline } from './render.ts';
-import { currentRun, measuredCallMs, openStore } from './store.ts';
+import {
+  currentRun, measuredCallMs, measuredMsPerToken, openStore, sessionCosts,
+} from './store.ts';
 import type { Detector } from './detect/index.ts';
 import type { Preset } from './types.ts';
 import {
@@ -586,9 +588,24 @@ function printAnalysis(config: Config): void {
     const db = openStore(config.archive);
     try {
       const sizes = sessionSizes(config.sources);
-      const { unread, judged, behind } = pendingWork(readJudgeState(config.archive), sizes);
+      const state = readJudgeState(config.archive);
+      const { unread, judged, behind } = pendingWork(state, sizes);
+
+      // What the queue actually holds, rather than how many things are in it.
+      // Measured by the standing pass; absent until it has run once, in which
+      // case the estimate falls back to assuming a full packet each.
+      const costs = sessionCosts(db);
+      const queueTokens = sizes
+        .filter((x) => (state.ledger[x.id] ?? 0) === 0 && costs.has(x.id))
+        .reduce((n, x) => n + (costs.get(x.id) ?? 0), 0);
+
       lines = analysisBlock({
         total: sizes.length,
+        ...(queueTokens > 0 ? { queueTokens } : {}),
+        ...(() => {
+          const r = measuredMsPerToken(db);
+          return r === undefined ? {} : { msPerToken: r };
+        })(),
         // "Read" means looked at at all — a live session is never *fully*
         // caught up, so counting only those would show 0 for ever.
         read: judged + behind,

@@ -636,9 +636,39 @@ export function findingsFor(state: JudgeState, sessionId: string): JudgedFinding
  * A real duration is given for exactly one case — a pass in flight, where
  * elapsed-against-expected is a fact rather than an extrapolation.
  */
+/**
+ * How long the outstanding work will take, in model time.
+ *
+ * Prefers the rate this machine has actually shown — duration divided by the
+ * tokens it was spent on — and falls back to the documented constant
+ * interpreted as a full-budget pass. `JUDGE_SECONDS_PER_CALL` was measured
+ * over batches of 35 to 195 calls, so treating it as the cost of a packet at
+ * the ceiling is the reading most consistent with where it came from.
+ */
+function estimateQueueSeconds(opts: {
+  unread: number;
+  queueTokens?: number;
+  msPerToken?: number;
+  budget?: number;
+}): number {
+  const budget = opts.budget ?? 60_000;
+  const rate = opts.msPerToken ?? (JUDGE_SECONDS_PER_CALL * 1000) / budget;
+
+  // With no measured sizes, fall back to assuming each unread session is one
+  // full-budget pass — an overestimate, and the honest direction to err in.
+  const tokens = opts.queueTokens ?? opts.unread * budget;
+  const CALLS_PER_PASS = 2;
+  return (tokens * rate * CALLS_PER_PASS) / 1000;
+}
+
 export function progressLine(
   opts: {
     unread: number;
+    /** Total tokens the judge still has to read, measured by the standing pass. */
+    queueTokens?: number;
+    /** This machine's own rate, where two runs of different sizes exist. */
+    msPerToken?: number;
+    budget?: number;
     running?: { sessionId?: string; elapsedMs: number };
     callMs?: number;
     /**
@@ -694,6 +724,11 @@ export function analysisBlock(opts: {
   running?: { sessionId?: string; elapsedMs: number };
   callMs?: number;
   spawned?: boolean;
+  /** Tokens the judge still has to read, measured by the standing pass. */
+  queueTokens?: number;
+  /** This machine's own ms-per-token, where runs of two sizes exist. */
+  msPerToken?: number;
+  budget?: number;
 }): string[] {
   const { total, read, unread } = opts;
   if (total === 0) return [];
@@ -710,10 +745,18 @@ export function analysisBlock(opts: {
     ...(opts.spawned === true ? { spawned: true } : {}),
   });
 
-  // Model time, stated as such. The per-call figure is measured where we have
-  // it and falls back to the constant until three passes exist.
-  const perSession = ((opts.callMs ?? JUDGE_SECONDS_PER_CALL * 1000) * 2) / 1000;
-  const left = humanDuration(Math.round(unread * perSession));
+  // ── Sized by what is actually there, not by how many things there are ───
+  //
+  // This was `unread × a per-session constant`, which assumes sessions are
+  // interchangeable. They are not: measured across 29 real ones, the packets
+  // span 1,075 to 66,196 tokens. Counting them equally made a queue of mostly
+  // small sessions look the same as a queue containing a 66k one.
+  //
+  // `queueTokens` is the sum of what the judge will read, measured by the
+  // standing pass, which parses every transcript anyway. Two calls per pass —
+  // extract then label — and the second reads records rather than transcripts,
+  // so it is counted at the same rate deliberately conservatively.
+  const left = humanDuration(Math.round(estimateQueueSeconds(opts)));
 
   return opts.running !== undefined
     ? [head, now]

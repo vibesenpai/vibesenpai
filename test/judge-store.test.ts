@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { markSkipped, openStore } from '../src/store.ts';
+import { endRun, markSkipped, measuredMsPerToken, openStore, startRun } from '../src/store.ts';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import {
   BYTES_PER_TURN,
   DEFAULT_SETTINGS,
+  analysisBlock,
   dueForJudging,
   emptyState,
   findingsFor,
@@ -262,5 +263,76 @@ describe('a session too big for one packet is read, not abandoned', () => {
     expect(branch, 'the windowing branch moved').not.toBe('');
     expect(branch, 'too large is permanent, not a fault').not.toMatch(/recordFailure/);
     expect(branch).toMatch(/skipSession/);
+  });
+});
+
+describe('the estimate is sized by what is there, not by how many', () => {
+  // It was `unread × a per-session constant`, which assumes sessions are
+  // interchangeable. Measured across 29 real ones, their packets span 1,075
+  // to 66,196 tokens — so a queue of small sessions looked identical to one
+  // holding a 66k session.
+  //
+  // Nothing cheap predicts the size either: tokens per KB spans 1.5 to 9.4,
+  // and tokens against event count is not even monotonic (6,067 events →
+  // 66,196 tokens; 7,013 → 55,691, because same-role turns merge). So it is
+  // measured by the standing pass, which parses every transcript anyway.
+  const line = (o: Parameters<typeof analysisBlock>[0]) => analysisBlock(o).join(' | ');
+
+  it('shrinks when the queue is small, even with many sessions', () => {
+    const many = line({ total: 30, read: 0, unread: 28, queueTokens: 20_000 });
+    const few = line({ total: 30, read: 0, unread: 2, queueTokens: 120_000 });
+    expect(many).toMatch(/seconds|1 minute/);
+    expect(few, 'two big sessions outweigh twenty-eight small ones').toMatch(/minutes/);
+  });
+
+  it('overestimates rather than under, with nothing measured yet', () => {
+    // Before the standing pass has run there are no sizes, so each unread
+    // session is assumed to be a full-budget packet. Wrong, and wrong in the
+    // direction that does not promise a reader something it cannot deliver.
+    const blind = line({ total: 28, read: 0, unread: 28 });
+    const measured = line({ total: 28, read: 0, unread: 28, queueTokens: 217_567 });
+    expect(blind).not.toBe(measured);
+    expect(blind).toMatch(/28 minutes/);
+  });
+
+  it('uses this machine rate once it has one', () => {
+    const fallback = line({ total: 28, read: 0, unread: 28, queueTokens: 217_567 });
+    const learned = line({
+      total: 28, read: 0, unread: 28, queueTokens: 217_567, msPerToken: 1.765,
+    });
+    expect(learned).not.toBe(fallback);
+  });
+
+  it('counts progress by sessions looked at, which can reach the total', () => {
+    expect(line({ total: 29, read: 2, unread: 27 })).toMatch(/2 of 29/);
+    expect(line({ total: 29, read: 29, unread: 0 })).toMatch(/Up to date/);
+  });
+});
+
+describe('a rate needs two sizes, not two samples', () => {
+  // `measuredCallMs` took a median of durations regardless of what they read.
+  // The first three recorded were ~3s each on packets of ~1,700 tokens, which
+  // says nothing about a 60,000-token one — and multiplying it across the
+  // queue is how the surface came to claim "about 3 minutes" for 217,567
+  // tokens of work.
+  const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-rate-'));
+
+  it('refuses when every run read the same amount', () => {
+    const db = openStore(scratch());
+    for (const ms of [3000, 3100, 2900]) {
+      endRun(db, startRun(db, 'judge'), 'done', ms, 1700);
+    }
+    expect(measuredMsPerToken(db)).toBeUndefined();
+    db.close();
+  });
+
+  it('gives a rate once the sizes differ', () => {
+    const db = openStore(scratch());
+    endRun(db, startRun(db, 'judge'), 'done', 3000, 1700);
+    endRun(db, startRun(db, 'judge'), 'done', 60_000, 60_000);
+    const r = measuredMsPerToken(db);
+    expect(r).toBeDefined();
+    expect(r as number).toBeGreaterThan(0);
+    db.close();
   });
 });

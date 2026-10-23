@@ -20,7 +20,11 @@ import {
   clearStarted, computeStanding, isFresh, readStanding, writeStanding, type SessionInput,
 } from '../src/standing.ts';
 import { recordFailure, recordSuccess } from '../src/breaker.ts';
-import { openStore, putOccurrences, transact, type Db } from '../src/store.ts';
+import {
+  openStore, putOccurrences, putSessionCost, transact, type Db,
+} from '../src/store.ts';
+import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
+import { buildSession, estimateTokens, renderExtract } from '../src/judge.ts';
 // One enumeration, shared with `report`. This file used to shell out to `find`.
 import { discoverTranscripts } from '../src/read.ts';
 
@@ -37,13 +41,45 @@ async function main(): Promise<void> {
 
   try {
     const sessions: SessionInput[] = [];
+    const costs: { id: string; project: string; sizeBytes: number; packetTokens: number }[] = [];
     let unreadable = 0;
     for (const f of discoverTranscripts(config.sources)) {
       try {
         const id = basename(f, '.jsonl');
-        const parsed = parse(f, readFileSync(f, 'utf8'), id);
+        const text = readFileSync(f, 'utf8');
+        const parsed = parse(f, text, id);
         if (parsed.events.length === 0) continue;
-        sessions.push({ sessionId: id, project: projectOf(f), events: parsed.events });
+        const project = projectOf(f);
+        sessions.push({ sessionId: id, project, events: parsed.events });
+
+        // ── Measure what the judge will have to read ──────────────────────
+        //
+        // Nothing cheap predicts it. Across 29 real sessions, tokens per KB
+        // spans 1.5 to 9.4, and tokens against event count is not monotonic:
+        // 6,067 events render to 66,196 tokens while 7,013 render to 55,691,
+        // because consecutive same-role turns merge.
+        //
+        // This pass already parses every transcript, so building the packet
+        // too costs +195ms on 1,442ms and no model tokens at all. The paid
+        // pass then needs no estimate, and neither does the surface that says
+        // how long the queue will take.
+        try {
+          const r = withFullText(() =>
+            parseTranscript(text.split('\n'), id),
+          );
+          const events = [...r.result.events].sort((a, b) => a.seq - b.seq);
+          const packet = buildSession(id, events, r.fullText, undefined);
+          if (packet.packet.turns.length > 0) {
+            costs.push({
+              id,
+              project,
+              sizeBytes: Buffer.byteLength(text),
+              packetTokens: estimateTokens(renderExtract([packet])),
+            });
+          }
+        } catch {
+          // A cost we cannot measure is one the estimate does without.
+        }
       } catch {
         unreadable++;
       }
@@ -62,6 +98,18 @@ async function main(): Promise<void> {
     // from scratch each time, and wrote only a rollup that keeps one subject
     // per dimension. One transaction, upserted by content hash, so running
     // twice is a no-op and a crash leaves nothing half-written.
+    if (costs.length > 0) {
+      let db: Db | undefined;
+      try {
+        db = openStore(config.archive);
+        transact(db, () => putSessionCost(db as Db, costs));
+      } catch {
+        // Principle Zero: the rollup is already written.
+      } finally {
+        db?.close();
+      }
+    }
+
     if (occurrences.length > 0) {
       let db: Db | undefined;
       try {
