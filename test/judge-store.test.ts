@@ -14,11 +14,19 @@ import {
 const archive = (): string => mkdtempSync(join(tmpdir(), 'as-judge-'));
 
 describe('settings', () => {
-  it('is OFF until somebody says otherwise', () => {
-    // The one part of the tool that spends money in a detached process while
-    // the user is not present. Consent is an explicit act.
-    expect(DEFAULT_SETTINGS.enabled).toBe(false);
-    expect(readJudgeState(archive()).settings.enabled).toBe(false);
+  it('is ON, because the trigger moved rather than the consent', () => {
+    // This asserted `false`, and the reasoning held for a CLI installed from
+    // npm: a detached process spending money while the user is absent is the
+    // Self-Initiated Overreach this tool exists to detect.
+    //
+    // The entry point is now `/plugin install`, and the structural tier alone
+    // is one detector — 4 occurrences across 18 real sessions where the judge
+    // found 19. What keeps the principle intact is that **the `Stop` hook no
+    // longer spawns a pass**: nothing is judged until the user runs a command.
+    // That boundary is asserted in `test/hook-stop.test.ts`, and it is the one
+    // that matters.
+    expect(DEFAULT_SETTINGS.enabled).toBe(true);
+    expect(readJudgeState(archive()).settings.enabled).toBe(true);
   });
 
   it('reads back what was written', () => {
@@ -38,7 +46,7 @@ describe('settings', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'judge.json'), '{ this is not json');
     const back = readJudgeState(dir);
-    expect(back.settings.enabled).toBe(false);
+    expect(back.settings).toEqual(DEFAULT_SETTINGS);
     expect(back.findings).toEqual([]);
   });
 

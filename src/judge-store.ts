@@ -45,7 +45,24 @@ export type JudgeSettings = {
 };
 
 export const DEFAULT_SETTINGS: JudgeSettings = {
-  enabled: false,
+  // ── On, because the entry point is the plugin ────────────────────────────
+  //
+  // This was `false`, and the reasoning was sound for the product we thought
+  // we were building: a CLI someone installs from npm, where a detached
+  // process spending their money unprompted is the Self-Initiated Overreach
+  // this tool exists to detect.
+  //
+  // Two things changed. The entry point is `/plugin install`, which is itself
+  // a deliberate act with a trust warning attached — and the structural tier
+  // alone is **one detector**, which found 4 occurrences across 18 real
+  // sessions where the judge found 19. Opt-in does not produce a cautious
+  // product; it produces one nobody turns on.
+  //
+  // The principle survives intact because the trigger moved rather than the
+  // consent: **nothing is judged until the user runs a command.** The `Stop`
+  // hook no longer spawns a pass. See `cmdNow` in `cli.ts`, and `/insights`,
+  // which spends a user's tokens on exactly these terms.
+  enabled: true,
   model: 'haiku',
   // ~50 turns: a 788-turn session is judged a handful of times rather than
   // hundreds. Measured against the cost of an invocation (26,384 tokens of

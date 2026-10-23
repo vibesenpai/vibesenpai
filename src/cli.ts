@@ -23,8 +23,8 @@ import {
 } from './read.ts';
 import { gatherReport, type ReportData } from './gather.ts';
 import {
-  BYTES_PER_TURN, findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL, pendingWork,
-  readJudgeState, tallyByDimension, writeJudgeState,
+  BYTES_PER_TURN, dueForJudging, findingsFor, humanDuration, JUDGE_SECONDS_PER_CALL,
+  type JudgeState, pendingWork, readJudgeState, tallyByDimension, writeJudgeState,
 } from './judge-store.ts';
 import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, renderExtract } from './judge.ts';
 import { parseTranscript, withFullText } from './parsers/claude-code.ts';
@@ -557,12 +557,120 @@ async function cmdNow(a: Argv): Promise<number> {
     );
   }
 
+  // ── The judge runs because you asked, and only then ─────────────────────
+  //
+  // This is the trigger that used to live in the `Stop` hook. Moving it here
+  // is what lets the judge be on from installation without a detached process
+  // spending someone's money at every turn boundary: a pass happens when a
+  // user runs a command about a session, and at no other time.
+  //
+  // Spawned detached rather than awaited, so this surface stays instant —
+  // measured at 0.41s, and the whole reason `now` is worth typing. The
+  // findings land on the next invocation, which the lag line already says.
+  //
+  // One session, never the backlog: ~58k input tokens here against ~1.05M for
+  // the 18 sessions on this machine. `judge --backlog` exists for that, and
+  // asks first.
+  maybeJudgeThisSession(config, current.sessionId, current.source, judgeState);
+
   // The window dump is a debug view, not the product. `agentsensei skeleton`
   // exists for it; `--skeleton` keeps it reachable from here too.
   if (a.flags['skeleton'] === true) {
     return printSkeletons(a, current.sessionId, current.source, undefined, true);
   }
   return 0;
+}
+
+/** `1 session` / `4 sessions`. The `(s)` form reads as an unfinished sentence. */
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * Has the one-time disclosure been shown on this machine?
+ *
+ * A marker file rather than a field in `judge.json`, for the same reason
+ * `standing.running` is one: it is a fact about this installation, not part of
+ * the judge's persisted state, and it must not be lost to a schema migration
+ * or re-shown because a store was rebuilt.
+ */
+function hasDisclosed(archive: string): boolean {
+  return existsSync(join(archive, 'disclosed'));
+}
+
+function markDisclosed(archive: string): void {
+  try {
+    mkdirSync(archive, { recursive: true, mode: 0o700 });
+    writeFileSync(join(archive, 'disclosed'), new Date().toISOString(), { mode: 0o600 });
+  } catch {
+    // Worst case the notice shows twice. Never worth failing a command over.
+  }
+}
+
+/**
+ * Spawn the judge for one session and do not wait.
+ *
+ * Detached, exactly as the `Stop` hook used to do it — the difference is only
+ * what triggers it. `stdio: 'ignore'` because anything it printed would land
+ * in the middle of the user's own session.
+ */
+function spawnJudge(sessionId?: string): void {
+  try {
+    const script = join(repoRoot(), isCompiled() ? 'dist/scripts' : 'scripts',
+      isCompiled() ? 'judge.js' : 'judge.ts');
+    // No session id means the whole backlog, which `scripts/judge.ts` batches.
+    const tail = sessionId === undefined ? [] : [sessionId];
+    const args = isCompiled() ? [script, ...tail] : ['--experimental-strip-types', script, ...tail];
+    spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref();
+  } catch {
+    // Principle Zero: a judge that cannot start must not break the command.
+  }
+}
+
+/**
+ * Spawn a judge pass for one session, if it has unjudged turns.
+ *
+ * Returns without doing anything when the judge is off, the breaker is
+ * tripped, or there is nothing new — all three are normal, and none is worth
+ * telling the user about.
+ */
+function maybeJudgeThisSession(
+  config: { archive: string },
+  sessionId: string,
+  source: string,
+  state: JudgeState,
+): void {
+  if (!state.settings.enabled) return;
+  if (isTripped(readBreaker(config.archive))) return;
+
+  let size: number;
+  try {
+    size = statSync(source).size;
+  } catch {
+    return;
+  }
+  if (!dueForJudging(state, sessionId, size)) return;
+
+  // Said once per machine, not once per run. A user who has seen it does not
+  // need telling again, and a line that repeats is a line that gets ignored.
+  if (!hasDisclosed(config.archive)) {
+    console.log('');
+    console.log(`  ${dim('─'.repeat(64))}`);
+    console.log(
+      `  agentsensei reads this session with the model on ${bold('your own account')}`,
+    );
+    console.log(
+      `  ${dim('— about 58k tokens, roughly a minute. Nothing is sent anywhere else,')}`,
+    );
+    console.log(
+      `  ${dim('and the text is redacted before it leaves. To stop it for good:')}`,
+    );
+    console.log(`  ${dim('/plugin disable agentsensei')}`);
+    console.log(`  ${dim('─'.repeat(64))}`);
+    markDisclosed(config.archive);
+  }
+
+  spawnJudge(sessionId);
 }
 
 /**
@@ -1049,6 +1157,37 @@ function cmdJudge(a: Argv): number {
       );
       console.log(`  ${dim('tokens, not dollars — a price depends on your plan and tier.')}`);
     }
+    return 0;
+  }
+
+  // ── `--backlog`: the one deliberately expensive thing ───────────────────
+  //
+  // `now` judges one session, ~58k tokens. The backlog on this machine is 18
+  // sessions — 1,046,898 tokens — which is not something to start on a flag
+  // alone, so it prints the estimate and waits for `--apply` like every other
+  // spend in this tool.
+  if (f['backlog'] === true) {
+    const { pending, seconds } = pendingWork(state, sessionSizes(config.sources));
+    if (pending === 0) {
+      console.log('nothing pending — every session is up to date');
+      return 0;
+    }
+    if (!state.settings.enabled) {
+      console.log('the judge is disabled; nothing would run');
+      return 1;
+    }
+    if (f['apply'] !== true) {
+      console.log(`this would read ${plural(pending, 'session')} with the model on your account`);
+      console.log(
+        `  about ${humanDuration(seconds)} · roughly ${(pending * 58).toLocaleString()}k input tokens`,
+      );
+      console.log('');
+      console.log('  nothing has been sent. re-run with --apply to start it.');
+      return 0;
+    }
+    spawnJudge();
+    console.log(`reading ${plural(pending, 'session')} — about ${humanDuration(seconds)}.`);
+    console.log(dim('  it runs in the background; findings appear as they land.'));
     return 0;
   }
 

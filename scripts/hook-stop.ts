@@ -28,9 +28,6 @@ import { join } from 'node:path';
 import { isTripped, readBreaker } from '../src/breaker.ts';
 import { resolveConfig } from '../src/config.ts';
 import { isFresh, readStanding } from '../src/standing.ts';
-import { dueForJudging, readJudgeState } from '../src/judge-store.ts';
-import { resolveCurrentSession } from '../src/read.ts';
-import { statSync } from 'node:fs';
 
 function main(): void {
   if (process.env['AGENTSENSEI_DISABLE'] === '1') return;
@@ -38,9 +35,24 @@ function main(): void {
   const { config } = resolveConfig();
   if (isTripped(readBreaker(config.archive))) return;
 
-  // Independent of the standing freshness window below: the judge has its own
-  // cadence, and a fresh standing must not mean a session goes unjudged.
-  maybeJudge(config.archive, config.sources);
+  // ── This hook spends nothing, and that is the whole design ──────────────
+  //
+  // It used to call `maybeJudge`, which spawned a model pass on a cadence
+  // whenever the live session had grown enough. That was defensible only
+  // while the judge was off by default — the user had enabled it in an
+  // explicit act, so the cadence was something they had asked for.
+  //
+  // The judge is now on from installation, so the same cadence would mean a
+  // detached process spending someone's money at every turn boundary without
+  // them asking. That is precisely the Self-Initiated Overreach this tool
+  // exists to detect, and shipping it would make the product the thing it
+  // criticises.
+  //
+  // So the trigger moved to the commands: `cmdNow` spawns a pass for the
+  // session the user is asking about, when they ask. Nothing here does.
+  //
+  // What remains is the standing refresh, which is local, free, and the
+  // reason the next session can open with a report instead of a spinner.
 
   // The freshness window is what makes this affordable at every boundary.
   if (isFresh(readStanding(config.archive))) return;
@@ -48,34 +60,6 @@ function main(): void {
   spawnDetached('compute-standing.ts');
 }
 
-/**
- * The live session's judge pass, on a cadence.
- *
- * **Stop fires at every response boundary** — ~788 times in one real session —
- * so this must never be once-per-fire. An invocation costs 26,384 tokens of
- * overhead before our packet, which at that rate would be indefensible.
- *
- * `dueForJudging` compares bytes rather than counting turns, because the hook
- * has milliseconds and a `stat` is free where a parse is not. Being slightly
- * early or late on the cadence costs nothing.
- */
-function maybeJudge(archive: string, sources: string[]): void {
-  const state = readJudgeState(archive);
-  if (!state.settings.enabled) return;
-
-  const current = resolveCurrentSession(sources);
-  if (current === undefined) return;
-
-  let size: number;
-  try {
-    size = statSync(current.source).size;
-  } catch {
-    return;
-  }
-  if (!dueForJudging(state, current.sessionId, size)) return;
-
-  spawnDetached('judge.ts', current.sessionId);
-}
 
 /** Spawn and forget. The hook never waits for analysis — see docs/surfaces.md. */
 function spawnDetached(script: string, ...args: string[]): void {
