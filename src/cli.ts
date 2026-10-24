@@ -55,7 +55,7 @@ import {
 import { readBreaker, isTripped } from './breaker.ts';
 import { computedAtLocal, readStanding } from './standing.ts';
 import {
-  costLine, detailLine, dimensionLine, fixLine, nextRung, reportBlock, whereLine,
+  costLine, detailLine, dimensionLine, nextRung, reportBlock, whereLine,
 } from './report-line.ts';
 import { compactionsFor, recommend, renderFix } from './fix.ts';
 import { spawn } from 'node:child_process';
@@ -675,10 +675,12 @@ async function cmdInsights(a: Argv): Promise<number> {
   // findings here, or a standing that has some. Nothing to fix means no line.
   const standing = readStanding(config.archive);
   const haveHistory = standing !== undefined && standing.dimensions.length > 0;
-  const nextStep =
-    res.findings.length > 0 || haveHistory
-      ? fixLine(repoRoot(), homedir(), res.findings.length > 0)
-      : '';
+  // ── Whether there is anything to fix, not what to say about it ─────────
+  //
+  // This held a rendered line, and the menu below now writes its own
+  // sentence — so the text was dead and only its emptiness was read. Said as
+  // the boolean it had become, rather than left as a string nobody prints.
+  const haveSomethingToFix = res.findings.length > 0 || haveHistory;
 
   // Precomputed by the detached pass — `now` reports, it never judges. That is
   // what keeps this surface instant.
@@ -837,20 +839,21 @@ async function cmdInsights(a: Argv): Promise<number> {
     // not a way out. Both hooks had been printed on either side of the note,
     // which left it sandwiched between them.
 
-    // Each says what you get, in the fewest words that stay true. The first
-    // read "one thing to try, from your history", which explains where the
-    // suggestion comes from — a thing nobody is asking at this point — and
-    // the second "every session, as a file you can keep", which described a
-    // filing system rather than an answer.
+    // ── Full sentences, in one shape ────────────────────────────────────
+    //
+    // This was a two-column label table, and the labels kept explaining the
+    // wrong thing: "one thing to try, from your history" gave the suggestion's
+    // provenance, which nobody is asking at the bottom of a report, and
+    // "every session, as a file you can keep" described a filing system
+    // rather than an answer.
+    //
+    // `Run X for Y` throughout, including the other surfaces via `nextRung`.
     const ways = [
-      ...(nextStep === '' ? [] : [['/agentsensei:fix', 'something to try']]),
-      ['/agentsensei:report', 'more detail'],
+      ...(haveSomethingToFix ? ['Run /agentsensei:fix for possible fixes'] : []),
+      'Run /agentsensei:report for more details',
     ];
-    const w = Math.max(...ways.map(([c]) => (c as string).length));
     console.log('');
-    for (const [cmd, what] of ways) {
-      console.log(`  ${dim((cmd as string).padEnd(w))}  ${dim(what as string)}`);
-    }
+    for (const w of ways) console.log(`  ${dim(w)}`);
     console.log('');
   return 0;
 }

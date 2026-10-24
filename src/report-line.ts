@@ -177,31 +177,16 @@ export function fixCommandPath(home: string): string {
   return join(home, '.claude', 'commands', 'agentsensei', 'fix.md');
 }
 
-/**
- * The next step after `now` — one thing to try about what it just showed.
+/*
+ * `fixLine` lived here and is gone.
  *
- * `now` reports this session; `fix` draws on the whole history, and the line
- * says so. Offering it as though it were about the session just shown would be
- * a small lie about what the next command prints.
- *
- * Checked the same way `detailLine` is, and for the same reason: the first
- * version of that line named a command that did not exist on the machine it was
- * written on.
+ * It rendered "/agentsensei:fix for one thing to try — from your history",
+ * which the user found confusing twice over: it explained where a suggestion
+ * comes from, which nobody asks at the bottom of a report, and it buried the
+ * instruction in a fragment. `nextRung` now writes every next step as the
+ * same full sentence, so there was nothing left for this to do but disagree
+ * with it.
  */
-export function fixLine(_repoRoot: string, _home: string, thisSession: boolean): string {
-  // ── Always the slash command ────────────────────────────────────────────
-  //
-  // This used to check whether `~/.claude/commands/agentsensei/fix.md` existed
-  // and fall back to printing a hundred-character `node --experimental-strip-
-  // types /Users/…/src/cli.ts fix` at the user. Under D64 the plugin is the
-  // only front door, so the slash command is always there and the path never
-  // is — the fallback could only fire after an uninstall, which is exactly
-  // when nobody wants a raw invocation suggested to them.
-  //
-  // Caught by running `:insights` straight after `uninstall --apply`.
-  const where = thisSession ? '' : ' — from your history';
-  return `/agentsensei:fix for one thing to try${where}`;
-}
 
 /**
  * The whole block.
@@ -319,14 +304,17 @@ export function reportBlock(
  * strings in four files is how they stop agreeing.
  */
 export function nextRung(from: 'block' | 'insights' | 'report' | 'fix'): string {
+  // Full sentences, in one shape — `Run X for Y`. They were fragments in four
+  // different registers ("for the exact turns", "as a file you can keep"),
+  // which reads as labelling rather than telling someone what to do next.
   switch (from) {
     case 'block':
-      return '/agentsensei:insights for the exact turns';
+      return 'Run /agentsensei:insights for the exact turns';
     case 'insights':
-      return '/agentsensei:report for every session, as a file you can keep';
+      return 'Run /agentsensei:report for more details';
     case 'report':
-      return '/agentsensei:fix for one thing to try';
+      return 'Run /agentsensei:fix for possible fixes';
     case 'fix':
-      return '/agentsensei:report for the evidence behind this';
+      return 'Run /agentsensei:report for more details';
   }
 }

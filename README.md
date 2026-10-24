@@ -140,7 +140,8 @@ Then, for the session you are in right now:
 
   Last read 2026-10-23 11:48.
 
-  /agentsensei:fix for one thing to try — from your history
+  Run /agentsensei:fix for possible fixes
+  Run /agentsensei:report for more details
 ```
 
 `no findings` is a clean bill of health, not a broken tool. That distinction is
