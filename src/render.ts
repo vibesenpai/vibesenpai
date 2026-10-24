@@ -710,10 +710,33 @@ export function renderCompaction(stats: SessionStats): string[] {
  * re-scoring the whole labelled set.
  */
 export function firstSentence(text: string, max: number): string {
+  // ── Whole sentences up to the budget, not exactly one ───────────────────
+  //
+  // This took the first sentence and dropped the rest, whatever the budget —
+  // so a judge explanation written in two lost its second half silently, and
+  // the 240-character allowance it was given never did the cutting.
+  //
+  // The judge usually explains the *what* and then the *why*: "the agent
+  // treated it as a request to parse the secrets" is half the finding without
+  // "rather than a reference the developer meant to handle". Nothing on this
+  // machine is long enough to be affected today, which is exactly why it went
+  // unnoticed.
+  //
+  // Still bounded, and still cut at a sentence end rather than mid-thought: a
+  // trailing fragment reads as a bug, where a complete sentence that stops
+  // early reads as brevity.
   const t = dejargon(text).trim();
-  const stop = t.search(/[.!?](\s|$)/);
-  const one = stop > 0 ? t.slice(0, stop + 1) : t;
-  return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`;
+  if (t.length <= max) return t;
+
+  let out = '';
+  for (const part of t.split(/(?<=[.!?])\s+/)) {
+    const next = out === '' ? part : `${out} ${part}`;
+    if (next.length > max) break;
+    out = next;
+  }
+  // One sentence over budget on its own: fall back to a hard cut, which is the
+  // only case where the ellipsis is honest.
+  return out === '' ? `${t.slice(0, max - 1).trimEnd()}…` : out;
 }
 
 /**

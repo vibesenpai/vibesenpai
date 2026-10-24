@@ -265,12 +265,26 @@ describe('the report can see the model tier', () => {
     expect(html).toContain('flagged by a model');
   });
 
-  it('clamps the model prose to its first sentence', () => {
+  it('clamps the model prose to a budget, at a sentence end', () => {
     // The judge's label stage writes in its own register, at length. Clamping
     // is a render-time fix on purpose: changing the rubric would invalidate the
     // measured 165/232 and require re-scoring the whole labelled set.
-    const html = renderHtml(data({ sessions: [session({ judged: [judged()] })] }));
-    expect(html).not.toContain('A second sentence that must not appear');
+    //
+    // It used to keep **exactly one** sentence whatever the budget, and this
+    // test's own fixture was 117 characters against an allowance of 240 — so
+    // it was asserting one-sentence-ness rather than the verbosity the comment
+    // above describes. The judge usually writes the *what* and then the *why*,
+    // and dropping the second half silently loses the half that explains.
+    //
+    // What must hold is the bound, and that a cut lands on a sentence end
+    // rather than mid-thought.
+    const long = `${'Something verbose happened in this session. '.repeat(8)}A tail that must not appear.`;
+    const html = renderHtml(data({ sessions: [session({ judged: [judged({ why: long })] })] }));
+    expect(html, 'the budget still holds').not.toContain('A tail that must not appear');
+
+    // Two short sentences, well inside the budget, now survive together.
+    const short = renderHtml(data({ sessions: [session({ judged: [judged()] })] }));
+    expect(short).toContain('A second sentence that must not appear');
   });
 
   it('does not say "no findings" when the judge found some', () => {

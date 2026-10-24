@@ -465,7 +465,7 @@ export function recommend(
       evidence:
         `${plural(n, 'time')} across your sessions, at ${where}` +
         (first.name !== undefined ? ` — ${first.name}` : '') +
-        (first.quote !== undefined && first.quote !== '' ? `\n             "${first.quote.slice(0, 90)}"` : ''),
+        (first.quote !== undefined && first.quote !== '' ? `\n             "${first.quote.slice(0, QUOTE_MAX)}"` : ''),
       because: overlay?.because ?? fix.because,
       ...(first.why === undefined || first.why === '' ? {} : { happened: first.why }),
       ...(fix.prompt !== undefined ? { prompt: fix.prompt } : {}),
@@ -651,6 +651,17 @@ export function compactionsFor(
  * Absent or unreadable counts as room — the common case is a project with no
  * `CLAUDE.md` at all, and refusing there would be wrong.
  */
+/**
+ * How much of the quoted evidence `:fix` shows.
+ *
+ * Was 90, where `:insights` shows 160 and the HTML report 200 — so the
+ * surface with the most room was cutting hardest, and a real 137-character
+ * quote on this machine was being clipped mid-phrase. Matched to the report,
+ * since the evidence is the one thing a reader can go and check for
+ * themselves.
+ */
+export const QUOTE_MAX = 200;
+
 export const MEMORY_WORD_BUDGET = 500;
 
 export function memoryAllowed(cwd: string = process.cwd()): boolean {

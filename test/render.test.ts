@@ -9,7 +9,21 @@
 
 import { describe, expect, it } from 'vitest';
 import { parse } from '../src/parsers/index.ts';
-import { activeDuration, caveatFor, describeTurn, durationOf, headlineFor, render, renderCompaction, renderCost, renderFinding, renderJudged, shortenPath, spanOf } from '../src/render.ts';
+import {
+  activeDuration,
+  caveatFor,
+  describeTurn,
+  durationOf,
+  firstSentence,
+  headlineFor,
+  render,
+  renderCompaction,
+  renderCost,
+  renderFinding,
+  renderJudged,
+  shortenPath,
+  spanOf,
+} from '../src/render.ts';
 import { materialise } from '../src/finding.ts';
 import type { Denominators } from '../src/detect/index.ts';
 import type { Event, Finding } from '../src/types.ts';
@@ -561,5 +575,38 @@ describe('a mechanism is not a behaviour, sixth instance', () => {
     const out = renderCost(d(50_000, 1_000_000), undefined, { ratio: 5, sessions: 20 }).join('');
     expect(out, 'nothing was necessarily re-READ').not.toMatch(/re-read/i);
     expect(out).toMatch(/Re-sending the conversation cost/);
+  });
+});
+
+describe('whole sentences, up to a budget', () => {
+  // `firstSentence` took the first sentence and dropped the rest whatever the
+  // budget, so a judge explanation written in two lost half of itself and the
+  // 240-character allowance never did the cutting. The judge typically writes
+  // the *what* and then the *why* — "the agent treated it as a request to
+  // parse the secrets" is half a finding without "rather than a reference the
+  // developer meant to handle".
+  const two =
+    'The agent parsed the secrets. It should have asked, because a bare path is not an instruction.';
+
+  it('keeps both when they fit', () => {
+    expect(firstSentence(two, 240)).toBe(two);
+  });
+
+  it('stops at a sentence end when they do not', () => {
+    const out = firstSentence(two, 70);
+    expect(out).toBe('The agent parsed the secrets.');
+    expect(out, 'a trailing fragment reads as a bug').not.toMatch(/…$/);
+  });
+
+  it('still bounds a single sentence that overruns alone', () => {
+    // The one case where an ellipsis is honest: there is no sentence end to
+    // stop at inside the budget.
+    const out = firstSentence('A single sentence longer than the budget allows here', 30);
+    expect(out.length).toBeLessThanOrEqual(30);
+    expect(out).toMatch(/…$/);
+  });
+
+  it('leaves short text exactly as written', () => {
+    expect(firstSentence('Short.', 240)).toBe('Short.');
   });
 });
