@@ -25,7 +25,7 @@ finds those moments, prices them, and quotes the turns back to you:
 ## What it looks like
 
 ```
-  one thing to try  inaccurate_self_report  [VERIFY]
+  INACCURATE SELF REPORT
   ────────────────────────────────────────────────────────────────────
 
   measured   5 times across your sessions, at turns 1050–3493

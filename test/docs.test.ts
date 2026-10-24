@@ -627,3 +627,51 @@ describe('every surface ends by naming the next one', () => {
     expect(detailLine('/repo', '/home')).toBe(nextRung('block'));
   });
 });
+
+describe('the fix block reads as sections, not as a form', () => {
+  // The user's verdict on the old shape: it "reads very unnaturally" in a
+  // terminal. Six visual systems were stacked in one block — a label line
+  // (`one thing to try  misread_intent  [CONFIG]`), two rules, a left-gutter
+  // form (`measured` / `because`), bullets, indented prose under them, and
+  // unindented prose after.
+  const src = readFileSync('src/fix.ts', 'utf8');
+
+  it('uses headings a reader takes as questions', () => {
+    for (const h of ['What happened', 'Why it happens', 'What you can do']) {
+      expect(src, `missing the "${h}" heading`).toContain(h);
+    }
+  });
+
+  it('drops the vocabulary that was ours rather than theirs', () => {
+    const render = /export function renderFix[\s\S]*$/.exec(src)?.[0] ?? '';
+    expect(render, 'the artifact kind is our catalogue, not their problem').not.toMatch(
+      /\[\$\{r\.kind\}\]|\$\{green\(/,
+    );
+    expect(render, 'and the heading phrase was rejected twice').not.toMatch(/one thing to try/);
+  });
+
+  it('shows the judge account of this case, not only the generic reason', () => {
+    // The block printed a bare quote — "~/Downloads/prod.env" — with nothing
+    // saying what it was, while the sentence explaining it sat unused on the
+    // finding.
+    expect(src).toMatch(/happened\?: string/);
+    expect(src).toMatch(/r\.happened/);
+  });
+
+  it('puts the reason for a remedy next to that remedy', () => {
+    // It existed, in `because`, several lines above the option it justified
+    // and written about the dimension rather than the mechanism.
+    expect(src).toMatch(/helps: string/);
+    expect(src).toMatch(/wrap\(r\.config\.helps/);
+    expect(src).toMatch(/r\.promptHelps/);
+  });
+
+  it('gives every remedy in the catalogue one', () => {
+    // A heading promising a reason, with no reason under it, is worse than
+    // the version that promised nothing.
+    const entries = [...src.matchAll(/^  (\w+): \{$/gm)].map((m) => m[1]);
+    expect(entries.length).toBeGreaterThan(0);
+    const configs = [...src.matchAll(/config: \{\n\s+helps:/g)];
+    expect(configs.length, 'every config remedy needs a `helps`').toBeGreaterThanOrEqual(4);
+  });
+});

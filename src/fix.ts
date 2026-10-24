@@ -40,7 +40,7 @@ import type { Standing } from './standing.ts';
 import type { JudgedFinding } from './judge-store.ts';
 import { nextRung, reasonLabel } from './report-line.ts';
 import { approx } from './cost.ts';
-import { bold, cyan, dim, green, pad, rule, yellow } from './style.ts';
+import { bold, cyan, dim, pad, rule } from './style.ts';
 
 /**
  * What kind of change this is — and the ordering is the docs' own.
@@ -103,9 +103,33 @@ export type Recommendation = {
    * **Printed, never written.** The never-touch-your-config rule is not relaxed
    * because the research likes hooks.
    */
-  config?: { what: string; snippet: string; costs: string };
+  config?: { what: string; snippet: string; costs: string; helps: string };
   /** What this costs the user, for a mechanism that can refuse to finish. */
   external?: { what: string; where: string };
+  /**
+   * Why **this remedy** addresses **this failure**, in one line.
+   *
+   * Distinct from `because`, which argues for the class of fix and sits at the
+   * top of the block. The user's objection was precise: *"I would have loved
+   * to know why I should use plan mode. Currently it's asking me to do
+   * something without really telling me the reasoning."*
+   *
+   * The reasoning did exist — buried in `because`, several lines above the
+   * option it justified, and written about the dimension rather than the
+   * mechanism. A reader deciding whether to adopt something needs the causal
+   * link next to the thing they are deciding about.
+   */
+  promptHelps?: string;
+  /**
+   * The judge's account of **this** occurrence, in its own words.
+   *
+   * Distinct from `evidence` (how often, which turns) and from `because`
+   * (why the class of thing happens). It was being dropped entirely, which
+   * left the block showing a bare quote — `"~/Downloads/prod.env"` — with
+   * nothing to say what it was or why it mattered. The sentence that explains
+   * it was already stored on the finding.
+   */
+  happened?: string;
   /**
    * Why this and not something else — so a recommendation can be argued with.
    *
@@ -247,8 +271,9 @@ export type Compactions = Map<string, CompactionContext>;
 type DimensionFix = {
   kind: ArtifactKind;
   prompt?: string;
-  config?: { what: string; snippet: string; costs: string };
+  config?: { what: string; snippet: string; costs: string; helps: string };
   external?: { what: string; where: string };
+  promptHelps?: string;
   because: string;
 };
 
@@ -256,6 +281,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
   constraint_violation: {
     kind: 'VERIFY',
     config: {
+      helps:
+        'Claude Code runs the check itself when the turn ends, so a constraint ' +
+        'holds whether or not the model still remembers it.',
       what: 'a Stop hook that checks the diff before the turn can end',
       snippet: `{ "hooks": { "Stop": [{ "hooks": [{ "type": "command",
     "command": "git diff --name-only | grep -qE '<paths you said not to touch>' && { echo 'touched a path you asked me not to' >&2; exit 2; } || true" }] }] } }`,
@@ -265,6 +293,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
       'For the rest of this session, before any edit or command: check it ' +
       'against every constraint stated earlier in this conversation, and say ' +
       'which one you checked against.',
+    promptHelps:
+      'Naming the constraint out loud is what makes a slip visible to you ' +
+      'while there is still time to stop it.',
     // The evidence for this wording lives in `docs/artifacts.md` and the
     // header above. It is deliberately NOT in the output: a user reading a
     // finding about their own session does not need a literature review, and
@@ -278,6 +309,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
   overreach: {
     kind: 'GUARD',
     config: {
+      helps:
+        'The list of changed files is checkable where "too much" is not, so ' +
+        'this catches the scope creep the request itself cannot describe.',
       what: 'a Stop hook that holds the diff to what was asked',
       snippet: `{ "hooks": { "Stop": [{ "hooks": [{ "type": "command",
     "command": "git diff --name-only | grep -vqE '<paths this task should touch>' && { echo 'changed files outside the task' >&2; exit 2; } || true" }] }] } }`,
@@ -286,6 +320,8 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
     prompt:
       'For the rest of this session: do only what was asked. If you think ' +
       'something adjacent needs doing, say so and wait rather than doing it.',
+    promptHelps:
+      'Turns a silent extra change into a sentence you can say no to.',
     because:
       'Nothing can tell "too much" from "just enough" by reading the request — ' +
       'but the list of changed files is checkable. Blocking the tools is not ' +
@@ -294,6 +330,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
   inaccurate_self_report: {
     kind: 'VERIFY',
     config: {
+      helps:
+        'Running the command settles whether the tests pass; reading a summary ' +
+        'of them does not. This makes the turn end on the outcome, not the claim.',
       what: 'a Stop hook that runs the check instead of trusting the claim',
       snippet: `{ "hooks": { "Stop": [{ "hooks": [{ "type": "command",
     "command": "<your test command> || { echo 'tests are not passing' >&2; exit 2; }" }] }] } }`,
@@ -306,6 +345,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
     prompt:
       'For the rest of this session: do not report work as done or passing ' +
       'unless a command in this session shows it. Quote the output.',
+    promptHelps:
+      'A quoted command output is something you can check in a second; ' +
+      '"tests pass" is something you have to take on trust.',
     because:
       'Whether the tests pass is not a matter of opinion, so it is worth ' +
       'checking rather than trusting. Running the command settles it; reading ' +
@@ -314,6 +356,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
   misread_intent: {
     kind: 'CONFIG',
     config: {
+      helps:
+        'Claude states its reading before it acts, so a wrong one costs you a ' +
+        'sentence instead of a session.',
       what: 'plan mode, so the reading gets agreed before the work starts',
       snippet: 'shift+tab to cycle into plan mode, or `claude --permission-mode plan`',
       costs:
@@ -323,6 +368,9 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
     prompt:
       'For the rest of this session: before acting on anything ambiguous, ' +
       'state the reading you are acting on in one line and wait.',
+    promptHelps:
+      'The same check as plan mode, without changing any settings — it just ' +
+      'relies on the model remembering, where plan mode does not.',
     because:
       'Nothing can check whether it understood you — that is the one thing ' +
       'only you can confirm. Agreeing the plan first recovers almost ' +
@@ -393,6 +441,10 @@ export function recommend(
               'have been in view. Anything you say in chat can be summarised ' +
               'away; a file on disk cannot.',
             config: {
+              helps:
+                'A compaction can summarise away anything said in chat. A file ' +
+                'on disk survives it, and re-reading it puts the instruction ' +
+                'back in view at the exact moment it was lost.',
               what: 'put standing instructions in a file, and re-read it after every compaction',
               snippet: `# once:  put them in .claude/standing.md
 { "hooks": { "SessionStart": [{ "matcher": "compact",
@@ -415,7 +467,9 @@ export function recommend(
         (first.name !== undefined ? ` — ${first.name}` : '') +
         (first.quote !== undefined && first.quote !== '' ? `\n             "${first.quote.slice(0, 90)}"` : ''),
       because: overlay?.because ?? fix.because,
+      ...(first.why === undefined || first.why === '' ? {} : { happened: first.why }),
       ...(fix.prompt !== undefined ? { prompt: fix.prompt } : {}),
+      ...(fix.promptHelps !== undefined ? { promptHelps: fix.promptHelps } : {}),
       ...(overlay?.config !== undefined
         ? { config: overlay.config }
         : fix.config !== undefined
@@ -631,22 +685,25 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
   // a prompt to paste, a rule to keep, or a figure and no artifact at all.
   lines.push(
     '',
-    `  ${dim('one thing to try')}  ${yellow(r.dimension)}  ${green(`[${r.kind}]`)}`,
+    `  ${bold(r.dimension.replace(/_/g, ' ').toUpperCase())}`,
     `  ${rule(W)}`,
     '',
   );
 
-  // `measured` / `because` / `cost` share a label column, so the three read as
-  // one block rather than three sentences. The cost is last because it is the
-  // consequence of the two above it.
-  const field = (label: string, text: string, style: (t: string) => string = (t) => t): void => {
-    for (const [i, l] of wrap(text, 54).entries()) {
-      lines.push(`  ${pad(i === 0 ? label : '', 10, dim)} ${style(l)}`);
-    }
-  };
 
-  field('measured', r.evidence);
-  field('because', r.because);
+  // ── Headings a reader takes as questions ───────────────────────────────
+  //
+  // `measured` / `because` in a left gutter reads as a form. Worse, the two
+  // texts were the wrong way round for what a reader wants first: `because`
+  // argues for the class of fix, while the judge's account of **this** case
+  // was discarded entirely — so the block showed a bare quote,
+  // `"~/Downloads/prod.env"`, with nothing saying what it was.
+  lines.push(`  ${dim('What happened')}`);
+  for (const l of wrap(r.happened ?? r.evidence, 62)) lines.push(`    ${l}`);
+  lines.push('');
+  lines.push(`  ${dim('Why it happens')}`);
+  for (const l of wrap(r.because, 62)) lines.push(`    ${l}`);
+  lines.push('');
   if (r.cost !== undefined) {
     // Bold on the figure only: the sentence around it is context, the number is
     // the thing worth carrying away.
@@ -654,7 +711,6 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
       `  ${pad('cost', 10, dim)} ${bold(`${approx(r.cost.written)} tokens`)} ${dim('written and discarded')}`,
     );
   }
-  lines.push('');
 
   // ── The mechanism first, because it is the only kind that measurably works ─
   //
@@ -663,15 +719,24 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
   // **printed and never written** — the never-touch-your-config rule is not
   // relaxed because the research likes hooks — and `costs` is shown with it
   // rather than as a footnote, because a Stop hook can refuse to end a turn.
+  lines.push(`  ${dim('What you can do')}`, '');
   if (r.config !== undefined) {
-    lines.push(`  ${cyan('▸')} ${dim(r.config.what)}`, '');
+    lines.push(`    ${cyan(r.config.what)}`, '');
+    // ── The reason, beside the thing it is a reason for ──────────────────
+    //
+    // *"I would have loved to know why I should use plan mode. Currently
+    // it's asking me to do something without really telling me the
+    // reasoning."* It existed — in `because`, several lines above, and
+    // written about the dimension rather than about the mechanism.
+    for (const l of wrap(r.config.helps, 60)) lines.push(`      ${l}`);
+    lines.push('');
     for (const l of r.config.snippet.split('\n')) lines.push(`      ${l}`);
     lines.push('');
     for (const l of wrap(r.config.costs, 60)) lines.push(`      ${dim(l)}`);
     lines.push('', `      ${dim('nothing is written — this is yours to apply.')}`, '');
   }
   if (r.external !== undefined) {
-    lines.push(`  ${cyan('▸')} ${dim('the industry already solved this one')}`, '');
+    lines.push(`    ${cyan('the industry already solved this one')}`, '');
     for (const l of wrap(r.external.what, 60)) lines.push(`      ${l}`);
     lines.push('', `      ${dim(r.external.where)}`, '');
   }
@@ -680,12 +745,16 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
       r.config === undefined
         ? 'for this session — paste or adopt'
         : 'or just for this session, if you would rather not configure anything';
-    lines.push(`  ${cyan('▸')} ${dim(label)}`, '');
+    lines.push(`    ${cyan(label)}`, '');
     for (const l of wrap(r.prompt, 60)) lines.push(`      ${l}`);
     lines.push('');
+    if (r.promptHelps !== undefined) {
+      for (const l of wrap(r.promptHelps, 60)) lines.push(`      ${dim(l)}`);
+      lines.push('');
+    }
   }
   if (r.memory !== undefined) {
-    lines.push(`  ${cyan('▸')} ${dim('to make it stick, add to CLAUDE.md')}`, '');
+    lines.push(`    ${cyan('to make it stick, add to CLAUDE.md')}`, '');
     lines.push(`      ${r.memory}`, '');
   } else if (r.prompt !== undefined && !memoryAllowed()) {
     // Say why there is no rule, rather than silently omitting it.

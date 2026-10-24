@@ -389,7 +389,7 @@ export function renderHtml(d: ReportData): string {
   const oneThing =
     r === undefined
       ? ''
-      : raw(`<h2>one thing to try</h2><div class="panel">
+      : raw(`<h2>What you can do</h2><div class="panel">
 <p><span class="dim-name">${esc(r.dimension)}</span><span class="pill">${esc(r.kind)}</span></p>
 <table><tbody>
 <tr><td class="mute">measured</td><td>${esc(r.evidence)}</td></tr>
