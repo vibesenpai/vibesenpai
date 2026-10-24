@@ -570,18 +570,102 @@ export function judgeRunning(archive: string, now = Date.now()): boolean {
   }
 }
 
+/**
+ * Take the lock, or report that somebody else has it.
+ *
+ * ── Why this had to become atomic ──────────────────────────────────────────
+ *
+ * It was `judgeRunning()` then `writeFileSync()` — a check and an act with a
+ * gap between them, and `writeFileSync` succeeds whether or not a file is
+ * already there. Two hooks firing together both saw "not running" and both
+ * wrote.
+ *
+ * Survivable while a pass judged one named session: two passes did different
+ * work. Now that a pass takes **everything pending**, two of them do
+ * *identical* work and bill for it twice.
+ *
+ * `mkdirSync` without `recursive` fails with EEXIST if the directory is there,
+ * so taking the lock and finding out whether we got it are the same syscall.
+ * This is the primitive D35 already chose for exactly this problem.
+ *
+ * The owner's pid goes inside, so a pass can tell its own lock from someone
+ * else's and never deletes one it does not hold.
+ */
+export function takeJudgeLock(archive: string, now = Date.now()): boolean {
+  try {
+    mkdirSync(archive, { recursive: true, mode: 0o700 });
+  } catch {
+    return false;
+  }
+
+  const dir = join(archive, RUNNING);
+  try {
+    mkdirSync(dir, { mode: 0o700 });
+  } catch {
+    // Held — unless whoever held it died. A stale lock is broken exactly once,
+    // by whoever notices, and the winner of the retry owns it.
+    if (judgeRunning(archive, now)) return false;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { mode: 0o700 });
+    } catch {
+      return false;
+    }
+  }
+
+  // ── Claim it, then confirm the claim stuck ──────────────────────────────
+  //
+  // Breaking a stale lock is `rmSync` then `mkdirSync`, and those are two
+  // operations. Two processes can interleave them: A removes and recreates,
+  // B removes **A's new lock** and recreates its own, and both believe they
+  // hold it.
+  //
+  // Writing the pid and reading it back does not make the sequence atomic,
+  // but it does make the loser notice: whoever's stamp is not there lost, and
+  // returns false. The window shrinks from "both proceed" to "both wrote
+  // within microseconds of each other, and one of them rechecks".
+  try {
+    writeFileSync(join(dir, 'owner'), `${process.pid}\n${new Date(now).toISOString()}\n`, {
+      mode: 0o600,
+    });
+    const back = Number.parseInt(
+      readFileSync(join(dir, 'owner'), 'utf8').split('\n')[0] ?? '',
+      10,
+    );
+    if (Number.isFinite(back) && back !== process.pid) return false;
+  } catch {
+    // The directory is the lock; a stamp we cannot write or read back is a
+    // diagnosis we do without, not a reason to refuse work.
+  }
+  return true;
+}
+
 export function markJudgeRunning(archive: string): void {
   try {
     mkdirSync(archive, { recursive: true, mode: 0o700 });
-    writeFileSync(join(archive, RUNNING), `${new Date().toISOString()}\n`, { mode: 0o600 });
+    mkdirSync(join(archive, RUNNING), { mode: 0o700 });
   } catch {
-    // Worst case two passes overlap once. Never worth failing a command over.
+    // Already held, which `takeJudgeLock` is the way to find out about.
   }
 }
 
-export function clearJudgeRunning(archive: string): void {
+export function clearJudgeRunning(archive: string, pid = process.pid): void {
+  const dir = join(archive, RUNNING);
   try {
-    rmSync(join(archive, RUNNING), { force: true });
+    // ── Only release a lock we actually hold ───────────────────────────────
+    //
+    // This was an unconditional delete, so with two passes running the first
+    // to finish freed the second's lock and a third could start while the
+    // second was still working. Now the owner's pid is checked, and a lock
+    // belonging to someone else is left alone to age out on its own.
+    const owner = Number.parseInt(readFileSync(join(dir, 'owner'), 'utf8').split('\n')[0] ?? '', 10);
+    if (Number.isFinite(owner) && owner !== pid) return;
+  } catch {
+    // No stamp to read — an older lock, or one interrupted mid-write. Removing
+    // it is the same behaviour as before and no worse.
+  }
+  try {
+    rmSync(dir, { recursive: true, force: true });
   } catch {
     // Staleness covers this.
   }

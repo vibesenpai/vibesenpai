@@ -514,10 +514,25 @@ describe('the backlog drains, which it did not', () => {
     expect(oldestUnread(state({ old: 100, mid: 100, new: 100 }), sizes)).toBeUndefined();
   });
 
-  it('is what the Stop hook falls back to when the live session is quiet', () => {
+  it('is a reason to start a pass, not a narrowing of what it reads', () => {
+    // The hook used to branch — judge the live session, else drain one backlog
+    // session. Measured on a real machine, it never went the second way: the
+    // live session grows 296,961 bytes per prompt against a 20,000-byte
+    // threshold, so it is due after 0.07 of one and `oldestUnread` was dead
+    // code. The user saw it as "the whole day had passed and only 2 sessions
+    // were read".
+    //
+    // There was never a choice to make. A pass with no session id takes every
+    // session past its watermark, the live one included, and packs them to the
+    // budget — 5 batched passes for this machine's 29 sessions rather than 29
+    // single ones.
     const hook = readFileSync('scripts/hook-stop.ts', 'utf8');
-    expect(hook).toMatch(/dueForJudging\([^)]*\)\s*\?/);
-    expect(hook).toMatch(/oldestUnread/);
+    expect(hook, 'the backlog is still a reason to spawn').toMatch(/oldestUnread/);
+    expect(hook, 'and so is the live session').toMatch(/dueForJudging/);
+    expect(hook, 'but the pass is never narrowed to one session').toMatch(
+      /spawnDetached\('judge\.ts'\)/,
+    );
+    expect(hook).not.toMatch(/spawnDetached\('judge\.ts',/);
   });
 });
 

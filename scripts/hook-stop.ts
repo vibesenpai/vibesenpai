@@ -28,7 +28,7 @@ import { basename, join } from 'node:path';
 import { isTripped, readBreaker } from '../src/breaker.ts';
 import { statSync } from 'node:fs';
 import {
-  dueForJudging, judgeRunning, markJudgeRunning, oldestUnread, readJudgeState,
+  dueForJudging, judgeRunning, oldestUnread, readJudgeState, takeJudgeLock,
 } from '../src/judge-store.ts';
 import { discoverTranscripts, resolveCurrentSession } from '../src/read.ts';
 import { resolveConfig } from '../src/config.ts';
@@ -74,6 +74,10 @@ function main(): void {
 function maybeJudge(archive: string, sources: string[]): void {
   const state = readJudgeState(archive);
   if (!state.settings.enabled) return;
+  // Cheap pre-check so the common "already running" case costs no syscalls
+  // beyond a stat; the real exclusion is `takeJudgeLock` below, which cannot
+  // be raced because taking the lock and learning whether we got it are one
+  // operation.
   if (judgeRunning(archive)) return;
 
   const current = resolveCurrentSession(sources);
@@ -98,13 +102,36 @@ function maybeJudge(archive: string, sources: string[]): void {
   // Every gate above still applies — off, already running, breaker tripped —
   // so this adds no new way to spend, only a use for a moment that was
   // already doing nothing.
-  const target = dueForJudging(state, current.sessionId, size)
-    ? current.sessionId
-    : oldestUnread(state, sessionSizes(sources));
-  if (target === undefined) return;
+  // ── One pass, taking everything that is pending ─────────────────────────
+  //
+  // This branched: judge the live session if it had enough new bytes,
+  // otherwise drain one backlog session. Measured on a real machine, the
+  // branch never went the second way — the live session grows **296,961 bytes
+  // per prompt** against a 20,000-byte threshold, so it is due after 0.07 of
+  // one. `oldestUnread` was dead code, and the user's report was the proof:
+  // *"the whole day had passed and only 2 sessions were read."*
+  //
+  // There was never a choice to make. `judge.ts` without a session id takes
+  // every session with bytes beyond its watermark — the live one included —
+  // and packs them to the budget. Its own header says why: *"the 26,384-token
+  // invocation overhead dwarfs a ~8,634-token session, so N sessions in one
+  // call rather than N calls."* Passing an id is what defeated it.
+  //
+  // Measured on this machine's backlog: 220,312 tokens over 29 sessions is
+  // **5 batched passes**, not 29 single ones — and the overhead is paid 5
+  // times rather than 29, which is 264k tokens instead of 1.53M.
+  //
+  // `dueForJudging` keeps its job, which is deciding **whether** a pass is
+  // worth starting at all. It no longer decides what the pass may read.
+  const liveDue = dueForJudging(state, current.sessionId, size);
+  const backlog = oldestUnread(state, sessionSizes(sources)) !== undefined;
+  if (!liveDue && !backlog) return;
 
-  markJudgeRunning(archive);
-  spawnDetached('judge.ts', target);
+  // Atomic: if another hook got here first, it owns the pass and we do
+  // nothing. Two unfiltered passes would read **the same** sessions and bill
+  // for both.
+  if (!takeJudgeLock(archive)) return;
+  spawnDetached('judge.ts');
 }
 
 /**

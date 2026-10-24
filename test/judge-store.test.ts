@@ -11,14 +11,18 @@ import { join } from 'node:path';
 import {
   BYTES_PER_TURN,
   DEFAULT_SETTINGS,
+  JUDGE_RUNNING_STALE_MS,
   analysisBlock,
+  clearJudgeRunning,
   dueForJudging,
   emptyState,
   findingsFor,
+  judgeRunning,
   oldestUnread,
   readJudgeState,
   recordPass,
   recordSpend,
+  takeJudgeLock,
   writeSettings,
 } from '../src/judge-store.ts';
 
@@ -334,5 +338,55 @@ describe('a rate needs two sizes, not two samples', () => {
     expect(r).toBeDefined();
     expect(r as number).toBeGreaterThan(0);
     db.close();
+  });
+});
+
+describe('two passes cannot take the same work', () => {
+  // The lock was `judgeRunning()` then `writeFileSync()` — a check and an act
+  // with a gap, where the write succeeds whether or not a file is there. Two
+  // hooks firing together both saw "not running" and both wrote.
+  //
+  // It mattered less when a pass judged one named session; two passes at
+  // least did different work. A pass now takes everything pending, so two of
+  // them read the same sessions and bill for both.
+  const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-lock2-'));
+
+  it('is take-or-fail in one operation', () => {
+    const dir = scratch();
+    expect(takeJudgeLock(dir)).toBe(true);
+    expect(takeJudgeLock(dir), 'the second caller must lose').toBe(false);
+  });
+
+  it('is not released by a process that does not hold it', () => {
+    // Whichever pass finished first used to delete the shared marker, freeing
+    // a lock the other was still working under.
+    const dir = scratch();
+    takeJudgeLock(dir);
+    clearJudgeRunning(dir, 999_999);
+    expect(judgeRunning(dir), 'someone else cannot free it').toBe(true);
+    clearJudgeRunning(dir);
+    expect(judgeRunning(dir)).toBe(false);
+  });
+
+  it('breaks a lock whose owner died', () => {
+    // Staleness is measured against the lock's own mtime, so a caller passing
+    // a clock far in the future makes *any* lock look stale — including one
+    // it just created. That is an artefact of injecting time, not a
+    // behaviour: in use, `now` and the mtime are the same clock.
+    //
+    // So this asserts the thing that is real — a dead owner's lock does not
+    // block for ever — and leaves re-entry to the test above, which uses the
+    // real clock.
+    const dir = scratch();
+    takeJudgeLock(dir);
+    expect(takeJudgeLock(dir), 'held').toBe(false);
+    expect(takeJudgeLock(dir, Date.now() + JUDGE_RUNNING_STALE_MS + 1), 'stale').toBe(true);
+  });
+
+  it('is free again after a normal release', () => {
+    const dir = scratch();
+    takeJudgeLock(dir);
+    clearJudgeRunning(dir);
+    expect(takeJudgeLock(dir)).toBe(true);
   });
 });

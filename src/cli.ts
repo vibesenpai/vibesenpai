@@ -28,10 +28,10 @@ import {
   findingsFor,
   humanDuration,
   judgeRunning,
-  markJudgeRunning,
   pendingWork,
   progressLine,
   readJudgeState,
+  takeJudgeLock,
   tallyByDimension,
   writeSettings,
 } from './judge-store.ts';
@@ -1411,7 +1411,12 @@ function cmdJudge(a: Argv): number {
       console.log('  nothing has been sent. re-run with --apply to start it.');
       return 0;
     }
-    markJudgeRunning(config.archive);
+    // `--backlog` used to write the marker without checking it, so it could
+    // start a second pass over a first one's work. Atomic now, like the hook.
+    if (!takeJudgeLock(config.archive)) {
+      console.log('a pass is already running — nothing started.');
+      return 0;
+    }
     spawnJudge();
     console.log(`reading ${plural(pending, 'session')} — about ${humanDuration(seconds)}.`);
     console.log(dim('  it runs in the background; findings appear as they land.'));

@@ -141,9 +141,19 @@ describe('a pass cannot overlap itself', () => {
     expect(judgeRunning(d)).toBe(false);
   });
 
-  it('is taken before every spawn, and released however the pass exits', () => {
-    expect(code('scripts/hook-stop.ts')).toMatch(/markJudgeRunning/);
-    expect(code('src/cli.ts'), 'the backlog path takes it too').toMatch(/markJudgeRunning/);
+  it('is taken atomically before every spawn, and released however the pass exits', () => {
+    // `judgeRunning()` then `writeFileSync()` is a check and an act with a gap
+    // between them, and the write succeeds whether or not a file is there —
+    // so two hooks firing together both saw "not running" and both wrote.
+    //
+    // Survivable while a pass judged one named session: the two did different
+    // work. Now a pass takes **everything pending**, so two of them do
+    // identical work and bill for it twice.
+    expect(code('scripts/hook-stop.ts')).toMatch(/takeJudgeLock/);
+    expect(code('src/cli.ts'), 'the backlog path takes it too').toMatch(/takeJudgeLock/);
+    expect(code('src/cli.ts'), 'and no longer writes the marker blind').not.toMatch(
+      /markJudgeRunning/,
+    );
 
     // `finally`, not a success path — a crash must still release it.
     const pass = code('scripts/judge.ts');
