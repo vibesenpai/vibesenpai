@@ -441,6 +441,29 @@ export function dueForJudging(state: JudgeState, sessionId: string, sizeBytes: n
 export const JUDGE_SECONDS_PER_CALL = 30;
 
 /**
+ * The rate assumed before this machine has shown its own.
+ *
+ * ── Erring high, on purpose ───────────────────────────────────────────────
+ *
+ * This was `JUDGE_SECONDS_PER_CALL / budget` — 30s over a 60,000-token packet,
+ * or 0.5 ms per token. Measured on a real machine the rate is **1.135**, so
+ * the fallback was optimistic by better than two times, and the estimate
+ * *grew* when the learned rate replaced it: a user watched progress go from
+ * 19 of 31 to 29 of 31 while the time left went from 2 minutes to 5.
+ *
+ * Both numbers were right for what was known, and that is no comfort. An
+ * estimate that rises as you make progress is one people stop reading.
+ *
+ * The error was treating 30s as the cost of a *full* packet.
+ * `JUDGE_SECONDS_PER_CALL` was measured over batches of 35 to 195 calls of
+ * mixed sizes, so it is an average, and a full packet is the slow end of what
+ * it averaged. Reading it as a **half**-budget call is the more defensible
+ * interpretation, and it puts the fallback just under what this machine shows
+ * — so learning moves the number **down**.
+ */
+export const FALLBACK_MS_PER_TOKEN = (JUDGE_SECONDS_PER_CALL * 1000) / (60_000 / 2);
+
+/**
  * Seconds as something a person can plan around.
  *
  * Deliberately coarse. "about 4 minutes" is honest about an estimate built
@@ -736,7 +759,7 @@ function estimateQueueSeconds(opts: {
   budget?: number;
 }): number {
   const budget = opts.budget ?? 60_000;
-  const rate = opts.msPerToken ?? (JUDGE_SECONDS_PER_CALL * 1000) / budget;
+  const rate = opts.msPerToken ?? FALLBACK_MS_PER_TOKEN;
 
   // With no measured sizes, fall back to assuming each unread session is one
   // full-budget pass — an overestimate, and the honest direction to err in.

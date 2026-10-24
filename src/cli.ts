@@ -562,7 +562,19 @@ function printHistory(config: Config): void {
     if (hidden > 0) console.log(`    ${dim(`and ${hidden} more`)}`);
 
     for (const { dimension, count } of judged) {
-      console.log(`  ${count} ${dimension.replace(/_/g, ' ')} ${dim('— flagged by a model')}`);
+      // ── The marker is dropped here, and kept where it is load-bearing ───
+      //
+      // CLAUDE.md requires the UI never to blur "flagged by rule" and
+      // "flagged by a model", and that rule is earned: the first judge
+      // response this project received invented its evidence. It is kept on
+      // the **session** findings, where a dimension sits beside the turns it
+      // cites and a reader is about to act on it.
+      //
+      // Here it is a one-line rollup with no turns and nothing to act on, and
+      // the dimension carries the distinction by itself: "misread intent" is
+      // plainly a reading, where "edits were rejected and retried" is plainly
+      // a count. Repeating it on every row was noise.
+      console.log(`    ${count} ${dimension.replace(/_/g, ' ')}`);
     }
   }
 
@@ -825,9 +837,14 @@ async function cmdInsights(a: Argv): Promise<number> {
     // not a way out. Both hooks had been printed on either side of the note,
     // which left it sandwiched between them.
 
+    // Each says what you get, in the fewest words that stay true. The first
+    // read "one thing to try, from your history", which explains where the
+    // suggestion comes from — a thing nobody is asking at this point — and
+    // the second "every session, as a file you can keep", which described a
+    // filing system rather than an answer.
     const ways = [
-      ...(nextStep === '' ? [] : [['/agentsensei:fix', 'one thing to try, from your history']]),
-      ['/agentsensei:report', 'every session, as a file you can keep'],
+      ...(nextStep === '' ? [] : [['/agentsensei:fix', 'something to try']]),
+      ['/agentsensei:report', 'more detail'],
     ];
     const w = Math.max(...ways.map(([c]) => (c as string).length));
     console.log('');

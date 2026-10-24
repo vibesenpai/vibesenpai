@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import {
   BYTES_PER_TURN,
   DEFAULT_SETTINGS,
+  FALLBACK_MS_PER_TOKEN,
   JUDGE_RUNNING_STALE_MS,
   analysisBlock,
   clearJudgeRunning,
@@ -296,7 +297,11 @@ describe('the estimate is sized by what is there, not by how many', () => {
     const blind = line({ total: 28, read: 0, unread: 28 });
     const measured = line({ total: 28, read: 0, unread: 28, queueTokens: 217_567 });
     expect(blind).not.toBe(measured);
-    expect(blind).toMatch(/28 minutes/);
+    // Doubled when the fallback rate was corrected: 0.5 ms/token assumed a
+    // full packet costs the average call, and a real machine showed 1.135.
+    // Over-stating is the direction that lets learning shrink the number
+    // rather than grow it.
+    expect(blind).toMatch(/56 minutes/);
   });
 
   it('uses this machine rate once it has one', () => {
@@ -388,5 +393,25 @@ describe('two passes cannot take the same work', () => {
     takeJudgeLock(dir);
     clearJudgeRunning(dir);
     expect(takeJudgeLock(dir)).toBe(true);
+  });
+});
+
+describe('learning must shrink the estimate, never grow it', () => {
+  // A user watched progress go 19 of 31 → 29 of 31 while the time left went
+  // 2 minutes → 5. Both numbers were right for what was known: the small
+  // sessions had been read, leaving the two biggest (123,867 tokens of the
+  // original 220,312), *and* the rate had switched from a fallback of 0.5
+  // ms/token to a learned 1.135.
+  //
+  // The queue growing heavier as the light work clears is honest. The rate
+  // being optimistic until measured is not, and it is the half that is fixable.
+  it('starts above what a real machine turned out to show', () => {
+    expect(FALLBACK_MS_PER_TOKEN).toBeGreaterThan(0.5);
+  });
+
+  it('is within reach of the measured rate, not merely large', () => {
+    // A wildly conservative default would always shrink and never be useful.
+    // This one is close enough that the correction is small.
+    expect(FALLBACK_MS_PER_TOKEN).toBeLessThan(1.135 * 1.5);
   });
 });
