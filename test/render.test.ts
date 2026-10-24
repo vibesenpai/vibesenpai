@@ -21,6 +21,7 @@ import {
   renderCost,
   renderFinding,
   renderJudged,
+  renderRebuilds,
   shortenPath,
   spanOf,
 } from '../src/render.ts';
@@ -608,5 +609,77 @@ describe('whole sentences, up to a budget', () => {
 
   it('leaves short text exactly as written', () => {
     expect(firstSentence('Short.', 240)).toBe('Short.');
+  });
+});
+
+describe('cache rebuilds are stated, never judged', () => {
+  // `cacheRead` cannot be divided — it re-counts the whole prefix every call,
+  // so any ratio is pinned near 1 and GRAVEYARD.md records cache hit rate
+  // dying on exactly that (p10 0.901 → p90 0.985). What it *can* do is be
+  // compared against itself: a rebuild is where it collapses from its own
+  // running level while `cacheCreation` fires.
+  const st = (
+    turns: { create: number; read: number }[],
+  ): Parameters<typeof renderRebuilds>[0] =>
+    ({
+      rewritten: [],
+      reingest: { total: 0, heaviest: [], share: 0 },
+      compactions: { count: 0, dropped: 0, measured: [] },
+      rebuilds: (() => {
+        let count = 0;
+        let tokens = 0;
+        let written = 0;
+        for (const [i, t] of turns.entries()) {
+          written += t.create;
+          const prev = turns[i - 1]?.read ?? 0;
+          if (prev > 20_000 && t.read < prev / 2 && t.create > 0) {
+            count += 1;
+            tokens += t.create;
+          }
+        }
+        return { count, tokens, share: written === 0 ? 0 : tokens / written };
+      })(),
+    }) as Parameters<typeof renderRebuilds>[0];
+
+  it('says nothing when the cache was never lost', () => {
+    const steady = st([
+      { create: 18_000, read: 0 },
+      { create: 400, read: 40_000 },
+      { create: 300, read: 41_000 },
+    ]);
+    expect(renderRebuilds(steady)).toEqual([]);
+  });
+
+  it('does not mistake a large legitimate write for a rebuild', () => {
+    // Reading a big file genuinely adds to the prefix, and is the cache
+    // working. What marks a rebuild is that there was nothing left to read.
+    const bigRead = st([
+      { create: 400, read: 90_000 },
+      { create: 60_000, read: 92_000 },
+    ]);
+    expect(renderRebuilds(bigRead), 'the prefix survived').toEqual([]);
+  });
+
+  it('reports one when the prefix was thrown away', () => {
+    const lost = st([
+      { create: 400, read: 90_000 },
+      { create: 250_000, read: 0 },
+    ]);
+    const out = renderRebuilds(lost).join('');
+    expect(out).toMatch(/Resuming re-cached/);
+    expect(out).toMatch(/250k/);
+  });
+
+  it('carries no verb, no remedy and no comparison', () => {
+    // The 12.5x multiple between a write and a read is true, and it is the
+    // sentence that turns a fact into a reproach — the same line compaction
+    // and file churn are held to.
+    const out = renderRebuilds(st([
+      { create: 400, read: 90_000 },
+      { create: 250_000, read: 0 },
+    ])).join('');
+    for (const nag of ['should', 'avoid', 'instead', 'try', 'cheaper', '12']) {
+      expect(out.toLowerCase(), `"${nag}" turns this into advice`).not.toContain(nag);
+    }
   });
 });

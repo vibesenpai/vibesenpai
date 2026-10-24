@@ -189,6 +189,42 @@ every call, so `read/(read+creation)` runs p10 0.901 → p90 0.985 by
 construction and an "outlier" is just a short session. `test/render.test.ts`
 asserts it never reaches the output.
 
+**But it can be compared with itself.** A ratio on `cacheRead` is dead; a
+*change* in it is not. A prefix rebuild is the one event where it collapses
+from its own running level while `cacheCreation` fires — the cache was thrown
+away and written again from nothing. Measured 2026-10-24 over the three
+largest sessions on one machine:
+
+```
+  46b591a1   15 rebuilds   6,151,009 of  9,394,443 cache writes   65%
+  e3a3f0d4   21 rebuilds   9,576,876 of 13,416,140                71%
+  28815e56    4 rebuilds     902,871 of  1,202,050                75%
+```
+
+Two thirds of what a long session writes to cache is rewriting what was
+already there, and it is concentrated: 15 events out of 2,252 carry it,
+because a rebuild rewrites the entire prefix where ordinary growth adds a few
+thousand tokens. The worst re-cached **797,275 tokens** after a 70-minute gap.
+
+Nearly every one follows an idle gap far past the 5-minute TTL — 70 minutes,
+3.9 hours, 12.7 hours, 40 hours.
+
+**Reported as metadata, never as a finding.** A write costs 1.25x base against
+0.10x for a read, so a rebuild costs about twelve times what reading would
+have. That multiple is deliberately absent from the output: the only thing a
+reader could do about it is work in shorter sessions, which is the advice this
+project declines to give — the same line `compactions` and `file_churn` sit
+behind.
+
+`ENABLE_PROMPT_CACHING_1H` (Claude Code 2.1.108) is **not** the remedy. It
+would recover about 4% of the rebuilt tokens, because the gaps are overnight
+rather than minutes, and the changelog lists it for API key, Bedrock, Vertex
+and Foundry — not subscription.
+
+**A first measurement put the share at 25%**, by summing `cacheCreation` over
+records rather than responses: the exact overcount `oncePerResponse` exists to
+prevent, inflating the denominator 2.61x.
+
 ## Deliberately not built
 
 | dimension | measured | why not |

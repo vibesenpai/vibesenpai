@@ -609,6 +609,36 @@ export function renderCost(
 }
 
 /**
+ * What re-caching the conversation cost, when it happened at all.
+ *
+ * ── Stated, and nothing more ───────────────────────────────────────────────
+ *
+ * The price is real: a cache write costs 1.25x base against 0.10x for a read,
+ * so rebuilding costs about twelve times reading. Saying that here would turn
+ * a fact into a reproach, and the only thing a reader could do about it —
+ * work in shorter sessions, resume less — is advice this project has declined
+ * to give twice already, for compaction and for file churn.
+ *
+ * So the figure, and no multiple, no comparison, no remedy. The line to beat
+ * is `compacted 8 times`, which has survived precisely because it never
+ * suggests you should have done otherwise.
+ *
+ * Presence-signalled like its neighbours: a session that never idled past the
+ * cache TTL says nothing at all.
+ */
+export function renderRebuilds(stats: SessionStats): string[] {
+  const { count, tokens, share } = stats.rebuilds;
+  if (count === 0 || tokens === 0) return [];
+
+  const times = count === 1 ? 'once' : `${count} times`;
+  const part = share >= 0.5 ? 'most of' : `${Math.round(share * 100)}% of`;
+  return [
+    `${INDENT.repeat(2)}${dim(`Resuming re-cached the conversation ${times} —`)} ` +
+      `${bold(human(tokens))}${dim(` tokens, ${part} everything it cached`)}`,
+  ];
+}
+
+/**
  * The session's most-rewritten files.
  *
  * A ranking, so there is no threshold to defend, and no verb: this says what
@@ -1048,6 +1078,7 @@ export function render(input: RenderInput): string {
   const observations = [
     ...renderCost(d, stats, input.baseline),
     ...renderCompaction(stats),
+    ...renderRebuilds(stats),
     ...renderRewritten(stats),
   ];
   if (observations.length > 0) {
