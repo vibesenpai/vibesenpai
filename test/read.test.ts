@@ -49,8 +49,7 @@ describe('readSession — two modes, one reader', () => {
   });
 
   it('live reads past the recorded offset and says how far', () => {
-    // The whole point of `now`: the turns since the last scan are the ones you
-    // just made.
+    // Turns since the last scan are the ones just made.
     const p = session('aaa', ['{"a":1}', '{"a":2}', '{"a":3}']);
     const r = readSession({ source: p, mode: 'live', catalogOffset: 8 });
     expect(r.bytesRead).toBe(statSync(p).size);
@@ -109,8 +108,7 @@ describe('readSession — two modes, one reader', () => {
 
 describe('finding a session', () => {
   it('locates a transcript by id without consulting the catalog', () => {
-    // `--live` has to work on a session no scan has reached, which is the normal
-    // state of the one you are sitting in.
+    // `--live` must work on a session no scan has reached yet.
     const p = session('target', ['{"a":1}']);
     expect(findSessionSource(SOURCES(), 'target')).toBe(p);
   });
@@ -122,8 +120,7 @@ describe('finding a session', () => {
 
   describe('the id you can see is the id you can use', () => {
     it('accepts the eight-character form every surface prints', () => {
-      // Reports print `session e3a3f0d4 · …`, and exact-equality matching meant
-      // the only id a reader ever saw was the one `--session` rejected.
+      // Reports print a short id, so `--session` must accept a prefix.
       const p = session('e3a3f0d4-a1b3-4305-8f15-5aefe476a409', ['{"a":1}']);
       const r = lookupSession(SOURCES(), 'e3a3f0d4');
       expect(r.ok).toBe(true);
@@ -150,8 +147,7 @@ describe('finding a session', () => {
     });
 
     it('errors with the candidates instead of picking one', () => {
-      // The one that matters: guessing here would analyse somebody else's
-      // session under a header that looks authoritative.
+      // An ambiguous prefix must not guess.
       session('dupe1111-aaaa', ['{"a":1}']);
       session('dupe2222-bbbb', ['{"a":1}']);
       const r = lookupSession(SOURCES(), 'dupe');
@@ -201,6 +197,12 @@ describe('resolveCurrentSession — explicit beats ambient beats guessing', () =
     expect(r).toMatchObject({ sessionId: 'aaa', via: 'flag' });
   });
 
+  it('resolves an explicit prefix to the full id', () => {
+    session('abcd1234-full', ['{"a":1}']);
+    const r = resolveCurrentSession(SOURCES(), { sessionId: 'abcd', env: {} });
+    expect(r).toMatchObject({ sessionId: 'abcd1234-full', via: 'flag' });
+  });
+
   it('uses the harness env var when there is no flag', () => {
     session('from-env', ['{"a":1}']);
     const r = resolveCurrentSession(SOURCES(), { env: { CLAUDE_SESSION_ID: 'from-env' } });
@@ -217,8 +219,7 @@ describe('resolveCurrentSession — explicit beats ambient beats guessing', () =
   });
 
   it('falls through to a guess when the env id names nothing on disk', () => {
-    // Inventing an id would be worse: the read would fail with a confusing error
-    // rather than analysing the session that is actually there.
+    // Inventing an id would fail confusingly instead of reading the session present.
     session('real', ['{"a":1}']);
     const r = resolveCurrentSession(SOURCES(), { env: { CLAUDE_SESSION_ID: 'ghost' } });
     expect(r).toMatchObject({ sessionId: 'real', via: 'latest' });

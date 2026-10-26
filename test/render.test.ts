@@ -1,31 +1,22 @@
-/**
- * The renderer is the product surface, so these tests are mostly about what it
- * must NOT print.
- *
- * CLAUDE.md allows two outputs — evidence, and something applicable — and bans
- * the score. A test suite that only checked formatting would let a total creep
- * in, which is the one regression that would change what this tool is.
- */
+// The renderer is the product surface; these tests mostly pin what it must NOT print (no score, no total).
 
 import { describe, expect, it } from 'vitest';
 import { parse } from '../src/parsers/index.ts';
 import {
   activeDuration,
   caveatFor,
-  describeTurn,
-  durationOf,
   firstSentence,
   headlineFor,
   render,
   renderCompaction,
-  renderCost,
   renderFinding,
   renderJudged,
   renderRebuilds,
-  shortenPath,
   spanOf,
 } from '../src/render.ts';
 import { materialise } from '../src/finding.ts';
+import { durationOf, shortenPath } from '../src/format.ts';
+import { sessionStats } from '../src/stats.ts';
 import type { Denominators } from '../src/detect/index.ts';
 import type { Event, Finding } from '../src/types.ts';
 
@@ -83,25 +74,20 @@ describe('render — what it must never print', () => {
       sessionId: 'abcdef1234',
       events: [],
     });
-    // An unexplained number is the thing this project exists as an alternative
-    // to, and a total is what people optimise instead of reading evidence.
     for (const banned of ['score', 'grade', '/100', 'out of', 'total:']) {
       expect(out.toLowerCase(), `must not contain "${banned}"`).not.toContain(banned);
     }
   });
 
-  it('never prints cacheRead, however tempting a ratio looks', () => {
-    // It re-counts the whole prefix per call, so any ratio on it is pinned near
-    // 1 by construction — p10 0.901 to p90 0.985 across the corpus.
-    const out = renderCost({
-      ...zeros,
-      tokens: { input: 10, output: 100, cacheRead: 9_000_000, cacheCreation: 1200 },
-    }).join('\n');
-    expect(out).not.toContain('9.0M');
-    expect(out).not.toMatch(/hit rate/i);
-    // The block speaks only for an unusual session now, so this asserts what
-      // must never appear rather than what must.
-      expect(out).not.toMatch(/cacheRead|9,000,000/);
+  it('prints no cache total and no ratio, however large the numbers', () => {
+    // Cache figures appear only beside a flag: DECISIONS.md D66.
+    const out = render({
+      findings: [],
+      denominators: { ...zeros, tokens: { input: 10, output: 50_000, cacheRead: 9_000_000, cacheCreation: 4_000_000 } },
+      sessionId: 'abcdef1234',
+      events: [],
+    });
+    expect(out).not.toMatch(/9\.0M|9,000,000|4\.0M|4,000,000|cacheRead|hit rate|your usual|\d+x what/i);
   });
 
   it('uses no imperative verb in the subject line', () => {
@@ -126,25 +112,13 @@ describe('render — evidence is checkable in place', () => {
       sessionId: 'abcdef1234',
       events: [edit, refused, retry],
     });
-    // The turn number and what happened there, in aligned columns. The `turn `
-    // prefix was dropped: it repeated on every row and bought nothing a column
-    // header does not.
+    // Turn number and what happened, in aligned columns, without a repeated `turn ` prefix.
     expect(out).toContain('10  Edit');
     expect(out).toContain('refused');
-    // The subject is in the header, so an evidence row touching that same path
-    // does not repeat it — this block would otherwise print it three times.
+    // The header names the subject, so evidence rows do not repeat the path.
     expect(out.match(/\/repo\/src\/api\.ts/g)).toHaveLength(1);
     expect(out).toContain('refused');
     expect(out).toContain('not-read-first');
-  });
-
-  it('names the harness reason, never a guess, when it is unrecognised', () => {
-    const e = ev({
-      turnType: 'tool_result', isError: true, failureKind: 'tool',
-      textSummary: '<tool_use_error>Something no release has ever said.</tool_use_error>',
-    });
-    expect(describeTurn(e)).toContain('Something no release');
-    expect(describeTurn(e)).toContain('failed');
   });
 
   it('prints (reason unknown) rather than implying there was none', () => {
@@ -155,16 +129,11 @@ describe('render — evidence is checkable in place', () => {
 
 describe('render — an empty result is not an unanalysed one', () => {
   it('distinguishes "nothing found" from "nothing to analyse"', () => {
-    // The lead used to say `nothing to analyse — this session made no edits`
-    // directly above `This session · 0 edits` and `Nothing flagged in this
-    // session yet` — the same nothing, three times. The denominator on the
-    // session line is the statement now, which is what this test was always
-    // really about: its own comment says so.
+    // The denominator on the session line says "nothing" once, not three times.
     const noEdits = render({ findings: [], denominators: zeros, sessionId: 's', events: [] });
     expect(noEdits).toContain('0 edits');
 
     const clean = render({ findings: [], denominators: { ...zeros, editCount: 155 }, sessionId: 's', events: [] });
-    // The denominator is what makes the difference legible.
     expect(clean).toContain('155 edits');
   });
 
@@ -187,9 +156,7 @@ describe('render — an empty result is not an unanalysed one', () => {
 
 describe('render — timestamps and spans', () => {
   it('ignores records with no usable timestamp', () => {
-    // Real shape: every file-history-snapshot lacks one. 107 in a single
-    // session. The parser omits them; an empty string would sort below every
-    // real timestamp and become the session start.
+    // file-history-snapshot records carry no timestamp; one must not become the session start.
     const span = spanOf([
       ev({ turnType: 'system', systemKind: 'file-history' }),
       ev({ turnType: 'user_prompt', ts: '2026-10-19T10:00:00.000Z' }),
@@ -200,7 +167,6 @@ describe('render — timestamps and spans', () => {
   });
 
   it('reads a resumed session in days, not hours', () => {
-    // Measured on a real session: 174h21m is a week nobody reads as one.
     expect(durationOf('2026-10-12T00:00:00.000Z', '2026-10-19T06:00:00.000Z')).toBe('7d6h');
   });
 
@@ -210,55 +176,9 @@ describe('render — timestamps and spans', () => {
   });
 });
 
-describe('render — the cost line measures you against yourself', () => {
-  // It used to quote `corpus median 17.9` — hand-copied from 1,132 SWE-chat
-  // sessions, which is to say other people's. A reader cannot check it, cannot
-  // find it and has no relationship with it. The baseline is now their own
-  // history, the one yardstick they own.
-  // Output above MIN_OUTPUT_FOR_RATIO. Below it the figure is mostly the first
-  // turn's one-time caching divided by almost nothing — measured at
-  // cache_creation 17,766 against output 134 — which is how a one-minute
-  // session came to report "133x".
-  const session = (cacheCreation: number) => ({
-    ...zeros,
-    tokens: { input: 0, output: 10_000, cacheRead: 0, cacheCreation },
-  });
-  const usual = { ratio: 5, sessions: 20 };
-
-  it('says nothing when the session is ordinary for this user', () => {
-    // Presence is the signal — D62, applied where it had been waived. A line
-    // reporting "normal" every run teaches people to skip the output.
-    expect(renderCost(session(70_000), undefined, usual)).toEqual([]);
-  });
-
-  it('speaks when the session is unlike their others, and still does not judge it', () => {
-    const out = renderCost(session(2_000_000), undefined, usual).join('\n');
-    expect(out).toMatch(/your usual/);
-    expect(out).not.toMatch(/bad|too high|excessive|warning/i);
-  });
-
-  it('never names a corpus, a percentile or a median', () => {
-    const out = renderCost(session(2_000_000), undefined, usual).join('\n');
-    expect(out).not.toMatch(/corpus|percentile|median/i);
-  });
-
-  it('stays silent rather than borrow a baseline the reader cannot see', () => {
-    // Too few sessions to have a "usual". The old code printed the corpus
-    // comparison here, which is the defect itself.
-    expect(renderCost(session(2_000_000), undefined, { ratio: 5, sessions: 2 })).toEqual([]);
-    expect(renderCost(session(2_000_000), undefined, undefined)).toEqual([]);
-  });
-
-  it('prints nothing at all when there is no token data', () => {
-    expect(renderCost(zeros)).toEqual([]);
-  });
-});
-
 describe('render — a digest subject gets a readable headline', () => {
   it('substitutes the command while keeping the digest it is keyed on', () => {
-    // A detector cannot read a command, so `redundant_call` names a Bash run
-    // `Bash #8e0f94`. Correct as identity, useless as a headline — and the
-    // renderer is display tier, so it may read what a detector may not.
+    // Detectors name a Bash run by id; the display tier may read the command for the headline.
     const call = ev({
       turnType: 'tool_use', toolName: 'Bash', uuid: 'a', seq: 10,
       command: 'npx tsc --noEmit 2>&1 | head -30',
@@ -274,7 +194,6 @@ describe('render — a digest subject gets a readable headline', () => {
   });
 
   it('keeps the digest when no cited turn carries a command', () => {
-    // TodoWrite takes arguments we can digest but not name.
     expect(headlineFor(finding({ subject: 'TodoWrite #475905' }), new Map())).toBe('TodoWrite #475905');
   });
 });
@@ -294,15 +213,13 @@ describe('shortenPath keeps the identifying end', () => {
 
 describe('render — the confidence badge is gone, the caveat is not', () => {
   it('says nothing for a rule that is certain', () => {
-    // Every live detector is a rule emitting `certain`, so the old `[certain]`
-    // badge had one possible value and told a reader nothing.
+    // Every live detector emits `certain`, so a confidence badge says nothing.
     expect(caveatFor(finding({}))).toBe('');
   });
 
   it('explains a rule that is merely close', () => {
     const c = caveatFor(finding({ confidence: 'high' }));
     expect(c).toContain('clipped');
-    // Words, not a severity token.
     expect(c).not.toContain('high');
   });
 
@@ -325,7 +242,6 @@ describe('render — the confidence badge is gone, the caveat is not', () => {
 describe('render — CONTEXT states compaction without judging it', () => {
   const statsWith = (count: number, measured: { seq: number; preTokens: number; postTokens: number }[]) => ({
     rewritten: [],
-    reingest: { total: 0, heaviest: [], share: 0 },
     compactions: {
       count,
       dropped: measured.reduce((n, m) => n + (m.preTokens - m.postTokens), 0),
@@ -343,9 +259,7 @@ describe('render — CONTEXT states compaction without judging it', () => {
     ).join('\n');
     expect(out).toContain('summarised');
     expect(out).toContain('summarised once');
-    // The per-turn rows (`turn 1745  1.0M → 31k`) were a debug view: a reader
-    // can act on none of them, and eight of them buried the one fact that can
-    // be acted on, which is that it happened at all.
+    // No per-turn rows: the fact that it happened is the only actionable part.
     expect(out).toContain('969k');
     expect(out).not.toContain('1745');
     // Stated, not judged: no imperative, no severity word.
@@ -353,41 +267,30 @@ describe('render — CONTEXT states compaction without judging it', () => {
   });
 
   it('counts a compaction that carries no figures rather than hiding it', () => {
-    // The older `summary` record shape reports no token counts. Two
-    // compactions shown as one would be worse than one without its numbers.
+    // The older `summary` record has no token counts; two compactions must not merge into one.
     const out = renderCompaction(
       statsWith(3, [{ seq: 10, preTokens: 900, postTokens: 100 }]) as never,
     ).join('\n');
     expect(out).toContain('summarised 3 times');
-    // The older record shape carries no figures. That was once stated as its
-    // own line; with the rows gone there is nothing for it to qualify, and the
-    // count it belongs to is already right.
     expect(out).toContain('summarised 3 times');
   });
 });
 
 describe('render — model findings are kept visibly apart', () => {
   it('labels the section so a reader knows what kind of claim it is', () => {
-    // CLAUDE.md: the UI never blurs "flagged by rule" and "flagged by a model
-    // at 0.7". A judge earns that caution — the first real judge response this
-    // project received invented its evidence.
+    // CLAUDE.md: never blur "flagged by rule" and "flagged by a model".
     const out = renderJudged(
       [{ dimension: 'inaccurate_self_report', turns: [412, 460], why: 'said green, 412 failed' }],
       0,
     ).join('\n');
-    // The marker is per-row now, not a section title: grouping rule and model
-    // findings under one heading would otherwise leave a model's claim
-    // indistinguishable from a rule's. See CLAUDE.md on never blurring them.
+    // The marker is per row, so mixed sections still tell model claims from rule ones.
     expect(out).toContain('flagged by a model');
     expect(out).toContain('inaccurate_self_report');
     expect(out).toContain('412, 460');
   });
 
   it('states the lag, because a judged finding is as old as the last pass', () => {
-    // Showing stale model findings beside live rule findings without saying so
-    // would imply a currency they do not have.
-    // "Since the last pass" implied a pass had happened and fallen 23 turns
-    // behind it. With no findings and a full count, there has never been one.
+    // With no findings and a full count, no pass has happened; do not imply one.
     expect(renderJudged([], 23).join('\n')).toContain('Nothing flagged in this session yet');
   });
 
@@ -396,13 +299,7 @@ describe('render — model findings are kept visibly apart', () => {
   });
 
   it('does not look broken when it simply has not run yet', () => {
-    // The point of this test is the tone, and the wording that carried it
-    // changed: with no findings and turns outstanding, the session has never
-    // been read, so it says that rather than reporting a lag against a pass
-    // that never happened.
-    // The queue sentence moved to the `Analysis` block, which owns it — this
-    // one was printing `27 sessions still to read` on the same screen as that
-    // block. What belongs here is only what is true of *this* session.
+    // Tone: a never-read session must not look broken. Queue counts belong to the `Analysis` block.
     const out = renderJudged([], 5).join('\n');
     expect(out).toContain('Nothing flagged in this session yet');
     expect(out).not.toMatch(/fail|error|behind|stale/i);
@@ -419,8 +316,7 @@ describe('the lead line', () => {
   });
 
   it('states what was found before naming the session', () => {
-    // It used to open with `session 46b591a1 · 4362 events · 2259 edits` — an
-    // identifier and two counts, with the news several lines below.
+    // The news comes first, not an id and counts.
     const out = render({
       findings: [], denominators: d(), sessionId: 'abcdef1234', events: [],
       judged: { findings: [{ dimension: 'misread_intent', turns: [12], why: 'x' }], unjudgedTurns: 0 },
@@ -429,9 +325,7 @@ describe('the lead line', () => {
     expect(body[0]).toContain('1 finding');
     expect(body[1]).toContain('This session');
     expect(body[1]).toContain('This session');
-    // The id is not merely demoted now, it is gone: it identified the session
-    // to us and never to the reader, who can do nothing with `abcdef12` that
-    // they cannot do with "this session". `--session` still takes it.
+    // The session id is gone from the lead; `--session` still accepts it.
     expect(out).not.toContain('abcdef12');
   });
 
@@ -451,8 +345,7 @@ describe('the lead line', () => {
   });
 
   it('still says nothing was found when neither tier fired', () => {
-    // Rung 3 of the ladder. A clean bill of health must stay legible as one —
-    // `PLAN.md:21` — and the denominator is what makes it a real statement.
+    // A clean session must still read as a real statement (PLAN.md:21).
     const out = render({
       findings: [], denominators: d(), sessionId: 'abcdef1234', events: [],
     });
@@ -460,7 +353,6 @@ describe('the lead line', () => {
   });
 
   it('uses real plurals, never the "(s)" form', () => {
-    // A headline reading `1 finding(s)` looks like an unfinished sentence.
     const out = render({
       findings: [], denominators: d(), sessionId: 'abcdef1234', events: [],
       judged: { findings: [{ dimension: 'overreach', turns: [1], why: 'y' }], unjudgedTurns: 0 },
@@ -471,9 +363,7 @@ describe('the lead line', () => {
 });
 
 describe('duration is time worked, not time elapsed', () => {
-  // A session opened at 06:14, left alone, and returned to at 18:35 reported
-  // `12h20m` across 59 lines. Never wrong, and useless: nobody counts the
-  // hours a tab sat open as time spent.
+  // Active time, not wall-clock: hours a tab sat idle are not time spent.
   const at = (iso: string) => ({ ts: iso }) as unknown as Parameters<typeof activeDuration>[0][number];
 
   it('drops a gap nobody was present for', () => {
@@ -487,8 +377,7 @@ describe('duration is time worked, not time elapsed', () => {
   });
 
   it('keeps a long think, which is work', () => {
-    // The threshold is deliberately generous: over-counting a long think costs
-    // a minute, under-counting an afternoon costs the number's credibility.
+    // Generous threshold: over-counting a long think costs a minute; under-counting costs credibility.
     const out = activeDuration([
       at('2026-10-23T06:00:00.000Z'),
       at('2026-10-23T06:29:00.000Z'),
@@ -497,8 +386,7 @@ describe('duration is time worked, not time elapsed', () => {
   });
 
   it('says so rather than rounding a short session to zero', () => {
-    // `durationOf` floors to whole minutes, so twenty seconds came back as
-    // `0m`, which reads as a bug rather than as a short session.
+    // Under a minute must not render as `0m`.
     expect(
       activeDuration([at('2026-10-23T06:00:00.000Z'), at('2026-10-23T06:00:20.000Z')]),
     ).toBe('under a minute');
@@ -511,14 +399,8 @@ describe('duration is time worked, not time elapsed', () => {
 });
 
 describe('the harness says when a turn is not a human speaking', () => {
-  // `isMeta` was not read. The harness writes a slash command's own stdout
-  // back as a `type: 'user'` record with `isMeta: true`, and because the array
-  // branch recognised only `tool_result`, text blocks became `user_prompt`.
-  //
-  // Measured on `d372b7c1`: two of four user-side turns were agentsensei's own
-  // output counted as the developer's prompts, and the judge anchored a
-  // `constraint_violation` on one of them — reporting that the agent had
-  // violated an instruction nobody gave.
+  // Regression: `isMeta: true` user records (a slash command's own stdout) were parsed as user prompts,
+  // and the judge then flagged a violation of an instruction nobody gave.
   it('classifies a meta record as a command, never a prompt', () => {
     const line = JSON.stringify({
       type: 'user',
@@ -542,50 +424,8 @@ describe('the harness says when a turn is not a human speaking', () => {
   });
 });
 
-describe('a mechanism is not a behaviour, sixth instance', () => {
-  // The user, on a session they had just opened:
-  //
-  //   "Claude re-read it 133x more than it wrote" — I just started the
-  //    session, and claude reread what?
-  //
-  // Nothing. Measured on a real short session, the first assistant turn is
-  // `cache_creation 17,766` against `output 134` — the system prompt, tools
-  // and CLAUDE.md being cached **for the first time**. There is no
-  // conversation to re-read yet.
-  //
-  // CLAUDE.md tabulates five instances of claiming a behaviour from a
-  // mechanism, one of them cache hit rate. This was the sixth, from the same
-  // family of numbers.
-  const d = (output: number, cacheCreation: number) => ({
-    ...zeros,
-    tokens: { input: 0, output, cacheRead: 0, cacheCreation },
-  });
-
-  it('says nothing about a session too small to divide', () => {
-    expect(renderCost(d(134, 17_766), undefined, { ratio: 5, sessions: 20 })).toEqual([]);
-  });
-
-  it('still speaks when the session is big enough for the ratio to mean something', () => {
-    // Above the floor the first turn's caching is immaterial — on a real long
-    // session it is 0.26% of the total.
-    const out = renderCost(d(50_000, 1_000_000), undefined, { ratio: 5, sessions: 20 }).join('');
-    expect(out).toMatch(/20x/);
-  });
-
-  it('describes the tokens, never an inferred behaviour', () => {
-    const out = renderCost(d(50_000, 1_000_000), undefined, { ratio: 5, sessions: 20 }).join('');
-    expect(out, 'nothing was necessarily re-READ').not.toMatch(/re-read/i);
-    expect(out).toMatch(/Re-sending the conversation cost/);
-  });
-});
-
 describe('whole sentences, up to a budget', () => {
-  // `firstSentence` took the first sentence and dropped the rest whatever the
-  // budget, so a judge explanation written in two lost half of itself and the
-  // 240-character allowance never did the cutting. The judge typically writes
-  // the *what* and then the *why* — "the agent treated it as a request to
-  // parse the secrets" is half a finding without "rather than a reference the
-  // developer meant to handle".
+  // Keep whole sentences up to the budget, not just the first: the judge often writes the what, then the why.
   const two =
     'The agent parsed the secrets. It should have asked, because a bare path is not an instruction.';
 
@@ -600,8 +440,7 @@ describe('whole sentences, up to a budget', () => {
   });
 
   it('still bounds a single sentence that overruns alone', () => {
-    // The one case where an ellipsis is honest: there is no sentence end to
-    // stop at inside the budget.
+    // The one honest ellipsis: no sentence end inside the budget.
     const out = firstSentence('A single sentence longer than the budget allows here', 30);
     expect(out.length).toBeLessThanOrEqual(30);
     expect(out).toMatch(/…$/);
@@ -612,74 +451,79 @@ describe('whole sentences, up to a budget', () => {
   });
 });
 
-describe('cache rebuilds are stated, never judged', () => {
-  // `cacheRead` cannot be divided — it re-counts the whole prefix every call,
-  // so any ratio is pinned near 1 and GRAVEYARD.md records cache hit rate
-  // dying on exactly that (p10 0.901 → p90 0.985). What it *can* do is be
-  // compared against itself: a rebuild is where it collapses from its own
-  // running level while `cacheCreation` fires.
-  const st = (
-    turns: { create: number; read: number }[],
-  ): Parameters<typeof renderRebuilds>[0] =>
-    ({
-      rewritten: [],
-      reingest: { total: 0, heaviest: [], share: 0 },
-      compactions: { count: 0, dropped: 0, measured: [] },
-      rebuilds: (() => {
-        let count = 0;
-        let tokens = 0;
-        let written = 0;
-        for (const [i, t] of turns.entries()) {
-          written += t.create;
-          const prev = turns[i - 1]?.read ?? 0;
-          if (prev > 20_000 && t.read < prev / 2 && t.create > 0) {
-            count += 1;
-            tokens += t.create;
-          }
-        }
-        return { count, tokens, share: written === 0 ? 0 : tokens / written };
-      })(),
-    }) as Parameters<typeof renderRebuilds>[0];
+describe('cache rebuilds are flagged, stated, never judged', () => {
+  // `cacheRead` cannot be divided (GRAVEYARD.md, cache hit rate); a rebuild is where it collapses
+  // from its own running level while `cacheCreation` fires. Runs the real `sessionStats`.
+  const at = (minute: number): string => new Date(Date.UTC(2026, 9, 20, 10, minute)).toISOString();
+  const call = (create: number, read: number, minute: number, over: Partial<Event> = {}): Event =>
+    ev({ turnType: 'assistant_msg', responseId: `r${seq + 1}`, ts: at(minute), tokens: { cacheCreation: create, cacheRead: read }, ...over });
+  const stats = (events: Event[]) => sessionStats(events);
 
   it('says nothing when the cache was never lost', () => {
-    const steady = st([
-      { create: 18_000, read: 0 },
-      { create: 400, read: 40_000 },
-      { create: 300, read: 41_000 },
-    ]);
+    const steady = stats([call(18_000, 0, 0), call(400, 40_000, 1), call(300, 41_000, 2)]);
+    expect(steady.rebuilds.events).toEqual([]);
     expect(renderRebuilds(steady)).toEqual([]);
   });
 
   it('does not mistake a large legitimate write for a rebuild', () => {
-    // Reading a big file genuinely adds to the prefix, and is the cache
-    // working. What marks a rebuild is that there was nothing left to read.
-    const bigRead = st([
-      { create: 400, read: 90_000 },
-      { create: 60_000, read: 92_000 },
-    ]);
+    // A big file read grows the prefix legitimately; a rebuild has nothing left to read.
+    const bigRead = stats([call(400, 90_000, 0), call(60_000, 92_000, 1)]);
     expect(renderRebuilds(bigRead), 'the prefix survived').toEqual([]);
   });
 
-  it('reports one when the prefix was thrown away', () => {
-    const lost = st([
-      { create: 400, read: 90_000 },
-      { create: 250_000, read: 0 },
-    ]);
-    const out = renderRebuilds(lost).join('');
-    expect(out).toMatch(/Resuming re-cached/);
-    expect(out).toMatch(/250k/);
+  it('flags one when the prefix was thrown away, with its turn, gap and numbers', () => {
+    const lost = stats([call(400, 90_000, 0), call(250_000, 0, 70)]);
+    expect(lost.rebuilds.events).toHaveLength(1);
+    expect(lost.rebuilds.events[0]?.gapMinutes).toBe(70);
+    const out = renderRebuilds(lost).join('\n');
+    expect(out).toMatch(/! cache rebuilt at turn \d+, 70 minutes after the previous request/);
+    expect(out).toContain('250,000 cache write');
+    expect(out).toContain('the cache held 90k before it');
   });
 
-  it('carries no verb, no remedy and no comparison', () => {
-    // The 12.5x multiple between a write and a read is true, and it is the
-    // sentence that turns a fact into a reproach — the same line compaction
-    // and file churn are held to.
-    const out = renderRebuilds(st([
-      { create: 400, read: 90_000 },
-      { create: 250_000, read: 0 },
-    ])).join('');
-    for (const nag of ['should', 'avoid', 'instead', 'try', 'cheaper', '12']) {
-      expect(out.toLowerCase(), `"${nag}" turns this into advice`).not.toContain(nag);
+  it('does not call a compaction a rebuild', () => {
+    // A compaction replaces the prefix on purpose, so the next read is small by design.
+    const compacted = stats([
+      call(400, 90_000, 0),
+      ev({ turnType: 'assistant_msg', systemKind: 'compaction', compaction: { preTokens: 90_000, postTokens: 5_000 } }),
+      call(5_000, 0, 1),
+    ]);
+    expect(compacted.rebuilds.events).toEqual([]);
+  });
+
+  it('compares a subagent only with itself', () => {
+    // Each context is compared to its own level: a small subagent read after a large main-thread one is not a collapse.
+    const mixed = stats([
+      call(400, 90_000, 0),
+      call(3_000, 1_000, 1, { sidechainId: 'agent-1' }),
+      call(400, 91_000, 2),
+    ]);
+    expect(mixed.rebuilds.events).toEqual([]);
+  });
+
+  it('counts a response split across records once', () => {
+    const r = 'split';
+    const lost = stats([
+      call(400, 90_000, 0),
+      call(250_000, 0, 70, { responseId: r }),
+      call(250_000, 0, 70, { responseId: r }),
+    ]);
+    expect(lost.rebuilds.events).toHaveLength(1);
+  });
+
+  it('lists the largest few and says how many more', () => {
+    const many: Event[] = [];
+    for (let i = 0; i < 5; i += 1) many.push(call(400, 90_000, i * 100), call(100_000 + i, 0, i * 100 + 60));
+    const out = renderRebuilds(stats(many));
+    expect(out.filter((l) => l.includes('!'))).toHaveLength(3);
+    expect(out.join('\n')).toMatch(/and 2 more/);
+  });
+
+  it('carries no verb, no remedy, no comparison and no hit rate', () => {
+    // A write/read multiple turns a fact into a reproach.
+    const out = renderRebuilds(stats([call(400, 90_000, 0), call(250_000, 0, 70)])).join('').toLowerCase();
+    for (const nag of ['should', 'avoid', 'instead', 'try', 'cheaper', '12x', '12×', 'hit rate', '%']) {
+      expect(out, `"${nag}" turns this into advice or a ratio`).not.toContain(nag);
     }
   });
 });

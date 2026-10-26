@@ -1,74 +1,24 @@
 /**
- * `fix` — the second output.
- *
- * CLAUDE.md allows exactly two: **evidence**, and **something applicable**. Up
- * to now the project shipped only the first, which makes it a report rather
- * than the thing it set out to be.
- *
- * ── Exactly one recommendation ─────────────────────────────────────────────
- *
- * Not a list. `docs/artifacts.md` settles this from behaviour-change research:
- * a single specific goal beats a list of them, and a tool that returns six
- * things to fix has returned nothing to do. So `recommend()` returns one
- * `Recommendation` or none.
- *
- * ── Artifact kinds, by measured effect ─────────────────────────────────────
- *
- * ```
- *   GUARD    a hook; mechanical, cannot be ignored   ~10.2% of gap closed, p=0.022
- *   PROMPT   evidence-loaded text for the agent      the default
- *   MEMORY   a CLAUDE.md diff                        ~3.6%, budget-limited
- *   REPORT   stated cost, no artifact available      honest, not a cop-out
- * ```
- *
- * **`edit_retry` cannot be guarded, and that is not a gap in the design.** A
- * `PreToolUse` guard prevents an action — but the harness *already* refuses
- * these edits. The waste is the round-trip, not an unprevented write, so there
- * is nothing left for a guard to stop. That is why the strongest kind is absent
- * here and the honest exits are `PROMPT` and `MEMORY`.
- *
- * ── Nothing is applied ─────────────────────────────────────────────────────
- *
- * This module returns text. Writing to `CLAUDE.md`, or adopting a prompt for a
- * session, is the user's decision and happens elsewhere, after they say yes.
+ * `fix`: picks at most one recommendation (the "something applicable" output) and renders it.
+ * Returns text only; nothing is applied. Artifact kinds and their evidence: docs/artifacts.md.
  */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Event } from './types.ts';
 import type { Standing } from './standing.ts';
-import type { JudgedFinding } from './judge-store.ts';
-import { nextRung, reasonLabel } from './report-line.ts';
+import type { JudgedFinding } from './judge/state.ts';
+import { nextRung } from './session-block.ts';
+import { reasonLabel } from './detect/labels.ts';
 import { approx } from './cost.ts';
 import { bold, cyan, dim, pad, rule } from './style.ts';
+import { plural, wrap } from './format.ts';
 
 /**
- * What kind of change this is — and the ordering is the docs' own.
- *
- * Claude Code's documentation splits its surfaces three ways, and the wording
- * matters because it is the difference between a fix and a hope:
- *
- * ```
- *   DETERMINISTIC   permissions + command hooks   "enforced by Claude Code,
- *                                                  not by the model"
- *   MODEL-JUDGED    prompt / agent hooks          "a model's judgment, not a
- *                                                  guarantee"
- *   PROSE           CLAUDE.md, .claude/rules/      "context, not enforced
- *                   memory, output styles           configuration"
- * ```
- *
- * `GUARD` and `VERIFY` are deterministic. `CONFIG` shifts what the harness
- * does. `PROMPT` is model-judged. `MEMORY` is prose, and measured at
- * **+0.066 pts** across 753 rules in 410 repos, so it is never the default.
- *
- * Two more that are not harness surfaces at all, and both were missing:
- *
- * `EXTERNAL` — some of these the industry already solved, and pointing at a
- * pattern beats inventing a worse one. `REPORT` — **no artifact exists, and
- * that is an answer.** Three of our seven dimensions end here, including one
- * where the harness already enforces the thing a rule would ask for.
+ * GUARD/VERIFY are deterministic hooks, CONFIG changes harness behaviour, PROMPT is model-judged,
+ * MEMORY is a CLAUDE.md line (weakest; never the default), REPORT means no artifact exists.
  */
-export type ArtifactKind =
+type ArtifactKind =
   | 'GUARD'
   | 'VERIFY'
   | 'CONFIG'
@@ -82,82 +32,25 @@ export type Recommendation = {
   dimension: string;
   /** What was measured, in the user's own data. Always present. */
   evidence: string;
-  /**
-   * Text to hand the agent for *this session*.
-   *
-   * Absent on a `REPORT`, which is the honest case where no artifact exists.
-   */
+  /** Text to hand the agent for this session. Absent on a `REPORT`. */
   prompt?: string;
-  /**
-   * A `CLAUDE.md` line, for making it stick beyond this session.
-   *
-   * **Budget-checked, and often absent even when one could be written.**
-   * `docs/artifacts.md` measures a prose rule at +0.066 pts and documents
-   * `CLAUDE.md` degrading past ~500 words, so an unconditional line is how a
-   * coach makes its user worse over time.
-   */
+  /** A `CLAUDE.md` line; omitted when the file is over budget (see `memoryAllowed`). */
   memory?: string;
-  /**
-   * The settings fragment or hook a `GUARD`, `VERIFY` or `CONFIG` needs.
-   *
-   * **Printed, never written.** The never-touch-your-config rule is not relaxed
-   * because the research likes hooks.
-   */
+  /** Hook or settings fragment for GUARD/VERIFY/CONFIG. Printed, never written. */
   config?: { what: string; snippet: string; costs: string; helps: string };
-  /** What this costs the user, for a mechanism that can refuse to finish. */
+  /** An existing external pattern that solves this. */
   external?: { what: string; where: string };
-  /**
-   * Why **this remedy** addresses **this failure**, in one line.
-   *
-   * Distinct from `because`, which argues for the class of fix and sits at the
-   * top of the block. The user's objection was precise: *"I would have loved
-   * to know why I should use plan mode. Currently it's asking me to do
-   * something without really telling me the reasoning."*
-   *
-   * The reasoning did exist — buried in `because`, several lines above the
-   * option it justified, and written about the dimension rather than the
-   * mechanism. A reader deciding whether to adopt something needs the causal
-   * link next to the thing they are deciding about.
-   */
+  /** Why this remedy addresses this failure, shown next to the prompt. */
   promptHelps?: string;
-  /**
-   * The judge's account of **this** occurrence, in its own words.
-   *
-   * Distinct from `evidence` (how often, which turns) and from `because`
-   * (why the class of thing happens). It was being dropped entirely, which
-   * left the block showing a bare quote — `"~/Downloads/prod.env"` — with
-   * nothing to say what it was or why it mattered. The sentence that explains
-   * it was already stored on the finding.
-   */
+  /** The judge's own account of this occurrence. */
   happened?: string;
-  /**
-   * Why this and not something else — so a recommendation can be argued with.
-   *
-   * A tool that says "do this" without saying "because you did that 528 times"
-   * is advice, which is out of scope.
-   */
+  /** Why this recommendation, so it can be argued with. */
   because: string;
-  /**
-   * What this reason has already cost, in tokens.
-   *
-   * **Past cost, not a forecast.** "You will save N" is a prediction the data
-   * cannot support — adopting a brief changes the session being measured, which
-   * the note at the bottom of the render already admits. "This cost N" is the
-   * claim the evidence actually makes.
-   *
-   * Absent when the standing predates the measurement or the reason has no
-   * priced instances.
-   */
+  /** Tokens this reason has already cost. Past cost, not a forecast. */
   cost?: { written: number; received: number };
 };
 
-/**
- * What each reason can actually be fixed with.
- *
- * Keyed on the harness's own reason, not the dimension: `not-read-first` and
- * `string-not-found` are both `edit_retry`, and they need different changes.
- * A reason absent from this table has no artifact, which is a real answer.
- */
+/** Fix per harness reason (not per dimension). A reason absent here has no artifact. */
 const ARTIFACTS: Record<string, { prompt: string; memory: string }> = {
   'not-read-first': {
     prompt:
@@ -187,45 +80,8 @@ const ARTIFACTS: Record<string, { prompt: string; memory: string }> = {
 };
 
 /**
- * What actually fixes each dimension, researched rather than assumed.
- *
- * ── Three of seven have no fix, and that is the finding ────────────────────
- *
- * `redundant_call` — re-reading a file is cheap and frequently correct. A
- * `PreToolUse` cache on `Read` is buildable but must reset on compaction, since
- * after a compact the content is gone and denying the re-read would strand the
- * model. Not worth it.
- *
- * `edit_retry` / `not-read-first` — **the harness already refuses unread
- * edits.** A rule asking for it is `docs/artifacts.md`'s *ceremonial* category
- * by definition: 66.7% of rules describe behaviour that already complied.
- * Saying "nothing to do, the harness has this" is the useful answer.
- *
- * `other` — unknown by construction. The descriptor is the point: accumulate
- * them and read them, rather than inventing a dimension.
- *
- * ── Where a mechanism does exist, it is deterministic ──────────────────────
- *
- * `constraint_violation` and `overreach` share one: a `Stop` hook comparing
- * `git diff --name-only` against an allowlist. It beats interception because
- * `permissions.deny` only matches the forms it is written for — `Bash(pnpm add
- * *)` misses `npx pnpm add`, `pnpm -C dir add`, `sh -c 'pnpm add'`, `yarn add`
- * and editing `package.json` by hand — and the docs state plainly that a Bash
- * rule "isn't a security boundary". Deny rules are offered as a cheap first
- * layer with that limit named, never as sufficient.
- *
- * `inaccurate_self_report` is the cleanest: a `Stop` hook runs the real check
- * and exits 2 with the output. The hook input carries `last_assistant_message`
- * **and** `transcript_path`, so a script can compare the claim against the
- * transcript. This is the verify-gated-completion pattern, and no major vendor
- * ships one — so `EXTERNAL` is a legitimate alternative.
- *
- * `misread_intent` has no gate. Clarification recovers nearly all the lost
- * ground (69.40% against 70.80% with the full issue, arXiv 2603.26233) but
- * over-asking has a real cost, and agents ask about *which target* far more
- * readily than *what you meant*. The harness itself shifts the ask rate from
- * 31.8% to 10.5% across scaffolds, which is why `CONFIG` outranks `PROMPT`
- * here.
+ * Dimensions with no artifact. Re-reads are cheap and often correct; `other` is unknown by
+ * construction. Why each dimension gets its mechanism: docs/artifacts.md.
  */
 const REPORT_ONLY = new Set(['redundant_call', 'other']);
 
@@ -235,37 +91,17 @@ const STOP_HOOK_COSTS =
   'Claude Code will not let that repeat more than 8 times in a row.';
 
 /**
- * What a compaction did before the cited turn, if anything.
- *
- * ── Why this changes the recommendation rather than decorating it ─────────
- *
- * The harness docs put it in one line: **"enforcement survives, context does
- * not."** Permissions and hooks are configuration, so a compaction cannot
- * remove them. Project-root `CLAUDE.md` is re-read from disk after a compact.
- * A constraint typed into the conversation is simply gone.
- *
- * That split is measurable. Across 1,323 episodes, a governance constraint was
- * violated **0% of the time when it survived the summary and 38% when it was
- * dropped** (arXiv 2606.22528). So when a compaction sits between a constraint
- * and its violation, the useful advice is not a better-worded rule — it is
- * *move this out of the conversation*, which is a different category of fix.
- *
- * `dropped` is `preTokens - postTokens` of the last compaction before the
- * finding: the size of what the agent stopped being able to see.
+ * Compactions before the cited turn. A constraint said in chat can be compacted away while hooks
+ * and files survive, so a compaction changes the fix (arXiv 2606.22528).
  */
-export type CompactionContext = {
+type CompactionContext = {
   /** Compactions strictly before the cited turn. */
   before: number;
-  /** Tokens the last one discarded. */
+  /** Tokens the last one discarded (preTokens - postTokens). */
   dropped: number;
 };
 
-/**
- * Compaction context per session, keyed by id.
- *
- * Computed by the caller, because `recommend` is pure and the events live on
- * disk — the same reason `Standing` is passed in rather than read here.
- */
+/** Per session id. Computed by the caller so `recommend` stays pure. */
 export type Compactions = Map<string, CompactionContext>;
 
 type DimensionFix = {
@@ -296,11 +132,6 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
     promptHelps:
       'Naming the constraint out loud is what makes a slip visible to you ' +
       'while there is still time to stop it.',
-    // The evidence for this wording lives in `docs/artifacts.md` and the
-    // header above. It is deliberately NOT in the output: a user reading a
-    // finding about their own session does not need a literature review, and
-    // "+0.066 pts across 753 rules" is a sentence that informs nobody who did
-    // not already know what it meant.
     because:
       'A hook is checked by Claude Code itself, so it holds whether or not the ' +
       'model remembers. Asking in a prompt only works while it is paying ' +
@@ -378,34 +209,16 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
   },
 };
 
-function plural(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
 /**
  * The one thing worth changing, or nothing.
- *
- * Chosen by occurrences among dimensions that **have** an artifact, so a rare
- * report-only dimension never outranks a frequent fixable one — and a
- * recommendation is never manufactured for a dimension whose honest exit is a
- * report.
+ * Ranked by occurrences among dimensions that have an artifact, so a report-only one never wins.
  */
 export function recommend(
   s: Standing | undefined,
   judged: JudgedFinding[] = [],
   compactions: Compactions = new Map(),
 ): Recommendation | undefined {
-  // ── Judge findings outrank rule findings, and the reason is the mechanism ──
-  //
-  // `fix` used to read only `Standing`, which holds the rule detectors. So on a
-  // machine whose judge had found two `constraint_violation`s — including
-  // "delete that prod.env from your memory" going unactioned — it reached past
-  // them to offer an `edit_retry` prose rule for something the harness already
-  // enforces.
-  //
-  // The ranking is not "newer is better": it is that a dimension with a
-  // deterministic mechanism available outranks one whose honest answer is a
-  // report. `BY_DIMENSION` is what knows which is which.
+  // Judged dimensions with a mechanism in `BY_DIMENSION` outrank rule findings.
   const byDim = new Map<string, number>();
   for (const f of judged) byDim.set(f.dimension, (byDim.get(f.dimension) ?? 0) + 1);
   const judgedFix = [...byDim.entries()]
@@ -420,12 +233,8 @@ export function recommend(
     const turns = anchors.flatMap((f) => f.turns).sort((a, b) => a - b);
     const where =
       turns.length > 1 ? `turns ${turns[0]}–${turns[turns.length - 1]}` : `turn ${turns[0] ?? '?'}`;
-    // ── The compaction overlay ────────────────────────────────────────────
-    //
-    // If a compaction dropped context before the cited turn, the constraint
-    // was probably not ignored — it was no longer there to follow. That is a
-    // different problem with a different fix, so it replaces the generic
-    // mechanism rather than being appended to it.
+    // A compaction before the cited turn replaces the generic mechanism: the
+    // constraint may no longer have been in view.
     const lost = anchors
       .map((f) => compactions.get(f.sessionId))
       .filter((c): c is CompactionContext => c !== undefined && c.before > 0)
@@ -479,13 +288,7 @@ export function recommend(
     };
   }
 
-  // ── A judged REPORT, held as a candidate rather than a last resort ───────
-  //
-  // Judge findings with no mechanism are still an answer, and `other` carries
-  // the descriptors that are the only route to discovering a missing dimension.
-  // Computing this as a candidate matters: the first version only reached it
-  // when `Standing` was absent, which in practice is never — so the
-  // descriptors were collected and then never shown.
+  // A judged REPORT is a candidate, not a last resort, so `other` descriptors get shown.
   const judgedReport = ((): Recommendation | undefined => {
     const only = [...byDim.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
     if (only === undefined) return undefined;
@@ -520,8 +323,7 @@ export function recommend(
   const sessions = `${plural(s.sessions, 'session')}`;
 
   if (REPORT_ONLY.has(target.dimension)) {
-    // Both are reports; the judged one is about the collaboration and may
-    // carry descriptors, so it is the more informative of two non-actions.
+    // Prefer the judged report: it may carry descriptors.
     if (judgedReport !== undefined) return judgedReport;
     return {
       kind: 'REPORT',
@@ -533,11 +335,7 @@ export function recommend(
     };
   }
 
-  // The dominant reason decides the artifact: the same dimension needs a
-  // different change depending on why the harness refused.
-  // Tie broken by reason key, so a 2-2 split does not flip between runs. The
-  // choice is arbitrary either way; being *stably* arbitrary is what matters,
-  // because a recommendation that changes on re-run cannot be followed.
+  // The dominant reason picks the artifact; ties break by key so re-runs agree.
   const ranked = Object.entries(s.reasons).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const top = ranked.find(([key]) => ARTIFACTS[key] !== undefined);
 
@@ -554,16 +352,8 @@ export function recommend(
 
   const [reason, n] = top;
 
-  // ── The harness already does this one ───────────────────────────────────
-  //
-  // `not-read-first` is the most common `edit_retry` reason and was the
-  // default recommendation: "read a file before editing it". The harness
-  // **already refuses** unread edits — `fix.ts` says so twenty lines up — so
-  // the rule describes behaviour that already complied. `docs/artifacts.md`
-  // measures that category at 66.7% of all rules and calls it ceremonial.
-  //
-  // Reporting it is more useful than a rule, because the user learns the
-  // retries are the harness working rather than something to configure.
+  // The harness already refuses unread edits, so a rule would be ceremonial
+  // (docs/artifacts.md). Report instead.
   if (reason === 'not-read-first') {
     if (judgedReport !== undefined) return judgedReport;
     const cost = s.wastedTokens?.[reason];
@@ -580,8 +370,7 @@ export function recommend(
   }
 
   const artifact = ARTIFACTS[reason] as { prompt: string; memory: string };
-  // `?.` although the type says it is there: `readStanding` casts rather than
-  // validates, so a file written by an older version reads as undefined.
+  // `?.`: `readStanding` casts without validating, so older files lack this field.
   const cost = s.wastedTokens?.[reason];
   const where =
     target.top !== undefined && target.files > 1
@@ -595,13 +384,6 @@ export function recommend(
       `${plural(target.occurrences, 'edit')} rejected and retried across ${sessions}` +
       `${where} — ${n} because ${reasonLabel(reason)}`,
     prompt: artifact.prompt,
-    // ── A CLAUDE.md line only if the budget allows one ────────────────────
-    //
-    // This used to be unconditional. `docs/artifacts.md` measures a prose rule
-    // at +0.066 pts across 753 rules, documents CLAUDE.md degrading past ~500
-    // words with the correlation going negative past 1,000, and says the most
-    // valuable memory action is often **removal**. A coach that appends on
-    // every run is the mechanism of catastrophic remembering.
     ...(memoryAllowed() ? { memory: artifact.memory } : {}),
     because: `${reasonLabel(reason)} is the most common reason, at ${n} of ${target.occurrences}.`,
     ...(cost !== undefined && cost.written + cost.received > 0 ? { cost } : {}),
@@ -609,14 +391,8 @@ export function recommend(
 }
 
 /**
- * Compaction context for the sessions a set of findings came from.
- *
- * Reads each transcript once and keeps only two numbers per session, because
- * the alternative is holding every event for a recommendation that needs a
- * count and a size.
- *
- * Unreadable is not an error: a missing transcript means no overlay, which is
- * the same outcome as no compaction and the correct one either way.
+ * Compaction context for the sessions the findings came from, two numbers per session.
+ * An unreadable transcript just means no overlay.
  */
 export function compactionsFor(
   judged: JudgedFinding[],
@@ -640,30 +416,15 @@ export function compactionsFor(
   return out;
 }
 
-/**
- * Is there room in `CLAUDE.md` for another line?
- *
- * Measured ceilings from `docs/artifacts.md`: well-performing files average
- * 300-350 words, past 500 shows diminishing returns, and past 1,000 the
- * correlation with performance goes **negative**. So this refuses rather than
- * appending to a file where the next line makes things worse.
- *
- * Absent or unreadable counts as room — the common case is a project with no
- * `CLAUDE.md` at all, and refusing there would be wrong.
- */
-/**
- * How much of the quoted evidence `:fix` shows.
- *
- * Was 90, where `:insights` shows 160 and the HTML report 200 — so the
- * surface with the most room was cutting hardest, and a real 137-character
- * quote on this machine was being clipped mid-phrase. Matched to the report,
- * since the evidence is the one thing a reader can go and check for
- * themselves.
- */
+/** Quote length shown by `:fix`, matched to the HTML report. */
 export const QUOTE_MAX = 200;
 
 export const MEMORY_WORD_BUDGET = 500;
 
+/**
+ * Is there room in `CLAUDE.md` for another line? Word ceilings: docs/artifacts.md.
+ * Absent or unreadable counts as room.
+ */
 export function memoryAllowed(cwd: string = process.cwd()): boolean {
   try {
     const words = readFileSync(join(cwd, 'CLAUDE.md'), 'utf8').split(/\s+/).filter(Boolean).length;
@@ -673,27 +434,27 @@ export function memoryAllowed(cwd: string = process.cwd()): boolean {
   }
 }
 
-/**
- * The recommendation, rendered.
- *
- * States what was measured before what to do about it, because the evidence is
- * what makes the suggestion arguable — and an unarguable suggestion is advice.
- */
-export function renderFix(r: Recommendation | undefined, preset: string, muted: string[] = []): string {
+/** The recommendation, rendered: evidence first, then what to do. */
+export function renderFix(
+  r: Recommendation | undefined,
+  preset: string,
+  muted: string[] = [],
+  dismissed = 0,
+): string {
   const lines: string[] = [];
   const W = 68;
 
   if (r === undefined) {
     lines.push(dim('nothing to recommend yet.'));
+    // "No findings in your history" is false once someone has dismissed them.
     lines.push(
-      `  ${dim('no findings in your history, or no standing computed — run `standing --refresh`.')}`,
+      dismissed > 0
+        ? `  ${dim(`${dismissed} finding${dismissed === 1 ? ' is' : 's are'} dismissed; /agentsensei:dismiss undo all restores them.`)}`
+        : `  ${dim('no findings in your history, or no standing computed — run `standing --refresh`.')}`,
     );
     return lines.join('\n');
   }
 
-  // The header names the dimension and the artifact kind. The kind is the
-  // strongest thing on the line because it says what you are being handed —
-  // a prompt to paste, a rule to keep, or a figure and no artifact at all.
   lines.push(
     '',
     `  ${bold(r.dimension.replace(/_/g, ' ').toUpperCase())}`,
@@ -702,13 +463,6 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
   );
 
 
-  // ── Headings a reader takes as questions ───────────────────────────────
-  //
-  // `measured` / `because` in a left gutter reads as a form. Worse, the two
-  // texts were the wrong way round for what a reader wants first: `because`
-  // argues for the class of fix, while the judge's account of **this** case
-  // was discarded entirely — so the block showed a bare quote,
-  // `"~/Downloads/prod.env"`, with nothing saying what it was.
   lines.push(`  ${dim('What happened')}`);
   for (const l of wrap(r.happened ?? r.evidence, 62)) lines.push(`    ${l}`);
   lines.push('');
@@ -716,29 +470,15 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
   for (const l of wrap(r.because, 62)) lines.push(`    ${l}`);
   lines.push('');
   if (r.cost !== undefined) {
-    // Bold on the figure only: the sentence around it is context, the number is
-    // the thing worth carrying away.
     lines.push(
       `  ${pad('cost', 10, dim)} ${bold(`${approx(r.cost.written)} tokens`)} ${dim('written and discarded')}`,
     );
   }
 
-  // ── The mechanism first, because it is the only kind that measurably works ─
-  //
-  // Decided with the user: lead with GUARD/VERIFY/CONFIG where one exists, and
-  // keep the prompt underneath as the low-commitment option. The snippet is
-  // **printed and never written** — the never-touch-your-config rule is not
-  // relaxed because the research likes hooks — and `costs` is shown with it
-  // rather than as a footnote, because a Stop hook can refuse to end a turn.
+  // Mechanism first, prompt as the fallback. The snippet is printed, never written.
   lines.push(`  ${dim('What you can do')}`, '');
   if (r.config !== undefined) {
     lines.push(`    ${cyan(r.config.what)}`, '');
-    // ── The reason, beside the thing it is a reason for ──────────────────
-    //
-    // *"I would have loved to know why I should use plan mode. Currently
-    // it's asking me to do something without really telling me the
-    // reasoning."* It existed — in `because`, several lines above, and
-    // written about the dimension rather than about the mechanism.
     for (const l of wrap(r.config.helps, 60)) lines.push(`      ${l}`);
     lines.push('');
     for (const l of r.config.snippet.split('\n')) lines.push(`      ${l}`);
@@ -781,14 +521,11 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
     lines.push('');
   }
   if (r.kind === 'REPORT') {
-    // A REPORT is an answer, not an apology — so it states the conclusion
-    // rather than drawing attention to the absence of a tip.
     for (const l of wrap(r.because, 60)) lines.push(`      ${l}`);
     lines.push('');
   }
 
-  // The honesty note the design requires: adopting a brief changes the session
-  // being measured, so the next report cannot call it an improvement.
+  // Adopting a brief changes the session being measured.
   if (r.prompt !== undefined) {
     for (const l of wrap(
       'adopting this changes the session it is measuring, so this dimension will read as suppressed rather than improved until you drop it again.',
@@ -799,31 +536,11 @@ export function renderFix(r: Recommendation | undefined, preset: string, muted: 
     lines.push('');
   }
 
-  // Say what it chose from. One live detector would otherwise read as "there is
-  // only one thing you could improve".
   lines.push(
     `  ${rule(W)}`,
     `  ${dim(`chosen from preset "${preset}"${muted.length > 0 ? ` · muted: ${muted.join(', ')}` : ''}`)}`,
-    // Which preset chose this is provenance, not a next step. Every other
-    // surface ends by naming the one after it; this one ended on machinery.
     '',
     `  ${dim(nextRung('fix'))}`,
   );
   return lines.join('\n');
-}
-
-/** Wrap to a width, on word boundaries. */
-function wrap(text: string, width: number): string[] {
-  const out: string[] = [];
-  let line = '';
-  for (const word of text.split(' ')) {
-    if (line === '') line = word;
-    else if (`${line} ${word}`.length <= width) line = `${line} ${word}`;
-    else {
-      out.push(line);
-      line = word;
-    }
-  }
-  if (line !== '') out.push(line);
-  return out;
 }

@@ -1,48 +1,24 @@
 /**
- * Who may spend the user's money, and who may not.
- *
- * ── Why this boundary moved, and why it moved back ─────────────────────────
- *
- * The judge used to fire from the `Stop` hook on a cadence. That was replaced
- * by firing from `/agentsensei:insights`, on the reasoning that asking about a
- * session is a fair moment to read it — and it was wrong for a reason the
- * pipeline model made obvious: it put a producer inside a reader. The command
- * said "now", looked like a view, and charged ~58k tokens for it.
- *
- * So producers produce and readers read:
- *
- *   PRODUCERS   the `Stop` hook, on a cadence
- *               `judge --backlog --apply`, explicitly and after showing cost
- *   READERS     every slash command. None of them spends.
- *
- * `Stop` fires when the main agent has finished responding, which is exactly
- * when a turn's work exists to analyse. The consent for it is the install plus
- * the one-time disclosure, not a per-turn decision nobody is present to make.
+ * Who may spend the user's money: producers (the `Stop` hook on a cadence, and
+ * `judge --backlog --apply`) spend; every slash command is a reader and never does.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  clearJudgeRunning,
-  DEFAULT_SETTINGS,
-  JUDGE_RUNNING_STALE_MS,
-  judgeRunning,
-  markJudgeRunning,
-} from '../src/judge-store.ts';
+import { DEFAULT_SETTINGS } from '../src/judge/state.ts';
+import { clearJudgeRunning, JUDGE_RUNNING_STALE_MS, judgeRunning, takeJudgeLock } from '../src/judge/lock.ts';
 
-/**
- * Source with comments stripped.
- *
- * An earlier version of this guard failed on the comment in `hook-stop.ts`
- * explaining why a spawn had been removed — prose worth keeping. A guard about
- * behaviour should read code.
- */
+/** Source with comments stripped, so the guard reads code, not prose. */
 function code(path: string): string {
   return readFileSync(path, 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '');
 }
+
+/** The CLI and every command it dispatches. */
+const cliCode = (): string =>
+  ['src/cli.ts', ...readdirSync('src/cmd').map((f) => `src/cmd/${f}`)].map(code).join('\n');
 
 describe('the Stop hook is the producer', () => {
   const hook = code('scripts/hook-stop.ts');
@@ -52,8 +28,6 @@ describe('the Stop hook is the producer', () => {
   });
 
   it('gates every reason not to spend', () => {
-    // Each of these is a reason the user would not want to be charged, and
-    // each is cheap enough to check in a hook that has milliseconds.
     expect(hook, 'the judge may be disabled').toMatch(/settings\.enabled/);
     expect(hook, 'a pass may already be running').toMatch(/judgeRunning/);
     expect(hook, 'the breaker may be tripped').toMatch(/isTripped/);
@@ -66,12 +40,10 @@ describe('the Stop hook is the producer', () => {
 });
 
 describe('no command spends', () => {
-  const cli = code('src/cli.ts');
+  const cli = cliCode();
 
   it('`insights` renders what exists and starts nothing', () => {
-    // The whole reason this surface is worth typing is that it is instant —
-    // measured at 0.41s. A command that waits on a model is a different
-    // product, and a command that spawns one silently is a worse one.
+    // Instant by design: a reader must never wait on or spawn a model.
     const cmd = /async function cmdInsights[\s\S]*?\n}/.exec(cli)?.[0] ?? '';
     expect(cmd, 'cmdInsights not found').not.toBe('');
     expect(cmd).not.toMatch(/spawnJudge|spawnDetached|markJudgeRunning/);
@@ -86,9 +58,7 @@ describe('no command spends', () => {
   });
 
   it('makes the backlog the one explicit exception', () => {
-    // Not a reader, and it does not pretend to be: it prints what a full pass
-    // would cost and sends nothing until told twice, the same `--apply` shape
-    // as `install`.
+    // Prints the cost and sends nothing without `--apply`.
     const backlog = /f\['backlog'\][\s\S]{0,1600}?return 0;\n  }/.exec(cli)?.[0] ?? '';
     expect(backlog, 'the --backlog branch moved or vanished').not.toBe('');
     expect(backlog).toMatch(/f\['apply'\] !== true/);
@@ -98,64 +68,50 @@ describe('no command spends', () => {
 
 describe('the judge ships on', () => {
   it('is enabled by default', () => {
-    // Defensible only because of the boundary above: the entry point is
-    // `/plugin install`, and the structural tier alone is one detector that
-    // found 4 occurrences across 18 real sessions where the judge found 19.
     expect(DEFAULT_SETTINGS.enabled).toBe(true);
   });
 
   it('discloses the first spend once, through a channel the user can see', () => {
-    // The producer is a hook now, and hooks print nothing — Principle One. So
-    // the notice surfaces through the session-start block, which is the one
-    // channel that reaches a user rather than the model.
-    const store = code('src/judge-store.ts');
+    // Hooks print nothing, so the notice goes through the session-start block.
+    const store = code('src/judge/state.ts');
     expect(store).toMatch(/export function hasDisclosed/);
     expect(store).toMatch(/export function markDisclosed/);
   });
 });
 
 describe('a pass cannot overlap itself', () => {
-  // Found by reading `pgrep` output during a timing test: two invocations had
-  // produced two independent passes on the same session, each ~58k tokens, on
-  // the same bytes. The ledger does not advance until stage A returns, so both
-  // saw the same offset and both decided the session was due.
+  // Two invocations once judged the same bytes twice: the ledger advances only after stage A.
   const dir = () => mkdtempSync(join(tmpdir(), 'as-lock-'));
 
   it('reports a fresh marker as running', () => {
     const d = dir();
     expect(judgeRunning(d)).toBe(false);
-    markJudgeRunning(d);
+    takeJudgeLock(d);
     expect(judgeRunning(d)).toBe(true);
   });
 
   it('ages a stale marker out, so a crashed pass does not block for ever', () => {
     const d = dir();
-    markJudgeRunning(d);
+    takeJudgeLock(d);
     expect(judgeRunning(d, Date.now() + JUDGE_RUNNING_STALE_MS + 1)).toBe(false);
   });
 
   it('clears on release', () => {
     const d = dir();
-    markJudgeRunning(d);
+    takeJudgeLock(d);
     clearJudgeRunning(d);
     expect(judgeRunning(d)).toBe(false);
   });
 
   it('is taken atomically before every spawn, and released however the pass exits', () => {
-    // `judgeRunning()` then `writeFileSync()` is a check and an act with a gap
-    // between them, and the write succeeds whether or not a file is there —
-    // so two hooks firing together both saw "not running" and both wrote.
-    //
-    // Survivable while a pass judged one named session: the two did different
-    // work. Now a pass takes **everything pending**, so two of them do
-    // identical work and bill for it twice.
+    // Check-then-write let two hooks both take the lock and bill twice.
     expect(code('scripts/hook-stop.ts')).toMatch(/takeJudgeLock/);
-    expect(code('src/cli.ts'), 'the backlog path takes it too').toMatch(/takeJudgeLock/);
-    expect(code('src/cli.ts'), 'and no longer writes the marker blind').not.toMatch(
+    expect(cliCode(), 'the backlog path takes it too').toMatch(/takeJudgeLock/);
+    expect(cliCode(), 'and no longer writes the marker blind').not.toMatch(
       /markJudgeRunning/,
     );
 
-    // `finally`, not a success path — a crash must still release it.
+    // `finally`, not a success path: a crash must still release it.
     const pass = code('scripts/judge.ts');
     expect(pass).toMatch(/\.finally\(/);
     expect(pass).toMatch(/clearJudgeRunning/);
@@ -163,38 +119,28 @@ describe('a pass cannot overlap itself', () => {
 });
 
 describe('the first spend is disclosed once', () => {
-  // The judge ships on, so a user must be told before it spends — and told by
-  // something they can actually see. The producer cannot do it: the `Stop`
-  // hook spends, and hooks print nothing (Principle One). `systemMessage` at
-  // session start renders in the user's own window, so that is where it goes.
+  // The `Stop` hook spends but prints nothing; `systemMessage` at session start reaches the user.
   const hook = code('scripts/hook-session-start.ts');
 
   it('says what it does before what it costs', () => {
-    // The first version opened with mechanism and spent three of four lines on
-    // denial. A notice that argues for itself is one people learn to skip.
     expect(hook).toMatch(/reads your finished sessions/);
     expect(hook).toMatch(/where effort went to waste/);
   });
 
   it('makes the cost checkable instead of asserting a figure', () => {
-    // `about 58k tokens a session` was exact and useless — nobody can
-    // calibrate it against a plan. `/usage` attributes spend by plugin, so the
-    // user can read the real number instead of trusting ours.
+    // `/usage` attributes spend by plugin, so the user can check the real number.
     expect(hook).toMatch(/on your own plan/);
     expect(hook).toMatch(/\/usage/);
     expect(hook, 'no uncalibratable token figure').not.toMatch(/58k/);
   });
 
   it('offers a way in, not just a way out', () => {
-    // The old notice's only command was the off switch — a dead end at the one
-    // moment a new user needs somewhere to go.
     expect(hook).toMatch(/\/agentsensei:insights/);
     expect(hook).toMatch(/plugin disable agentsensei/);
   });
 
   it('goes out through systemMessage, not the model channel', () => {
-    // `additionalContext` would put the tool inside the session it measures,
-    // which is the observer effect this project refuses — see D11/D58.
+    // `additionalContext` would put the tool inside the session it measures (DECISIONS.md D11/D58).
     expect(hook).toMatch(/systemMessage/);
     expect(hook).not.toMatch(/additionalContext/);
   });
@@ -205,8 +151,7 @@ describe('the first spend is disclosed once', () => {
   });
 
   it('is one message, not two', () => {
-    // Prepended to the report rather than written separately: two
-    // `systemMessage` writes from one hook is one of them being discarded.
+    // Two `systemMessage` writes from one hook means one is discarded.
     expect(hook).toMatch(/\$\{notice\}\$\{block\}/);
   });
 });

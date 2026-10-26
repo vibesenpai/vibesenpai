@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ParserRegistry,
-  detectHarness,
-  detectVersion,
-  type TranscriptParser,
-} from '../src/parsers/registry.ts';
-import { parse, registry, claudeCode2_1 } from '../src/parsers/index.ts';
+  ParserRegistry, detectHarness, detectVersion, type TranscriptParser, parse, registry, claudeCode2_1,
+} from '../src/parsers/index.ts';
 
 const j = (o: unknown): string => JSON.stringify(o);
 
@@ -21,8 +17,7 @@ const stub = (over: Partial<TranscriptParser> = {}): TranscriptParser => ({
 
 describe('version detection', () => {
   it('scans past records that lack the field', () => {
-    // `version` is on only 4 of 13 record types — mode/queue-operation etc.
-    // never carry it, so line 1 is often not the one with it.
+    // `version` is on only some record types, so line 1 often lacks it.
     const lines = [
       j({ type: 'mode', mode: 'default' }),
       j({ type: 'last-prompt', leafUuid: 'x' }),
@@ -127,9 +122,7 @@ describe('provenance reporting', () => {
   });
 
   it('parses a file from OUR OWN archive, where the path carries no hint', () => {
-    // The archive stores `sessions/<id>.jsonl`, so harness detection has only
-    // record shape to work from. Being strict here would make the archiver
-    // produce files its own parser refuses.
+    // With no path hint, detection has only record shape; strictness would refuse valid files.
     const b = j({ type: 'user', uuid: 'a', parentUuid: null, version: '2.1.296', message: { content: 'hi' } });
     const r = parse('/home/u/.local/share/agentsensei/sessions/abc.jsonl', b);
     expect(r.provenance.harness).toBe('claude-code');

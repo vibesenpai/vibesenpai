@@ -1,17 +1,9 @@
-/**
- * The two-stage path: extract without labelling, then label the record.
- *
- * Kept in its own file because the single-pass path in `judge.test.ts` is the
- * measured baseline and stays runnable until this one beats it. Today's lesson
- * was that two prompt changes shipped together let one mask the other.
- */
+/** The two-stage judge path: extract without labelling, then label the record. */
 
 import { describe, expect, it } from 'vitest';
-import {
-  buildSession, parseExtract, parseLabels, renderExtract, renderLabel,
-  type JudgeEpisode, type JudgePacketSession,
-} from '../src/judge.ts';
-import { wouldLeak } from '../src/model.ts';
+import { parseExtract, parseLabels, renderExtract, renderLabel, type JudgeEpisode } from '../src/judge/prompt.ts';
+import { buildSession, type JudgePacketSession } from '../src/judge/packet.ts';
+import { wouldLeak } from '../src/judge/model.ts';
 import { redact } from '../src/redact.ts';
 import type { Event } from '../src/types.ts';
 
@@ -92,9 +84,7 @@ describe('stage A — extraction does not label', () => {
 
 describe('stage A — the guards that need no judgement', () => {
   it('drops a quote that is one of OUR truncation markers', () => {
-    // We write "… [N chars omitted] …" in truncate(). A quote carrying it is
-    // quoting the pipeline, not the agent. Their taxonomy calls this
-    // `truncation` and only warns about it; we are the ones who create it.
+    // "… [N chars omitted] …" is our own truncation marker, not the agent.
     const r = parseExtract(
       extractReply([{ ...wellFormed, evidence: [{ quote: 'ran the suite … [1,204 chars omitted] … all passed', context: 'claimed success' }] }]),
       [session()],
@@ -122,9 +112,7 @@ describe('stage A — the guards that need no judgement', () => {
   });
 
   it('drops an episode anchored on the last turn of an unfinished session', () => {
-    // Live-ness, not validation. We judge sessions still running; a request the
-    // agent has not reached yet is not a misalignment. They judged finished
-    // transcripts and still rejected 1,784 records this way.
+    // The session may still be running; an unreached request is not a misalignment.
     const r = parseExtract(
       extractReply([{ ...wellFormed, evidence: [{ quote: 'you are right, removing it', context: 'the final turn' }] }]),
       [session()],
@@ -147,10 +135,7 @@ describe('stage A — the guards that need no judgement', () => {
 
 describe('stage A — the carry between batches', () => {
   it('tells the judge what was left failing earlier, and what is already reported', () => {
-    // `renderPacket` rendered the carry and `renderExtract` did not, so wiring
-    // two-stage into production silently dropped the thread between batches.
-    // 18.9% of boundaries leave a tool failure open, and a failure needs no
-    // retry to contradict a later claim of success.
+    // Regression: `renderExtract` once dropped the carry between batches.
     const text = renderExtract([{
       ...session(),
       carry: {
@@ -197,8 +182,7 @@ describe('stage A — malformed replies, which must not throw', () => {
   });
 
   it('tolerates a quote the model reflowed', () => {
-    // Models rewrap. An exact comparison would fail on exactly the long quotes
-    // most worth having.
+    // Models rewrap long quotes.
     const r = parseExtract(
       extractReply([{ ...wellFormed, evidence: [{ quote: 'I will add   left-pad\n  for this', context: 'reflowed' }] }]),
       [session()],
@@ -259,8 +243,7 @@ describe('stage B — labelling a record', () => {
   });
 
   it('refuses `other` WITHOUT a descriptor', () => {
-    // `other` with no descriptor is the one label carrying no information,
-    // which is the opposite of why the escape hatch exists.
+    // `other` without a descriptor carries no information.
     const r = parseLabels(
       JSON.stringify({ labels: [{ record: 1, reasoning: 'nothing fits', dimension: 'other', other_descriptor: null }] }),
       [episode()],
@@ -302,10 +285,7 @@ describe('stage B — labelling a record', () => {
 
 describe('wouldLeak — the gate that stops a send', () => {
   it('refuses a packet redaction would still change', () => {
-    // 50% of corpus sessions carry secret-class content at packet fidelity,
-    // and tool output is where they concentrate. This is asserted rather than
-    // warned because the packet leaves the machine, and a warning in a
-    // detached process is a thing nobody reads.
+    // Redaction is asserted before every model call; a warning in a detached process goes unread.
     expect(wouldLeak('export TOKEN=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789')).toBe(true);
   });
 
@@ -315,9 +295,7 @@ describe('wouldLeak — the gate that stops a send', () => {
   });
 
   it('is not satisfied by idempotence, which is weaker', () => {
-    // `isIdempotent` returns true for text redaction would still change — the
-    // distinction this project got wrong once. The gate asks whether redaction
-    // changes the text AT ALL, not whether redacting twice differs from once.
+    // The gate asks whether redaction changes the text at all, not whether twice differs from once.
     const dirty = 'ssh user:hunter2@example.com and /Users/someone/x';
     expect(wouldLeak(dirty)).toBe(true);
     expect(wouldLeak(redact(dirty).text)).toBe(false);
@@ -325,13 +303,7 @@ describe('wouldLeak — the gate that stops a send', () => {
 });
 
 describe('the extraction record survives into the finding', () => {
-  // This exists because the fields were added, silently reverted by a
-  // `git checkout` during unrelated work, and then COMMITTED with a message
-  // claiming they were there. The carry regression in the same batch was caught
-  // because a test failed; these had none, so 16 real findings lost their
-  // record and both `other` descriptors came back null. The descriptors are the
-  // only route to learning what dimension we are missing, so losing them
-  // quietly is the worst available outcome.
+  // Regression: these fields were once silently lost, and `other` descriptors with them.
   it('carries name, description, alignmentGoal, confidence and context', () => {
     const r = parseLabels(
       JSON.stringify({ labels: [{ record: 1, reasoning: 'the agent installed a dep', dimension: 'constraint_violation', other_descriptor: null }] }),
@@ -354,9 +326,7 @@ describe('the extraction record survives into the finding', () => {
   });
 
   it('omits otherDescriptor rather than storing an empty one', () => {
-    // `exactOptionalPropertyTypes` is on, and an empty descriptor is the same
-    // as no descriptor — storing '' would make "did the hatch tell us
-    // anything" unanswerable.
+    // An empty descriptor is no descriptor (`exactOptionalPropertyTypes`).
     const r = parseLabels(
       JSON.stringify({ labels: [{ record: 1, reasoning: 'x', dimension: 'misread_intent' }] }),
       [episode()],

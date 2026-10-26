@@ -1,6 +1,6 @@
 ---
 title: What it is
-description: What your coding agent's mistakes cost you, in tokens — and an honest account of what this does and does not do.
+description: Find out why your agents failed you — and an honest account of what this does and does not do.
 ---
 
 `agentsensei` reads the transcripts your coding agent already writes, finds the
@@ -30,7 +30,7 @@ compares to the corpus median.
 
 **`agentsensei report`** — the same across your history.
 
-**`agentsensei fix`** — one change worth making, with the evidence for it. Or a
+**`agentsensei fix`** — a recommendation, with the evidence for it. Or a
 plain statement that no fix exists, which is a real answer here rather than a
 shrug.
 
@@ -44,7 +44,7 @@ change it suggests is addressed to your *agent* — a hook, a setting, a line of
 prompt — because that is a thing you can apply in one keystroke rather than a
 habit you have to build.
 
-**Not a dashboard.** `fix` returns exactly one thing. A tool that hands you six
+**Not a dashboard.** `fix` returns a single recommendation. A tool that hands you six
 problems has handed you nothing to do.
 
 **Not finished.** Two rule detectors ship. The judge ships and is measured

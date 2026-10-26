@@ -1,38 +1,7 @@
 /**
- * Finding identity and merge.
- *
- * ── Two keys, and why ────────────────────────────────────────────────────────
- *
- * `id` is per-session: `hash(dimension + sessionId + subject)`.
- * `subjectId` is cross-session: `hash(dimension + project + subject)`.
- *
- * Both are keyed on the **subject** and never on the evidence. That is the whole
- * point: if identity included evidence extent, a finding with 7 violations would
- * become a *different* finding at the 8th — so the running score would lose its
- * history and anyone who dismissed it would get nagged again. The subject is
- * what a person recognises ("use pnpm, never npm"); the evidence is what grew.
- *
- * ── The merge fixes a bug deferred from M1 ───────────────────────────────────
- *
- * M1 shipped non-overlapping windows partly because `occurrences` would
- * double-count a turn appearing in two windows. The real problem was that
- * `occurrences` had no definition independent of how the session was windowed.
- *
- * It does now: **`occurrences` is the number of distinct anchors**, where an
- * anchor is the turn that identifies one instance. Merging two windows that
- * share a turn counts it once, so the number describes the session rather than
- * the slicing, and `stride` becomes safe to lower.
- *
- * ── Why anchors are not just the evidence ────────────────────────────────────
- *
- * The first version used `evidence.length`, which real data immediately broke.
- * `inaccurate_self_report` cites **two** turns per instance — the failing check
- * and the claim that contradicts it — so a single false claim reported
- * `occurrences: 2`. Meanwhile `tool_loop` cites three repeated calls and three
- * *is* the right count.
- *
- * So a candidate may name its anchors explicitly: one per instance. When it does
- * not, every evidence ref is an instance, which is the common case.
+ * Finding identity and merge. `id` is per session, `subjectId` across sessions; both hash the subject,
+ * never the evidence, so a finding keeps its identity as it grows.
+ * `occurrences` is the number of distinct anchors (one per instance), so it is independent of windowing.
  */
 
 import { createHash } from 'node:crypto';
@@ -54,13 +23,7 @@ export type Candidate = {
   subject: string;
   /** Every turn worth showing. May include supporting context. */
   evidence: TurnRef[];
-  /**
-   * One ref per instance, when that differs from the evidence.
-   *
-   * Omit when every evidence ref is itself an instance. Supplying it is what
-   * keeps `occurrences` meaning "how many times this happened" rather than "how
-   * many turns we cited".
-   */
+  /** One ref per instance, when that differs from the evidence. Omit when every ref is an instance. */
   anchors?: TurnRef[];
   confidence: Confidence;
   method: Method;
@@ -72,8 +35,7 @@ export type Candidate = {
 function sha(parts: string[]): string {
   const h = createHash('sha256');
   for (const p of parts) {
-    // Length-prefixed so that ("ab","c") and ("a","bc") cannot collide — a
-    // dimension named `x` with subject `y:z` must not equal `x:y` with `z`.
+    // Length-prefixed so ("ab","c") and ("a","bc") cannot collide.
     h.update(String(p.length)).update(':').update(p);
   }
   return h.digest('hex').slice(0, 16);
@@ -87,20 +49,8 @@ export function subjectIdOf(dimension: string, project: string, subject: string)
   return sha([dimension, project, subject]);
 }
 
-/**
- * Deduplicate refs by uuid, in transcript order.
- *
- * **Sorted by `seq`, not by insertion.** A thread-scoped detector runs once per
- * actor, so merging two actors' findings appended one actor's turns after the
- * other's: a loop shared by the main thread and a subagent cited
- * `turns 1,5,9,3,7,11`. The finding was right and unreadable — evidence a
- * person is meant to follow has to be in the order it happened.
- *
- * Refs without a `seq` keep their relative order at the end: `seq` is a derived
- * position and may legitimately be absent, and inventing one to sort by would
- * be worse than leaving them last.
- */
-export function dedupeEvidence(refs: TurnRef[]): TurnRef[] {
+/** Deduplicate refs by uuid, sorted by `seq` (refs without one go last, in order). */
+function dedupeEvidence(refs: TurnRef[]): TurnRef[] {
   const seen = new Set<string>();
   const out: TurnRef[] = [];
   for (const r of refs) {
@@ -115,7 +65,7 @@ export function dedupeEvidence(refs: TurnRef[]): TurnRef[] {
   });
 }
 
-export type MaterialiseInput = {
+type MaterialiseInput = {
   candidate: Candidate;
   sessionId: string;
   project: string;
@@ -150,17 +100,8 @@ export function materialise(input: MaterialiseInput): Finding {
 }
 
 /**
- * Combine two findings that share an `id`.
- *
- * Evidence unions by uuid and `occurrences` follows from it, so a turn seen in
- * two overlapping windows is counted once. `firstSeen` keeps the earlier value —
- * it is the age of the pattern, and letting a re-detection reset it would erase
- * exactly the history the running score reads.
- *
- * `surfaced` is sticky-true: once an ambient nudge has shown a finding, a later
- * merge must not make it surfaceable again. `dismissed` and `suppressedBy` are
- * preserved for the same reason — they are the user's decisions, and a merge is
- * not a reason to revisit them.
+ * Combine two findings that share an `id`: evidence unions by uuid, `firstSeen` keeps the earlier.
+ * `surfaced`, `dismissed` and `suppressedBy` are sticky: a merge never revisits the user's decisions.
  */
 export function mergeFindings(a: Finding, b: Finding): Finding {
   if (a.id !== b.id) {
@@ -188,13 +129,7 @@ export function mergeFindings(a: Finding, b: Finding): Finding {
   } as Finding;
 }
 
-/**
- * Add two reason tallies.
- *
- * Summed rather than replaced: merging two halves of the same finding must not
- * lose that two of its instances failed for one reason and one for another,
- * which is the whole value of the tally.
- */
+/** Add two reason tallies (summed, not replaced). */
 function mergeReasons(
   a: Record<string, number> | undefined,
   b: Record<string, number> | undefined,
@@ -227,32 +162,14 @@ function topReason(reasons: Record<string, number> | undefined): string | undefi
   return best?.[0];
 }
 
-/**
- * A finding, flattened to the atomic rows a store can hold.
- *
- * ── Why one row per anchor ─────────────────────────────────────────────────
- *
- * `anchors` is already defined as **one ref per instance** — the turn that
- * identifies a single occurrence, distinct from `evidence`, which may cite
- * supporting turns. So the atomic fact exists in this module already; it has
- * simply never been persisted.
- *
- * Rule findings are not stored at all today. The standing pass re-derives
- * every one of them from scratch every ten minutes, which is why nothing can
- * contribute findings between passes — and why the rolled-up file it writes
- * keeps only the single worst subject per dimension, losing the rest.
- *
- * Pure on purpose: this module does no I/O, so it maps and the caller writes.
- */
+/** A finding flattened to one store row per anchor. Pure: the caller writes. */
 export function occurrencesOf(findings: Finding[]): OccurrenceRow[] {
   const rows: OccurrenceRow[] = [];
   for (const f of findings) {
     const reason = topReason(f.reasons);
     for (const anchor of f.anchors) {
       rows.push({
-        // Content-hashed from the finding's own identity plus the anchor, so a
-        // re-run upserts over itself rather than duplicating. The anchor is in
-        // the key because it is what makes the row atomic.
+        // Content hash of finding id + anchor, so a re-run upserts rather than duplicates.
         id: createHash('sha256').update(`rule\0${f.id}\0${anchor.uuid}`).digest('hex').slice(0, 16),
         sessionId: f.sessionId,
         dimension: f.dimension,
@@ -260,9 +177,7 @@ export function occurrencesOf(findings: Finding[]): OccurrenceRow[] {
         subject: f.subject,
         anchorUuid: anchor.uuid,
         confidence: f.confidence,
-        // `reasons` is a tally keyed by the harness's own reason. The
-        // commonest one labels the row; the full tally stays answerable from
-        // the rows themselves, which is the point of the atomic grain.
+        // The commonest harness reason labels the row.
         ...(reason === undefined ? {} : { reason }),
         at: f.lastSeen,
       });

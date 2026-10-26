@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "agentsensei",
-      "description": "See what your coding agent's mistakes cost you — in tokens, with the exact turns, using the AI you already pay for.",
+      "description": "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.",
       "author": {
         "name": "agentsensei contributors"
       },

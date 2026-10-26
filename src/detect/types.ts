@@ -1,37 +1,7 @@
 /**
- * The detector contract.
- *
- * ── Async from day one ───────────────────────────────────────────────────────
- *
- * Every detector returns a promise even though M2a's are all pure synchronous
- * rules. CLAUDE.md requires it: the semantic tier calls a model, and converting
- * a synchronous interface to async later would touch every detector, the
- * registry, and the runner at once.
- *
- * ── What a detector may and may not do ───────────────────────────────────────
- *
- * It reads one window and returns candidates. It does **not** assign identity,
- * merge, persist, or count denominators — those are session-level concerns, and
- * a detector that incremented a denominator per window would make every rate
- * wrong on a partial run.
- *
- * It must not throw. Principle Zero: a broken analyzer must never break a
- * session, so the runner isolates failures, but a detector that returns no
- * candidates when confused is better than one that throws and loses the rest of
- * the window's findings.
- *
- * ── It cannot read text, and that is a compile error ────────────────────────
- *
- * `events` is `StructuralEvent[]`, which omits `command`, `pattern` and
- * `textSummary`. Reading any of them in a detector does not fail review — it
- * fails to build.
- *
- * This is not stylistic. Three detectors shipped on text and produced 5 true
- * positives against ~25 false positives across 1,139 real sessions; each failure
- * was a rule over an open space. Where a harness string genuinely adds
- * something, the **runner** attaches it as a label to an already-valid finding
- * (`labelFor` in `./labels.ts`), so a harness change loses a label and never a
- * detection. `GRAVEYARD.md` holds the evidence.
+ * The detector contract. Detectors are async (the semantic tier calls a model) and must not throw.
+ * They return candidates only; identity, merging and denominators belong to the runner.
+ * `events` omits command text, so reading it is a build error: CLAUDE.md "A detector reads structure".
  */
 
 import type { Candidate } from '../finding.ts';
@@ -46,80 +16,26 @@ import type {
 } from '../types.ts';
 
 export type DetectorContext = {
-  /**
-   * The events in this detector's scope, in `seq` order.
-   *
-   * Deliberately not a `Window`: the scope is the detector's own choice, and
-   * only a window-scoped detector gets a skeleton at all.
-   */
+  /** The events in this detector's scope, in `seq` order. */
   events: StructuralEvent[];
-  /**
-   * The skeleton, for window-scoped detectors only.
-   *
-   * Present when `scope: 'window'`. Thread-scoped detectors have no single
-   * skeleton — their scope spans many windows — and must not invent one.
-   */
+  /** Present only when `scope: 'window'`. */
   skeleton?: Skeleton;
   /** Facts the scope cannot see on its own. */
   session: SessionFacts;
 };
 
-/**
- * How much of the transcript a detector evaluates at once.
- *
- * ── Why this is a per-detector choice ───────────────────────────────────────
- *
- * The first version ran every detector per window, conflating "the unit a model
- * can afford to read" with "the scope a rule evaluates". They are not the same
- * thing, and the measurement is damning: of 363 genuinely verified edits across
- * the corpora, **293 — 81% — are verified by a command in a *later* window**.
- * A per-window `no_verification` would have called every one of them unverified.
- *
- * That is a precision failure, not a recall one, which is the worse kind.
- */
+// How much a detector evaluates at once: .claude/rules/detectors.md, "Scope is a property of the detector".
 export type Scope =
-  /**
-   * One 6–12 line window plus its event span. For detectors where locality is
-   * the signal, and for the semantic tier, where a token budget binds.
-   */
+  /** One 6–12 line window; for the semantic tier, where a token budget binds. */
   | 'window'
-  /**
-   * One whole thread — the main thread, or one subagent — at full length.
-   *
-   * For rules where *locality* is the signal. Thread rather than session
-   * because a flat array interleaves subagent events among main-thread ones,
-   * which breaks consecutive-run detection and merges work belonging to
-   * different actors.
-   */
+  /** One whole thread (main or one subagent), for rules where locality is the signal. */
   | 'thread'
-  /**
-   * Every thread, in one pass — "did this happen anywhere, by anyone?"
-   *
-   * The default for rules that are not about locality. The cross-actor case is
-   * real: a subagent edits a file and the main thread runs the tests. Scoped to
-   * a thread, that edit looks unverified.
-   */
+  /** Every thread at once: "did this happen anywhere, by anyone?" */
   | 'session'
-  /**
-   * Across sessions — "has this happened before?"
-   *
-   * Declared but **not implemented**: it needs stored history, which arrives
-   * with the store in M3. `constraint_decay` lives here, because a constraint
-   * stated in one session is violated in the next. Declared now so the runner
-   * refuses it explicitly rather than silently evaluating the wrong span.
-   */
+  /** Across sessions. Declared but not implemented, so the runner refuses it. */
   | 'project';
 
-/**
- * Facts a detector needs that are not in its window.
- *
- * Deliberately small. Anything that grows here is a hint that the thing wants to
- * be a session-level pass rather than a detector.
- *
- * It once carried a learned verification registry — "what counts as a test in
- * this project". That is removed: identifying a test command means reading
- * command text, which is irreducibly framework-specific. See `GRAVEYARD.md`.
- */
+// Facts a detector needs that are not in its scope. Keep it small.
 export type SessionFacts = {
   sessionId: string;
   project: string;

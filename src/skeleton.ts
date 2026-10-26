@@ -1,40 +1,9 @@
 /**
- * The skeletonizer: `Event[]` → windows → `Skeleton[]`.
- *
- * A skeleton is the unit everything downstream works on, and it has three
- * consumers at once (docs/contracts.md §3): model input at ~2K tokens, the
- * evidence `explain` prints, and the future team product's wire format. One
- * typed structure, two renderings.
- *
- * ── What a "turn" is, since the spec reads two ways ───────────────────────────
- *
- * "6–12 turn sliding windows" could mean 6–12 events or 6–12 exchanges. The
- * rendered example in docs/contracts.md settles it: seven lines containing two
- * user prompts, with each tool call on its own line. So a **turn is a skeleton
- * line**, and a window is 6–12 of them. An exchange-based window would be an
- * order of magnitude larger and would blow the token budget on every real
- * session.
- *
- * ── Why windows do not overlap by default ────────────────────────────────────
- *
- * `Finding` identity is subject-based (`hash(dimension + project + subject)`),
- * never evidence extent, so the same finding surfacing from two windows merges
- * rather than duplicating.
- *
- * **The double-counting objection is resolved.** This used to say `occurrences`
- * would double-count a turn seen twice "until M2a's evidence-set merge exists".
- * It exists — see `src/finding.ts`: `occurrences` is the number of **distinct
- * anchors**, so merging two windows that share a turn counts it once and the
- * number describes the session rather than the slicing.
- *
- * Non-overlapping therefore remains the default on its own merits rather than
- * as a workaround: it can only cause a missed pattern that straddles a
- * boundary, and CLAUDE.md is explicit that thresholds are tuned to miss rather
- * than over-fire. `stride` is a parameter, so lowering it is now genuinely safe
- * — a one-line change, not a redesign.
+ * The skeletonizer: `Event[]` → windows → `Skeleton[]` (docs/contracts.md §3).
+ * A window is 6–12 skeleton lines. Windows do not overlap by default; `occurrences` counts
+ * distinct anchors, so a smaller `stride` is safe.
  */
 
-import { executablePart } from './command.ts';
 import { stamp } from './schema.ts';
 import type { Event, Skeleton, SkeletonLine, TurnRef } from './types.ts';
 
@@ -43,39 +12,21 @@ export type SkeletonOptions = {
   width?: number;
   /** Lines advanced between windows. Defaults to `width` — no overlap. */
   stride?: number;
-  /**
-   * Token ceiling per window. 2K leaves room for a rubric and examples inside a
-   * 4K prompt.
-   */
+  /** Token ceiling per window; 2K fits a 4K prompt with rubric. */
   tokenBudget?: number;
 };
 
 const DEFAULTS = { width: 12, stride: undefined, tokenBudget: 2000 } as const;
 
-/**
- * Rough token estimate: 4 characters per token.
- *
- * Deliberately not a real tokenizer. Shipping one would add a runtime
- * dependency and a model-specific vocabulary to a budget that only needs to be
- * approximately right — and the budget is a *ceiling*, so erring high costs a
- * little extra elision while erring low would overflow a prompt.
- */
+/** Rough token estimate: 4 characters per token. A ceiling, so no real tokenizer is needed. */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/**
- * Git operations worth promoting out of a plain tool line.
- *
- * Display tier: this reads command text, which no *detector* may do. It marks a
- * skeleton line so the token budget keeps it and a human reading the evidence
- * sees where a commit or a revert landed. It produces no finding, so a wrong
- * label is visible and harmless — see `src/command.ts`.
- */
+/** Git commit/revert, promoted to a meta line. Display only; it produces no finding. */
 function gitMeta(command: string | undefined): 'commit' | 'revert' | undefined {
   if (command === undefined) return undefined;
-  // A doc file mentioning `git commit` would otherwise render as a commit that
-  // never happened.
+  // Ignore heredoc bodies: a doc mentioning `git commit` is not a commit.
   const exec = executablePart(command);
   if (/\bgit\s+(?:-\S+\s+)*commit\b/.test(exec)) return 'commit';
   if (/\bgit\s+(?:revert|reset\s+--hard)\b|\bgit\s+checkout\s+--/.test(exec)) return 'revert';
@@ -87,16 +38,8 @@ function refOf(e: Event): TurnRef {
 }
 
 /**
- * Enough of a shell command to tell two invocations apart.
- *
- * Two words was too few: it collapsed 111 distinct `uv run <script>` calls into
- * one indistinguishable target, which is precisely the discrimination a detector
- * needs. Leading shell punctuation is stripped because a compound command
- * otherwise yields targets like `(source .venv/bin/activate`.
- *
- * Capped by characters rather than words, and cut on a word boundary. The
- * command has already been redacted upstream, so the only concern here is
- * length — and the token budget has 4x headroom at the worst real window.
+ * Enough of a (pre-redacted) command to tell invocations apart: first line, leading shell
+ * punctuation stripped, capped by characters on a word boundary.
  */
 function commandHead(command: string, max = 48): string {
   const cleaned = command.trim().replace(/^[([{;&|\s]+/, '');
@@ -114,32 +57,18 @@ function targetOf(e: Event): string | undefined {
   return undefined;
 }
 
-export type LineResult = {
+type LineResult = {
   lines: SkeletonLine[];
   /** Thread total — every type with no line representation, counted. */
   dropped: Record<string, number>;
   /**
-   * The same drops, located: `dropsAt[i]` holds what was dropped immediately
-   * before line `i`, with a trailing bucket at `lines.length`.
-   *
-   * A window must report only the drops inside its own span. Stamping the thread
-   * total onto every window would multiply the count by the number of windows,
-   * which defeats the reason the field exists — a compression ratio must not be
-   * flattered by quietly discarding input, and it would be *worse* than flattered
-   * if the discard count were inflated tenfold.
+   * `dropsAt[i]` is what was dropped just before line `i` (trailing bucket at `lines.length`),
+   * so each window reports only its own drops.
    */
   dropsAt: Record<string, number>[];
 };
 
-/**
- * Events → lines.
- *
- * The compression comes from two moves: a successful `tool_result` is omitted
- * entirely (the tool line already says the call happened), and assistant prose
- * is summarised rather than reproduced. A *failed* result always gets its own
- * line — failure is the signal almost every detector is built on, and dropping
- * it would be compressing out the evidence itself.
- */
+/** Events → lines. Successful results are omitted; a failed result always gets a line. */
 export function toLines(events: Event[]): LineResult {
   const lines: SkeletonLine[] = [];
   const dropped: Record<string, number> = {};
@@ -170,11 +99,7 @@ export function toLines(events: Event[]): LineResult {
         break;
 
       case 'assistant_msg':
-        // An assistant record with no text carries nothing: it renders as a bare
-        // `A  …`, and any tool calls it contained already have their own lines.
-        // Measured: 3.8% of lines on the public corpus, but 21.3% on a
-        // tool-heavy real session — pure cost in all three consumers, worst in
-        // the one with a token budget.
+        // No text: nothing to show, and its tool calls have their own lines.
         if (e.textSummary === undefined) {
           drop('assistant_msg:no-text');
           break;
@@ -183,9 +108,7 @@ export function toLines(events: Event[]): LineResult {
         break;
 
       case 'tool_use': {
-        // A commit or a revert is an outcome signal, not a tool invocation, and
-        // outcome classification is the thing most starved of input. Promoting
-        // it also makes those two `meta` kinds reachable.
+        // A commit or revert is an outcome signal, so it becomes a meta line.
         const git = gitMeta(e.command);
         if (git !== undefined) {
           emit({ k: 'meta', ref, kind: git, ...flag });
@@ -204,12 +127,7 @@ export function toLines(events: Event[]): LineResult {
       case 'tool_result': {
         const failed = e.isError === true || (e.exitCode !== undefined && e.exitCode !== 0);
         if (!failed) {
-          // Not emitted: a read that worked says nothing a detector needs, and
-          // the preceding tool line already records that the call happened.
-          // Note this is *omission*, not a merge — nothing is written back onto
-          // the tool line, so the contract's `→ Edit auth.ts (60 lines)` example
-          // is not reproducible until `lines` has a source. `Event` carries no
-          // edit size today.
+          // Omitted, not merged: `Event` has no edit size, so `lines` stays unset.
           break;
         }
         emit({
@@ -235,8 +153,7 @@ export function toLines(events: Event[]): LineResult {
         break;
 
       case 'local_command':
-        // Not a human speaking. Counting it as a prompt would inflate every
-        // per-prompt denominator; see TurnType in types.ts.
+        // Not a human prompt; see TurnType in types.ts.
         drop('local_command');
         break;
 
@@ -269,27 +186,16 @@ function renderLine(l: SkeletonLine): string {
   }
 }
 
-/**
- * The text rendering, for models and humans alike.
- *
- * Elision is printed, never silent. A skeleton that quietly dropped the
- * decisive turn would produce a confident wrong verdict, which is the single
- * most expensive failure this design can have.
- */
-export function render(sk: Skeleton): string {
+/** The text rendering, for models and humans. Elision is printed, never silent. */
+export function renderSkeleton(sk: Skeleton): string {
   const body = sk.lines.map(renderLine).join('\n');
   if (sk.elided === undefined) return body;
   return `${body}\n…  ${sk.elided.lines} line(s) shortened or dropped (${sk.elided.reason})`;
 }
 
 /**
- * Bring a window under its token ceiling.
- *
- * Dropped by rule, worst-value first: assistant prose, then assistant lines
- * entirely, then tool targets. User prompts, failures and meta lines are never
- * dropped — they are what the detectors read. If a window is still over budget
- * after all three passes it is emitted over budget rather than gutted: an
- * honest overflow beats a skeleton missing its evidence.
+ * Bring a window under its token ceiling: drop assistant prose, then assistant lines, then tool
+ * targets. User, failure and meta lines are never dropped; if still over, emit over budget.
  */
 function fitToBudget(
   lines: SkeletonLine[],
@@ -298,8 +204,7 @@ function fitToBudget(
   const cost = (ls: SkeletonLine[]): number => estimateTokens(ls.map(renderLine).join('\n'));
   if (cost(lines) <= budget) return { lines };
 
-  // Under `exactOptionalPropertyTypes` a dropped field must be *absent*, not set
-  // to undefined — so these destructure the key away rather than overwrite it.
+  // `exactOptionalPropertyTypes`: destructure the key away rather than set undefined.
   let shortened = 0;
   let out: SkeletonLine[] = lines.map((l) => {
     if (l.k !== 'assist' || l.text === undefined) return l;
@@ -307,9 +212,7 @@ function fitToBudget(
     const { text: _text, ...rest } = l;
     return rest;
   });
-  // `lines` counts every line that lost content, shortened or removed. Reporting
-  // 0 here while prose had in fact been stripped would print "0 line(s) elided"
-  // into the evidence `explain` shows a user.
+  // `elided.lines` counts every line that lost content, shortened or removed.
   if (cost(out) <= budget) {
     return { lines: out, elided: { lines: shortened, reason: 'token-budget' } };
   }
@@ -330,16 +233,8 @@ function fitToBudget(
 }
 
 /**
- * Split events into threads: the main thread, plus one per subagent.
- *
- * The key is `undefined` for the main thread and the `sidechainId` for a
- * subagent. One definition, because both the windower and the detector runner
- * need it and two copies would drift.
- *
- * Why this grouping is load-bearing: a flat session array interleaves subagent
- * events among main-thread ones. Anything that cares about *consecutive* events
- * — `tool_loop` above all — is wrong on the flat array, because another actor's
- * call spliced between two identical ones makes them non-consecutive.
+ * Split events into threads, keyed `undefined` for main and `sidechainId` per subagent.
+ * Consecutive-event logic must run per thread: the flat array interleaves actors.
  */
 export function threadsOf(events: Event[]): Map<string | undefined, Event[]> {
   const threads = new Map<string | undefined, Event[]>();
@@ -353,25 +248,12 @@ export function threadsOf(events: Event[]): Map<string | undefined, Event[]> {
 }
 
 /**
- * A window: the evidence a detector reads, plus the skeleton a human reads.
- *
- * `events` is the **full** event span the skeleton's lines cover, including the
- * records the skeleton dropped or folded away. That difference is load-bearing:
- * a successful `tool_result` produces no line, so a detector asking "was this
- * edit ever verified" would conclude *no* from the skeleton while the transcript
- * plainly shows a passing test. The skeleton is for reading; the events are for
- * deciding.
+ * A skeleton for reading plus the full event span for deciding. `events` includes records the
+ * skeleton omitted (e.g. successful results), which detectors need.
  */
 export type Window = { skeleton: Skeleton; events: Event[] };
 
-/**
- * Split events into windows and reduce each to a `Skeleton`.
- *
- * Sidechains get their own windows rather than being merged into the main
- * thread or dropped. A parallel fan-out legitimately reads the same files, so
- * merging would make every healthy fan-out look like a reading spiral; dropping
- * would leave 712 events across 99 public transcripts with no coverage at all.
- */
+/** Split events into windows and reduce each to a `Skeleton`. Sidechains get their own windows. */
 export function buildSkeletons(
   sessionId: string,
   events: Event[],
@@ -405,8 +287,7 @@ export function buildWindows(
       const first = slice[0]!;
       const last = slice[slice.length - 1]!;
 
-      // Only this window's drops. The trailing bucket belongs to the window that
-      // ends the thread, since that is where those events actually sat.
+      // Only this window's drops; the last window takes the trailing bucket.
       const dropped: Record<string, number> = {};
       const upTo = end === lines.length ? dropsAt.length : end;
       for (let d = i; d < upTo; d++) {
@@ -415,13 +296,8 @@ export function buildWindows(
         }
       }
 
-      // The event span this window covers, sliced from **its own thread**. A
-      // sidechain window slicing the global array would pick up every
-      // main-thread event that happens to sit between its seq numbers.
-      //
-      // The first and last window extend to the thread's edges so that records
-      // before the first line and after the last — dropped types, mostly — land
-      // in exactly one window rather than nowhere.
+      // Sliced from this thread only. The first and last windows extend to the
+      // thread's edges so every event lands in exactly one window.
       const lo = i === 0 ? -Infinity : (first.ref.seq ?? 0);
       const hi = end >= lines.length ? Infinity : (last.ref.seq ?? 0);
       const windowEvents = threadEvents.filter((e) => e.seq >= lo && e.seq <= hi);
@@ -439,11 +315,44 @@ export function buildWindows(
         events: windowEvents,
       });
 
-      // A final partial window is emitted, but a stride shorter than the width
-      // must not re-emit a tail already fully covered by the previous window.
+      // Don't re-emit a tail already covered when stride < width.
       if (i + width >= lines.length) break;
     }
   }
 
   return out;
+}
+
+// Command text, for display only. No detector may read it: CLAUDE.md "A detector reads structure".
+
+/** Remove heredoc bodies (data, not commands): `cat > f <<'EOF' … EOF` becomes `cat > f`. */
+function stripHeredocs(command: string): string {
+  const lines = command.split('\n');
+  const out: string[] = [];
+  let terminator: string | undefined;
+
+  for (const line of lines) {
+    if (terminator !== undefined) {
+      // Inside a body: the terminator may be indented when `<<-` was used.
+      if (line.trim() === terminator) terminator = undefined;
+      continue;
+    }
+    const m = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(line);
+    if (m !== null) {
+      terminator = m[2] as string;
+      out.push(line.slice(0, m.index));
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** The executable part of a command: heredoc bodies and trailing `#` comments removed. */
+function executablePart(command: string | undefined): string {
+  if (command === undefined) return '';
+  return stripHeredocs(command)
+    .split('\n')
+    .map((l) => l.replace(/\s+#\s.*$/, ''))
+    .join('\n');
 }

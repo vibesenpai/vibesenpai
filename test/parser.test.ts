@@ -5,8 +5,7 @@ const j = (o: unknown): string => JSON.stringify(o);
 
 describe('parser — record selection', () => {
   it('skips noise types but still parses records that follow them', () => {
-    // attachments sit INSIDE the parentUuid chain. Measured: filtering them
-    // before walking the tree turned 1 root into 305.
+    // Attachments sit inside the parentUuid chain; filtering them first breaks the tree.
     const text = [
       j({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'hello' } }),
       j({ type: 'attachment', uuid: 'b', parentUuid: 'a', attachment: { type: 'hook_success' } }),
@@ -153,8 +152,7 @@ describe('parser — failure signals', () => {
 
 describe('parser — sequencing', () => {
   it('sequences by file order, which is already topological', () => {
-    // Measured on real data: 0 parent-after-child violations in file order,
-    // and the longest parentUuid path covers only 78.2% of records.
+    // File order has no parent-after-child violations; the parentUuid path is incomplete.
     const text = [
       j({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'one' } }),
       j({ type: 'user', uuid: 'b', parentUuid: 'a', message: { content: 'two' } }),
@@ -188,8 +186,7 @@ describe('parser — sequencing', () => {
 });
 
 describe('parser — abandoned branches', () => {
-  // Structure observed 2026-10-15 in a session rewound on purpose: the
-  // pre-rewind records remain in the file, unmarked. 38 of 71 were dead.
+  // A rewind leaves pre-rewind records in the file, unmarked.
   const rewound = [
     j({ type: 'user', uuid: 'root', parentUuid: null, message: { content: 'hey' } }),
     j({ type: 'attachment', uuid: 'att', parentUuid: 'root', attachment: {} }),
@@ -223,16 +220,14 @@ describe('parser — abandoned branches', () => {
   });
 
   it('flags abandoned work even though it HAS assistant replies', () => {
-    // An earlier discriminator used "no assistant descendant", which misses a
-    // rewind entirely — the dead branch had 4 assistant records in real data.
+    // "No assistant descendant" misses a rewind: dead branches have replies.
     const r = parseTranscriptText(rewound);
     const deadAssistant = r.events.find((e) => e.abandoned && e.turnType === 'assistant_msg');
     expect(deadAssistant).toBeDefined();
   });
 
   it('does NOT flag a parallel tool call as abandoned', () => {
-    // The shape that broke an earlier heuristic: an assistant tool_use and a
-    // user tool_result share a parent, and the result stub is tiny. Both live.
+    // A tool_use and its tool_result share a parent; both are live.
     const parallel = [
       j({
         type: 'assistant',
@@ -265,8 +260,7 @@ describe('parser — abandoned branches', () => {
   });
 
   it('flags a prompt submitted then resubmitted with no reply', () => {
-    // Observed twice in a real session: identical prompt ~20s apart, the first
-    // copy having only hook attachments and no assistant reply.
+    // Identical prompt resubmitted with no reply to the first.
     const resubmit = [
       j({ type: 'system', uuid: 's', parentUuid: null, subtype: 'x' }),
       j({ type: 'user', uuid: 'first', parentUuid: 's', message: { content: 'same text' } }),
@@ -301,8 +295,7 @@ describe('parser — slash-command echoes are not prompts', () => {
 });
 
 describe('parser — redacts at construction, not at display', () => {
-  // An Event is already the only version that will exist, since no transcript
-  // copy is kept. A secret that survives into one has nowhere else to be caught.
+  // No transcript copy is kept, so the Event is the only place to catch a secret.
   it('redacts a secret in a user prompt', () => {
     const text = j({
       type: 'user',
@@ -328,8 +321,7 @@ describe('parser — redacts at construction, not at display', () => {
   });
 
   it('redacts before truncating, so a long secret cannot survive as a fragment', () => {
-    // Truncating first could cut a token in half, leaving a fragment no rule
-    // matches. Half a key is still a leak.
+    // Truncating first could leave a key fragment no rule matches.
     const secret = `sk-ant-api03-${'A'.repeat(300)}`;
     const text = j({ type: 'user', uuid: 'a', message: { content: `key ${secret} end` } });
     const out = parseTranscriptText(text).events[0]?.textSummary ?? '';
@@ -348,16 +340,14 @@ describe('parser — redacts at construction, not at display', () => {
       },
     });
     const e = parseTranscriptText(text).events[0];
-    // `command` is a structured field, not a summary — it is evidence and must
-    // survive verbatim for constraint_decay to work.
+    // `command` is evidence and survives verbatim.
     expect(e?.command).toBe('npm install lodash');
   });
 });
 
 describe('parser — structured evidence fields are redacted too', () => {
   it('rewrites a home path in filePath while keeping the path structure', () => {
-    // These bypass summarise(), so forgetting them leaked silently: 347 events
-    // in real transcripts carried a raw home path through filePath/command.
+    // These bypass summarise(), so they need their own redaction.
     const home = process.env.HOME ?? '/Users/nobody';
     const text = j({
       type: 'assistant',
@@ -393,10 +383,7 @@ describe('parser — structured evidence fields are redacted too', () => {
 
 describe('parser — a sidechain is never an abandoned branch', () => {
   it('does not flag a subagent fan-out as abandoned', () => {
-    // A subagent hangs off the main spine and carries its own injected prompt,
-    // so the human-prompt test would classify a whole fan-out as abandoned.
-    // A public corpus of 99 sidechain transcripts produced 0 false positives —
-    // but incidentally, which is the worst reason to be correct.
+    // A subagent carries its own injected prompt, which the human-prompt test would misread.
     const text = [
       j({ type: 'user', uuid: 'm1', parentUuid: null, message: { content: 'do the thing' } }),
       // subagent branch off the main thread, with its own prompt
@@ -419,14 +406,8 @@ describe('parser — a sidechain is never an abandoned branch', () => {
 });
 
 describe('parser — truncation must preserve the redaction fixed point', () => {
-  // Found by the public-corpus leak gate, which fired 10 times on text that was
-  // already safe. Redaction runs before truncation, so a cut token can never
-  // expose a secret — but the cut *marker* was being absorbed into the fragment
-  // it followed, turning `/home/` + `…` into a path whose username looked real.
-  //
-  // The invariant: re-redacting anything we emit must be a no-op. That is what
-  // lets scripts/verify-corpus.ts treat any change as proof a field reached an
-  // Event without passing the redactor.
+  // The cut marker must not merge into the fragment before it: re-redacting emitted text
+  // must be a no-op (the invariant scripts/verify-corpus.ts relies on).
   const summaryOf = (content: string): string => {
     const text = [
       j({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'go' } }),
@@ -478,10 +459,7 @@ describe('parser — truncation must preserve the redaction fixed point', () => 
 
 describe('parser — sidechain attribution', () => {
   // `isSidechain` says only THAT a record is subagent work, never whose.
-  // Measured: 712 sidechain events across 90 public transcripts, none carrying a
-  // subagent id. Without deriving one, every subagent in a file collapses into
-  // one interleaved pseudo-thread — which reproduces the `reading_spiral` false
-  // positive that separating sidechains exists to prevent.
+  // Records carry no subagent id, so one is derived per subtree.
   it('attributes each sidechain record to its subtree root', () => {
     const text = [
       j({ type: 'user', uuid: 'main', parentUuid: null, message: { content: 'go' } }),
@@ -510,9 +488,7 @@ describe('parser — sidechain attribution', () => {
 });
 
 describe('parser — records that carry role instead of type', () => {
-  // Observed in 2 of 160 SWE-chat transcripts: 103 records with no `type`
-  // field, 24 of them real human prompts, all counted as `(missing)` and
-  // dropped. The shape is otherwise a normal user/assistant record.
+  // Some SWE-chat records have `role` but no `type`.
   it('infers the type from role', () => {
     const text = [
       j({ role: 'user', uuid: 'a', parentUuid: null, message: { content: 'review the branch' } }),
@@ -563,8 +539,7 @@ describe('compaction, argBytes, and the repeated usage', () => {
         message: { content: 'This session is being continued from a previous conversation.' },
       }),
     );
-    // It carries replacement context, not an instruction — and `edit_retry`
-    // ends a span at the next prompt, so misreading it truncates spans.
+    // `edit_retry` ends a span at the next prompt, so misreading it truncates spans.
     expect(r.events.filter((e) => e.turnType === 'user_prompt')).toHaveLength(0);
     expect(r.events.filter((e) => e.systemKind === 'compaction')).toHaveLength(1);
   });
@@ -588,8 +563,7 @@ describe('compaction, argBytes, and the repeated usage', () => {
     );
     const call = r.events.find((e) => e.turnType === 'tool_use');
     expect(call?.argBytes).toBe(Buffer.byteLength(JSON.stringify(input)));
-    // Both blocks belong to one response, which is what lets its `usage` be
-    // counted once rather than once per block.
+    // One response, so its `usage` is counted once.
     expect(new Set(r.events.map((e) => e.responseId))).toEqual(new Set(['msg_1']));
   });
 });

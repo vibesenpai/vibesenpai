@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { SCHEMA, checkVersion, stamp } from '../src/schema.ts';
-import { SKELETON_VERSION } from '../src/types.ts';
 
 describe('schema versioning', () => {
   it('stamps a self-describing envelope', () => {
@@ -28,9 +27,5 @@ describe('schema versioning', () => {
   it('rejects an unversioned record rather than assuming v1', () => {
     expect(checkVersion('event', undefined)).toEqual({ ok: false, reason: 'unversioned' });
     expect(checkVersion('event', '1')).toEqual({ ok: false, reason: 'unversioned' });
-  });
-
-  it('keeps SKELETON_VERSION sourced from SCHEMA, not duplicated', () => {
-    expect(SKELETON_VERSION).toBe(SCHEMA.skeleton);
   });
 });

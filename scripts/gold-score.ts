@@ -8,27 +8,18 @@
  *   git clone --depth 1 https://github.com/ND-SaNDwichLAB/coding-agent-misalignment
  * and the SWE-chat transcripts, via `AGENTSENSEI_GOLD_SESSIONS`.
  *
- * ── Recall is measured; precision is not claimed ───────────────────────────
- *
- * The paper released the episodes it found, so a judge finding it did not
- * record may be a miss of theirs rather than an invention of ours. Calling
- * those false positives would quietly assume the gold set is complete, which
- * nothing supports. They are counted as **unmatched, awaiting adjudication**,
- * and reading them is the next step rather than a number to report.
- *
- * ── Batched, because the overhead is the cost ──────────────────────────────
- *
- * 26,384 tokens of invocation overhead dwarf a ~8,634-token session, so
- * sessions are packed to the ceiling and sent together — the same argument as
- * `scripts/judge.ts`, and the reason this is affordable at all.
+ * Measures recall only: findings the paper did not record are "unmatched", not false
+ * positives, since the gold set is not known to be complete. Batched because invocation
+ * overhead dwarfs a session.
  */
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
-import { buildSession, estimateTokens, parseExtract, parseLabels, renderExtract, renderLabel, type JudgePacketSession } from '../src/judge.ts';
-import { callModel, wouldLeak } from '../src/model.ts';
-import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from '../src/gold.ts';
+import { parseExtract, parseLabels, renderExtract, renderLabel } from '../src/judge/prompt.ts';
+import { buildSession, estimateTokens, type JudgePacketSession } from '../src/judge/packet.ts';
+import { callModel, wouldLeak } from '../src/judge/model.ts';
+import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from './gold.ts';
 import type { Event } from '../src/types.ts';
 
 const GOLD_JSON = process.env['AGENTSENSEI_GOLD'] ?? '/tmp/cam-check/misalignments.json';
@@ -46,13 +37,7 @@ function provenance(): { commit: string; dirty: boolean } {
 const SESSION_DIRS = (process.env['AGENTSENSEI_GOLD_SESSIONS'] ?? '').split(',').filter(Boolean);
 const BATCH_TOKENS = 55_000;
 
-/**
- * One call, through the shared caller, accumulating what the run spent.
- *
- * `total_cost_usd` is the harness's own figure and is reported **here only** —
- * a measurement script may state what an experiment consumed; the product
- * reports tokens, because on a subscription a dollar figure is notional.
- */
+/** One model call, accumulating spend. Dollars appear here only; the product reports tokens. */
 function call(packet: string, model: string): string | undefined {
   const r = callModel(packet, model);
   if (r === undefined) return undefined;
@@ -63,34 +48,19 @@ function call(packet: string, model: string): string | undefined {
   return r.reply;
 }
 
-// `total_cost_usd` comes back from the harness itself, so it is measured
-// rather than derived from a price table we would have to keep current.
+// `total_cost_usd` is the harness's own figure, not derived from a price table.
 const spent = { calls: 0, input: 0, output: 0, usd: 0 };
 
 async function main(): Promise<void> {
-  // ── Default to everything ────────────────────────────────────────────────
-  //
-  // This defaulted to 30 and was called with 60 for about a dozen runs, which
-  // was 24% of the 246 sessions sitting on disk. Nobody chose that: an early
-  // cost decision picked a number and every later run inherited it, so the
-  // whole campaign ran at roughly twice the error bar it needed to.
-  //
-  // Sampling is now explicit. A deliberate subset is fine; an accidental one
-  // is how a dozen comparisons get made against the wrong denominator.
+  // Default to every session; a sample must be asked for explicitly.
   const limit = process.argv[2] === undefined ? Number.MAX_SAFE_INTEGER : Number(process.argv[2]);
   const model = process.argv[3] ?? 'haiku';
 
   const episodes = loadGold(GOLD_JSON);
 
-  // `--negatives` scores the other half of the question: on sessions their
-  // pipeline examined and found nothing in, every finding is a false-positive
-  // candidate. Recall alone cannot say whether we are better or merely noisier.
+  // `--negatives`: sessions their pipeline found nothing in, so every finding is a false-positive candidate.
   const negativesMode = process.argv.includes('--negatives');
-  // Extract-then-label is the only path; `--extract-only` stops after stage A
-  // and assigns no real dimension, which isolates EXTRACTION. The session- and
-  // episode-level numbers are dimension-agnostic, so they mean something
-  // without stage B having run — which is how the two halves get measured
-  // separately rather than as one bundle.
+  // `--extract-only` stops after stage A, so extraction is measured on its own.
   const extractOnly = process.argv.includes('--extract-only');
   let files: Map<string, string>;
   if (negativesMode) {
@@ -135,13 +105,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // Pack to the ceiling. Whole sessions only — a halved packet yields findings
-  // about turns whose other half was never shown.
-  // Size a batch by the prompt that will actually be SENT. This measured
-  // `renderPacket` while the two-stage path sent `renderExtract` — a different,
-  // differently-sized string — so two-stage batches were composed against the
-  // wrong budget. Both arms used the same (wrong) function, so the 56%-vs-71%
-  // comparison stands; the call count does not.
+  // Pack whole sessions to the ceiling, sized by the prompt actually sent (`renderExtract`).
   const batches: JudgePacketSession[][] = [];
   let current: JudgePacketSession[] = [];
   for (const p of packets) {
@@ -160,8 +124,7 @@ async function main(): Promise<void> {
   for (const [i, batch] of batches.entries()) {
     process.stdout.write(`  batch ${i + 1}/${batches.length} (${batch.length} sessions) … `);
     const text = renderExtract(batch);
-    // The same gate the runner enforces. A scoring harness that sent what the
-    // product refuses to send would be measuring a different system.
+    // The same redaction gate the runner enforces.
     if (wouldLeak(text)) {
       console.log('REFUSED by the redaction gate');
       continue;
@@ -180,9 +143,7 @@ async function main(): Promise<void> {
         continue;
       }
       if (extractOnly) {
-        // A placeholder dimension, never reported. Only the dimension-agnostic
-        // session and episode numbers mean anything in this mode, and the
-        // output says so.
+        // A placeholder dimension, never reported: only session and episode numbers mean anything here.
         found.push(
           ...ex.episodes.map((e) => ({
             sessionId: e.sessionId,
@@ -213,24 +174,11 @@ async function main(): Promise<void> {
     }
   }
 
-  // Persisted so the scoring can be re-run without paying for the model again.
-  // The first run cost 363,719 input tokens; a threshold question is not worth
-  // repeating that, and re-running to get a nicer number would be worse still.
+  // Persisted so scoring can be re-run without paying for the model again.
   const cache = process.env['AGENTSENSEI_GOLD_CACHE'];
   if (cache !== undefined) {
     writeFileSync(cache, JSON.stringify({
-      // ── Which code produced this ────────────────────────────────────────
-      //
-      // A three-run "variance" experiment was reported as 16 points of spread
-      // on identical code. `src/judge.ts` had been rewritten at 19:49:16,
-      // mid-experiment: run 1 read the old rubric and runs 2-3 the new one,
-      // and the difference was attributed to sampling. True same-code variance
-      // is about one point.
-      //
-      // The comparison was wrong for a whole day, a graveyard entry was
-      // committed from it, and a buried result that actually worked stayed
-      // buried. One `git rev-parse` would have made it self-evident, so it is
-      // recorded rather than remembered.
+      // The commit and dirty flag, so results from different code are never compared as variance.
       code: provenance(),
       found,
       sessions: packets.map((p) => p.sessionId),
@@ -263,9 +211,7 @@ async function main(): Promise<void> {
   console.log(`\n  sessions judged          : ${s.sessionsJudged}`);
   console.log(`  out of scope (S1/S5/S6)  : ${s.outOfScope}  — the packet cannot show these`);
   console.log('');
-  // Loosest first: this is the unit the product is built around. Every one of
-  // the three requires a finding within TURN_TOLERANCE of located evidence —
-  // they differ only in the denominator and whether the LABEL must match.
+  // Loosest first. All three need a finding within TURN_TOLERANCE of located evidence.
   console.log(`  SESSION-level  (any dimension) : ${s.sessionLevel.caught}/${s.sessionLevel.withEpisode}   ${pct(s.sessionLevel.recall)}   <- headline`);
   console.log(`  episode-level  (any dimension) : ${s.episodeLevel.caught}/${s.episodeLevel.total}   ${pct(s.episodeLevel.recall)}`);
   console.log(

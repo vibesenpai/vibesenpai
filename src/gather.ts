@@ -1,50 +1,26 @@
 /**
- * One pass over the sessions, feeding every section of a report.
- *
- * ── Why this exists ────────────────────────────────────────────────────────
- *
- * `report` used to take its session list from the catalog, its coverage from
- * `describeCatalog`, and its recommendation from a `Standing` covering all of
- * history. Three sources, so one page could disagree with itself — and it did:
- * the catalog held 4 entries against 8 transcripts on disk, so `report` printed
- *
- *     2026-10-19 → 2026-10-20  no transcripts cover this period
- *
- * for a window that a session it would have listed spanned exactly.
- *
- * So the enumeration happens once, here, and coverage, findings and the
- * standing are all derived from that one list. A section cannot describe
- * sessions another section has not heard of.
- *
- * ── Events are not retained, and the detectors run once ────────────────────
- *
- * Each session's events are parsed, used, and dropped inside one iteration.
- * What survives is the derived view: findings with their evidence already
- * turned into rows, the cost, and the denominators. Holding 40 sessions of
- * events — the design target — to look up six cited turns each would keep the
- * whole history resident for no reason.
- *
- * The standing is folded in the same loop through `accumulateSession`. The
- * first version pushed every session's events into an array and handed them to
- * `computeStanding` afterwards, which kept them all alive *and* re-ran every
- * detector to rediscover findings this loop already had.
+ * One pass over the sessions feeding every report section, so no section can describe sessions
+ * another has not seen. Each session's events are dropped after its iteration.
  */
 
 import { basename } from 'node:path';
 import { parse } from './parsers/index.ts';
-import { discoverTranscripts, readSession } from './read.ts';
+import { discoverTranscripts, projectLabel, projectOf, readSession } from './read.ts';
 import { countDenominators, runDetectors, type Denominators, type Detector } from './detect/index.ts';
 import { costFor, type Cost } from './cost.ts';
 import { caveatFor, evidenceRows, headlineFor, type EvidenceRow } from './render.ts';
 import { sessionStats, type SessionStats } from './stats.ts';
+import { cleanCut, isHarnessNoise } from './judge/packet.ts';
+import { redact } from './redact.ts';
 import {
   accumulateSession, finishStanding, newStandingAccumulator, type Standing,
 } from './standing.ts';
-import { recommend, type Recommendation } from './fix.ts';
-import type { DateRange } from './report.ts';
+import { compactionsFor, recommend, type Compactions, type Recommendation } from './fix.ts';
+import type { DateRange } from './range.ts';
 import { adviceFor, type Reason } from './detect/labels.ts';
 import type { Event, Finding } from './types.ts';
-import type { JudgedFinding } from './judge-store.ts';
+import type { JudgedFinding } from './judge/state.ts';
+import { emptyDismissed, withoutDismissed, type Dismissed } from './dismiss.ts';
 
 /** A finding, flattened to what a renderer needs and nothing more. */
 export type FindingView = {
@@ -56,20 +32,12 @@ export type FindingView = {
   caveat: string;
   reasons: { reason: string; count: number; advice: string }[];
   cost: Cost;
-  evidence: EvidenceRow[];
+  evidence: AskedRow[];
   /** Cited turns beyond the ones in `evidence`. */
   hidden: number;
 };
 
-/**
- * A judge finding, flattened for display.
- *
- * Kept in its own list rather than folded into `findings`, because the two
- * tiers are not equally reliable and the display must never imply they are.
- * A rule finding is `certain` — the harness itself refused the call. A judge
- * finding is a model's reading of the conversation. They are counted together
- * in the headline and shown apart.
- */
+/** A judge finding for display. Kept apart from rule findings: the tiers are not equally reliable. */
 export type JudgedView = {
   dimension: string;
   turns: number[];
@@ -77,7 +45,14 @@ export type JudgedView = {
   why: string;
   /** The turn text the finding was anchored to, when the judge recorded one. */
   quote?: string;
+  /** What the person asked before the first cited turn. */
+  asked?: Asked;
 };
+
+/** The prompt a cited turn answered: redacted `textSummary`, cut so it still survives `redact`. */
+export type Asked = { seq: number; ts?: string; text: string };
+
+export type AskedRow = EvidenceRow & { asked?: Asked };
 
 export type SessionView = {
   sessionId: string;
@@ -101,40 +76,60 @@ export type ReportData = {
   /** Discovered but unparseable. Counted, never silently dropped. */
   unreadable: number;
   standing: Standing;
-  recommendation: Recommendation | undefined;
+  /** One recommendation per dimension found, from the same `recommend` that `fix` uses. */
+  recommendations: Record<string, Recommendation>;
 };
 
-export type GatherOptions = {
+type GatherOptions = {
   sources: string[];
   detectors: Detector[];
-  /**
-   * Omit for no date bound at all.
-   *
-   * Not a very wide range standing in for "everything": the returned
-   * `ReportData.range` is what the coverage section segments, and a sentinel
-   * like `2000-01-01` put a 26-year *"no transcripts cover this period"* gap at
-   * the top of the page. With no bound, the range comes back as the span the
-   * sessions actually occupy.
-   */
+  /** Omit for no bound: the range then becomes the span the sessions occupy, not a sentinel. */
   range?: DateRange;
   preset: string;
   muted: string[];
   /** Narrow to one session. Already resolved — `lookupSession` owns that. */
   onlySessionId?: string;
-  /**
-   * Judge findings for a session, if the caller has them.
-   *
-   * Passed in rather than read here, so this module keeps doing no I/O. The
-   * archive path lives with the CLI; `findingsFor` in `judge-store.ts` is the
-   * implementation every caller should hand over.
-   *
-   * Omitting it is what every caller did implicitly until now, and the result
-   * was a report that could not see 19 of the 22 findings on this machine.
-   */
+  /** Judge findings for a session (see `findingsFor` in `judge/state.ts`). Passed in: no I/O here. */
   judgedFor?: (sessionId: string) => JudgedFinding[];
+  /** What the person dismissed. Judge findings arrive already filtered. */
+  dismissed?: Dismissed;
   evidenceMax?: number;
   now?: Date;
 };
+
+/** Long enough to recognise a request, short enough to sit on one line. */
+const ASKED_MAX = 160;
+
+/** Every prompt the person typed, in order. Excludes sidechain prompts and harness noise. */
+export function promptsOf(events: Event[]): Asked[] {
+  const out: Asked[] = [];
+  for (const e of events) {
+    if (e.turnType !== 'user_prompt' || e.isSidechain) continue;
+    let text = (e.textSummary ?? '').trim();
+    if (text === '' || isHarnessNoise(text)) continue;
+    if (text.length > ASKED_MAX) text = `${cleanCut(text.slice(0, ASKED_MAX)).trimEnd()}…`;
+    else if (redact(text).text !== text) text = cleanCut(text);
+    if (text === '' || text === '…') continue;
+    out.push({ seq: e.seq, ...(e.ts !== undefined ? { ts: e.ts } : {}), text });
+  }
+  return out;
+}
+
+/** The last prompt at or before `seq`. `prompts` is in seq order. */
+export function askedBefore(prompts: Asked[], seq: number): Asked | undefined {
+  let lo = 0;
+  let hi = prompts.length - 1;
+  let hit: Asked | undefined;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const p = prompts[mid] as Asked;
+    if (p.seq <= seq) {
+      hit = p;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return hit;
+}
 
 /** First and last plausible timestamps, which is this session's own span. */
 function spanOf(events: Event[]): { firstTs?: string; lastTs?: string } {
@@ -151,14 +146,7 @@ function spanOf(events: Event[]): { firstTs?: string; lastTs?: string } {
   };
 }
 
-/**
- * The span the sessions actually occupy.
- *
- * **Ends at the last session's last turn, not at `now`.** Running it to the
- * clock makes coverage report the time since as a gap: scoped to one short
- * session from August, the page said *"2026-08-23 → 2026-10-20 (59d) no
- * transcripts cover this period"* about a session it had just analysed.
- */
+/** The span the sessions occupy. Ends at the last turn, not `now`, so idle time is not a gap. */
 function spanOfSessions(sessions: SessionView[], now: Date): DateRange {
   const starts = sessions.map((s) => s.firstTs).filter((t): t is string => t !== undefined);
   const ends = sessions.map((s) => s.lastTs).filter((t): t is string => t !== undefined);
@@ -175,6 +163,8 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
   // Folded in per session, so no session's events outlive its iteration.
   const acc = newStandingAccumulator();
   let unreadable = 0;
+  const allJudged: JudgedFinding[] = [];
+  const compactions: Compactions = new Map();
 
   for (const source of discoverTranscripts(opts.sources)) {
     const sessionId = basename(source, '.jsonl');
@@ -185,8 +175,7 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
       const read = readSession({ source, sessionId, mode: 'live' });
       parsed = parse(source, read.text, sessionId);
     } catch {
-      // Discovered but not readable. Counted so the report cannot quietly
-      // analyse fewer sessions than it claims.
+      // Counted so the report cannot quietly analyse fewer sessions than it claims.
       unreadable++;
       continue;
     }
@@ -195,16 +184,7 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
     const events = [...parsed.events].sort((a, b) => a.seq - b.seq);
     const span = spanOf(events);
 
-    // ── Overlap, not containment ─────────────────────────────────────────
-    //
-    // A session is in range if its span **intersects** the range. Testing
-    // whether it *started* inside the range drops a long-running session that
-    // began earlier and is still going — which is the same mistake the catalog
-    // made: `report` claimed today was uncovered while the session writing
-    // today's transcript had simply started eight days ago.
-    //
-    // Timestamps come from the session's own events, never from a record of
-    // when we first saw it.
+    // In range if the session's own span intersects it, so a long-running session is not dropped.
     if (opts.range !== undefined && span.firstTs !== undefined && span.lastTs !== undefined) {
       const from = Date.parse(span.firstTs);
       const to = Date.parse(span.lastTs);
@@ -223,29 +203,45 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
       session: { sessionId, project, live: false },
       detectors: opts.detectors,
     });
+    const shown = withoutDismissed(res.findings, opts.dismissed ?? emptyDismissed()).findings;
 
     const byUuid = new Map(events.map((e) => [e.uuid, e]));
-    const findings: FindingView[] = res.findings.map((f) => ({
+    const prompts = promptsOf(events);
+    const withAsked = (r: EvidenceRow): AskedRow => {
+      const seq = Number(r.turn);
+      const asked = Number.isFinite(seq) ? askedBefore(prompts, seq) : undefined;
+      return asked === undefined ? r : { ...r, asked };
+    };
+    const findings: FindingView[] = shown.map((f) => ({
       dimension: f.dimension,
       subject: headlineFor(f, byUuid),
       occurrences: f.occurrences,
       caveat: caveatFor(f),
       reasons: reasonViews(f),
       cost: costFor(events, { dimension: f.dimension, subject: f.subject }),
-      evidence: evidenceRows(f, byUuid, max),
+      evidence: evidenceRows(f, byUuid, max).map(withAsked),
       hidden: Math.max(0, f.evidence.length - max),
     }));
 
-    const judged: JudgedView[] = (opts.judgedFor?.(sessionId) ?? []).map((j) => ({
-      dimension: j.dimension,
-      turns: j.turns,
-      why: j.why,
-      ...(j.quote !== undefined ? { quote: j.quote } : {}),
-    }));
+    const judgedRaw = opts.judgedFor?.(sessionId) ?? [];
+    allJudged.push(...judgedRaw);
+    // Same compaction check `fix` makes before a judged turn.
+    for (const [id, c] of compactionsFor(judgedRaw, () => events)) compactions.set(id, c);
+    const judged: JudgedView[] = judgedRaw.map((j) => {
+      const first = j.turns.length > 0 ? Math.min(...j.turns) : undefined;
+      const asked = first === undefined ? undefined : askedBefore(prompts, first);
+      return {
+        dimension: j.dimension,
+        turns: j.turns,
+        why: j.why,
+        ...(j.quote !== undefined ? { quote: j.quote } : {}),
+        ...(asked !== undefined ? { asked } : {}),
+      };
+    });
 
     sessions.push({
       sessionId,
-      project,
+      project: projectLabel(project),
       ...span,
       findings,
       judged,
@@ -262,31 +258,23 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
       ),
     });
 
-    // While the events are still to hand. Handing them to `computeStanding`
-    // afterwards kept every session resident *and* ran every detector a second
-    // time to rediscover findings this loop already has.
-    accumulateSession(acc, { sessionId, events, findings: res.findings });
+    // Folded here so events are not kept and detectors are not re-run.
+    accumulateSession(acc, { sessionId, events, findings: shown });
   }
 
-  // Findings first, then recency. Strict chronology put three empty sessions
-  // above the one with the evidence in it, which is the wrong thing to read
-  // first in a report whose whole point is the findings.
+  // Sessions with findings first, then most recent.
   const weight = (s: SessionView): number => s.findings.length + s.judged.length;
   sessions.sort(
     (a, b) => weight(b) - weight(a) || (b.firstTs ?? '').localeCompare(a.firstTs ?? ''),
   );
 
-  // Over the **same** sessions as everything else, so the recommendation cannot
-  // describe data the rollup does not show.
+  // Over the same sessions as everything else.
   const standing = finishStanding(acc, {
     unreadable,
     ...(opts.now !== undefined ? { now: opts.now.toISOString() } : {}),
   });
 
   return {
-    // With no bound asked for, the range *is* what was found — so the coverage
-    // section describes the sessions rather than an invented window around
-    // them.
     range: opts.range ?? spanOfSessions(sessions, opts.now ?? new Date()),
     generatedAt: (opts.now ?? new Date()).toISOString(),
     preset: opts.preset,
@@ -294,8 +282,34 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
     sessions,
     unreadable,
     standing,
-    recommendation: recommend(standing),
+    recommendations: recommendationsFor(standing, sessions, allJudged, compactions),
   };
+}
+
+/** One recommendation per dimension, each computed over that dimension's own findings and reasons. */
+function recommendationsFor(
+  standing: Standing,
+  sessions: SessionView[],
+  judged: JudgedFinding[],
+  compactions: Compactions,
+): Record<string, Recommendation> {
+  const out: Record<string, Recommendation> = {};
+  for (const dim of standing.dimensions) {
+    const reasons: Record<string, number> = {};
+    for (const s of sessions) {
+      for (const f of s.findings) {
+        if (f.dimension !== dim.dimension) continue;
+        for (const r of f.reasons) reasons[r.reason] = (reasons[r.reason] ?? 0) + r.count;
+      }
+    }
+    const r = recommend({ ...standing, dimensions: [dim], reasons });
+    if (r !== undefined) out[dim.dimension] = r;
+  }
+  for (const dim of new Set(judged.map((j) => j.dimension))) {
+    const r = recommend(undefined, judged.filter((j) => j.dimension === dim), compactions);
+    if (r !== undefined) out[dim] = r;
+  }
+  return out;
 }
 
 /** Reasons with their advice, ordered by how often each occurred. */
@@ -310,17 +324,3 @@ function adviceOf(reason: string): string {
   return adviceFor(reason as Reason) ?? '';
 }
 
-/**
- * The project a transcript belongs to.
- *
- * The harness encodes the full path as one directory name
- * (`-Users-me-Workspace-agentsensei`), which is unreadable in a report and
- * carries the home directory for no benefit. The trailing segment is the part
- * anybody recognises.
- */
-function projectOf(source: string): string {
-  const parts = source.split('/');
-  const dir = parts[parts.length - 2] ?? 'unknown';
-  const tail = dir.split('-').filter(Boolean).pop();
-  return tail ?? dir;
-}

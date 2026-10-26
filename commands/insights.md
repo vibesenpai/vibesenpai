@@ -9,7 +9,5 @@ Reproduce the output above in a code block, preserving every line, number and
 column exactly. Add no summary and no commentary: it is evidence, and
 paraphrasing it defeats the point.
 
-Add no emphasis of any kind. This asked for the figures to be bolded, which
-contradicts the code block directly above it: markdown does not render inside
-one, so the reader saw literal `**0**` and `**28**` scattered through their
-output.
+Add no emphasis of any kind: markdown does not render inside a code block, so
+asterisks would show up literally.

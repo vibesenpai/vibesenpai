@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isRedundant, repeatGroups } from '../src/detect/redundant-call.ts';
+import { isRedundant, repeatGroups, redundantCall } from '../src/detect/redundant-call.ts';
 import { createHash } from 'node:crypto';
 import { outputDigest } from '../src/normalise.ts';
 import {
@@ -13,10 +13,8 @@ import {
 import { collect, mergeFindings, materialise, findingId, subjectIdOf } from '../src/finding.ts';
 import type { Event, Finding } from '../src/types.ts';
 import { editRetry, retriedFailures } from '../src/detect/edit-retry.ts';
-import { redundantCall } from '../src/detect/redundant-call.ts';
-import { truncatesOutput } from '../src/parsers/claude-code.ts';
+import { truncatesOutput, failureKindOf } from '../src/parsers/claude-code.ts';
 import { reasonOf, adviceFor } from '../src/detect/labels.ts';
-import { failureKindOf } from '../src/parsers/claude-code.ts';
 import type { Detector, SessionFacts } from '../src/detect/types.ts';
 
 let seq = 0;
@@ -41,11 +39,7 @@ const facts = (over: Partial<SessionFacts> = {}): SessionFacts => ({
   ...over,
 });
 
-/**
- * `argHash` stands in for the parser's digest of the call's full arguments.
- * Without it `signatureOf` returns undefined and no two calls compare equal —
- * which is the behaviour, not a test artifact.
- */
+/** Stands in for the parser's argument digest; without it no two calls compare equal. */
 const hash = (s: string): string =>
   createHash('sha256').update(s).digest('hex').slice(0, 16);
 
@@ -58,11 +52,7 @@ const bash = (command: string, uuid?: string): Event =>
     ...(uuid ? { uuid } : {}),
   });
 
-/**
- * `outHash` mirrors what the parser computes over the FULL output. Fixtures must
- * carry it, because `tool_loop` compares digests rather than summaries — the
- * summary is capped at 200 chars and 59.9% of real results hit that cap.
- */
+/** Mirrors the parser's digest over the FULL output; the 200-char summary is not comparable. */
 const result = (textSummary?: string): Event =>
   ev({
     turnType: 'tool_result',
@@ -76,9 +66,7 @@ const edit = (filePath: string): Event =>
 
 describe('finding — identity is keyed on the subject, never the evidence', () => {
   it('keeps the same id as evidence grows', () => {
-    // If identity included extent, a 7-violation finding would become a
-    // different finding at the 8th — losing its history and re-nagging anyone
-    // who dismissed it.
+    // Identity excludes extent, so a growing finding keeps its history and its dismissal.
     const a = findingId('tool_loop', 's1', 'Bash npm test');
     const b = findingId('tool_loop', 's1', 'Bash npm test');
     expect(a).toBe(b);
@@ -117,8 +105,7 @@ describe('finding — the merge that fixes M1 double-counting', () => {
     }) as Finding & typeof over;
 
   it('counts a turn once even when two windows both saw it', () => {
-    // The reason M1 shipped non-overlapping windows. `occurrences` now describes
-    // the session rather than the slicing.
+    // `occurrences` describes the session, not the slicing.
     const merged = mergeFindings(f(['a', 'b', 'c']), f(['c', 'd']));
     expect(merged.evidence.map((e) => e.uuid)).toEqual(['a', 'b', 'c', 'd']);
     expect(merged.occurrences).toBe(4);
@@ -176,9 +163,7 @@ describe('finding — the merge that fixes M1 double-counting', () => {
 });
 
 describe('denominators — one pass, never incremental', () => {
-  // Detectors run per window; these are per session. If a detector incremented
-  // them, a run stopped halfway would bank partial findings against partial
-  // denominators and every rate would be silently wrong.
+  // Per session, never per window, so a partial run cannot skew rates.
   it('counts turns, edits and tool calls', () => {
     const d = countDenominators([
       ev({ turnType: 'user_prompt', textSummary: 'go' }),
@@ -189,9 +174,7 @@ describe('denominators — one pass, never incremental', () => {
   });
 
   it('counts only failures the harness itself declared', () => {
-    // Structural, and it stays that way: a text pattern tried here read
-    // `0 errors, 0 warnings` as a failure, and missed 26 of 38 real non-zero
-    // exits. The harness's own verdict is the only one worth having.
+    // Structural: the harness's own verdict, never a text pattern.
     const d = countDenominators([
       ev({ turnType: 'tool_result', isError: true }),
       ev({ turnType: 'tool_result', exitCode: 1 }),
@@ -211,10 +194,7 @@ describe('denominators — one pass, never incremental', () => {
   });
 
   it('records cacheRead without ever making it a ratio', () => {
-    // `cacheRead` re-counts the whole prefix on every call, so it grows with
-    // the square of the turn count: read/(read+creation) measured p10 0.901 to
-    // p90 0.985 across the corpus, i.e. pinned near 1 by construction. It is
-    // kept as a total and never divided. See GRAVEYARD.md.
+    // `cacheRead` re-counts the whole prefix per call; kept as a total, never divided. See GRAVEYARD.md.
     const short = countDenominators([
       ev({ turnType: 'assistant_msg', tokens: { cacheRead: 100, cacheCreation: 100 } }),
     ]);
@@ -225,21 +205,13 @@ describe('denominators — one pass, never incremental', () => {
     );
     const ratio = (d: ReturnType<typeof countDenominators>): number =>
       d.tokens.cacheRead / (d.tokens.cacheRead + d.tokens.cacheCreation);
-    // The longer session scores "better" purely for being longer. Which is why
-    // no detector may use it.
+    // Grows with session length, which is why no detector may use it.
     expect(ratio(long)).toBeGreaterThan(ratio(short));
     expect(Object.keys(countDenominators([]))).not.toContain('cacheHitRate');
   });
 });
 
-/**
- * A detector with no rule of its own.
- *
- * The runner's behaviour — failure isolation, scope dispatch, skeleton delivery
- * — is framework, not detection. Testing it through a real detector made these
- * tests break when that detector was removed, which is backwards: the framework
- * outlives any rule that runs on it.
- */
+/** A detector with no rule of its own, so runner tests outlive any real detector. */
 function stub(over: Partial<Detector> = {}): Detector {
   return {
     dimension: 'stub',
@@ -281,14 +253,7 @@ const perSpan = (over: Partial<Detector> = {}): Detector =>
 
 describe('a detector cannot read text — enforced by the compiler', () => {
   it('omits command, pattern and textSummary from the detector view', () => {
-    // The whole reset in one assertion. If any of these fields becomes
-    // readable again, the expect-error directives below go unused and the
-    // BUILD fails — which is the point: three detectors read text to decide
-    // and produced 5 true positives against ~25 false positives over 1,139
-    // real sessions. See GRAVEYARD.md.
-    //
-    // (Written without the directive's own spelling, because a comment
-    // containing it IS one — that mistake cost a confusing build error here.)
+    // If any of these fields becomes readable, the directives below go unused and the build fails.
     const probe = stub({
       detect: async (ctx) => {
         const e = ctx.events[0];
@@ -299,7 +264,6 @@ describe('a detector cannot read text — enforced by the compiler', () => {
           void e.pattern;
           // @ts-expect-error — `textSummary` is not on StructuralEvent.
           void e.textSummary;
-          // Structural fields are of course readable.
           void e.argHash;
           void e.isError;
           void e.filePath;
@@ -353,9 +317,7 @@ describe('runner — isolation and presets', () => {
   });
 
   it('every registered detector describes itself in prose, never as a bare count', () => {
-    // Nudges need a short description, not a number. The singular form names
-    // the subject; the plural may omit it, because quoting one instance when
-    // three occurred would misrepresent the finding.
+    // The plural may omit the subject: quoting one instance of three would misrepresent it.
     for (const d of [...detectorsFor('all'), stub()]) {
       expect(d.describe('subject-here', 1), d.dimension).toContain('subject-here');
       const many = d.describe('subject-here', 3);
@@ -365,18 +327,13 @@ describe('runner — isolation and presets', () => {
   });
 
   it('registers only detectors that read structure', () => {
-    // The 2026-10-19 reset removed every detector that read text to decide.
-    // Anything registered here must survive `StructuralEvent`, which the
-    // compiler already guarantees — this pins the roster itself so a
-    // reintroduction is a visible change rather than a quiet one.
+    // Pins the roster, so reintroducing a detector is a visible change.
     expect(allDetectors().map((d) => d.dimension)).toEqual(['edit_retry', 'redundant_call']);
   });
 });
 
 describe('occurrences counts instances, not cited turns', () => {
-  // Found by running against real sessions: every finding that cited both a
-  // cause turn and an effect turn reported `occurrences: 2`. One instance is
-  // one occurrence, however many turns it took to evidence it.
+  // One instance is one occurrence, however many turns evidence it.
   it('counts one occurrence for a finding evidenced by two turns', async () => {
     const twoTurnEvidence = stub({
       detect: async (ctx) => [
@@ -407,9 +364,7 @@ describe('occurrences counts instances, not cited turns', () => {
 });
 
 describe('scope — the window is a token budget, not an evaluation span', () => {
-  // Measured across 255 sessions: of 363 genuinely verified edits, 293 (81%)
-  // were covered by a command in a LATER window. A per-window detector calls
-  // every one of them unverified — a precision failure, not a recall one.
+  // A verifying command often sits in a later window: .claude/rules/detectors.md, "Scope is a property of the detector".
   const long = (): Event[] => {
     const out: Event[] = [];
     for (let i = 0; i < 30; i++) out.push(bash(`echo step-${i}`));
@@ -436,8 +391,7 @@ describe('scope — the window is a token budget, not an evaluation span', () =>
   });
 
   it('keeps a subagent span separate from the main thread', async () => {
-    // Thread scope: a flat array interleaves subagent events among main-thread
-    // ones, so a session-scoped rule would merge work belonging to two actors.
+    // A flat array interleaves subagent events, so thread scope keeps actors apart.
     const sc = (c: string): Event =>
       ev({ turnType: 'tool_use', toolName: 'Bash', command: c, argHash: hash(c), isSidechain: true, sidechainId: 'sc1' });
     const events = [sc('a'), bash('ls'), sc('b'), bash('ls'), sc('c')];
@@ -481,15 +435,13 @@ describe('scope — the window is a token budget, not an evaluation span', () =>
 
 describe('EDIT_TOOLS is one definition', () => {
   it('is exported once and covers the four Claude-owned writers', () => {
-    // A legitimate allowlist: the space is closed, published, and slow-moving.
-    // It previously existed as three separate copies.
+    // A legitimate allowlist: the space is closed and published.
     expect([...EDIT_TOOLS].sort()).toEqual(['Edit', 'MultiEdit', 'NotebookEdit', 'Write']);
   });
 });
 
 describe('"did a file change?" without a name allowlist', () => {
-  // The rule: a closed list is authoritative where it applies, behaviour covers
-  // the open remainder, and what neither decides is reported as undecided.
+  // Closed list where it applies, behaviour for the rest, undecided otherwise.
   const snapshot = (changed: string[]): Event =>
     ev({ turnType: 'system', systemKind: 'file-history', changedFiles: changed });
 
@@ -503,8 +455,7 @@ describe('"did a file change?" without a name allowlist', () => {
   });
 
   it('treats an unknown path-carrying tool as PROBABLE, never proven', () => {
-    // `mcp__acp__Write` writes files; `mcp__acp__Read` does not. Both carry a
-    // path, so path presence alone cannot separate them.
+    // Both carry a path, so path presence alone cannot separate writer from reader.
     const mcpWrite = ev({ turnType: 'tool_use', toolName: 'mcp__acp__Write', filePath: '/x/a.ts', argHash: hash('w') });
     expect(editEvidenceOf(mcpWrite)).toBe('probable');
   });
@@ -534,11 +485,7 @@ describe('"did a file change?" without a name allowlist', () => {
   });
 
   it('dedupes across the ABSOLUTE tool path and the RELATIVE harness path', () => {
-    // The real shape, and the bug the identical-literal test above missed: the
-    // harness records `e2e/agents/cursor_cli.go` while the tool call carries
-    // `/Users/[USER]/Projects/devenv/cli/e2e/agents/cursor_cli.go`. Compared for
-    // equality they never match, and every edit in a harness-2.1 session
-    // doubled — 6 tool edits plus 3 snapshots read as 9.
+    // The harness records a relative path while the tool call carries an absolute one; still one edit.
     const d = countDenominators([
         edit('/Users/[USER]/Projects/devenv/cli/e2e/agents/cursor_cli.go'),
         snapshot(['e2e/agents/cursor_cli.go']),
@@ -553,15 +500,7 @@ describe('"did a file change?" without a name allowlist', () => {
 
 });
 
-/**
- * Fixtures below use the harness's **real** messages, copied from the corpus.
- *
- * Invented strings are how a detector passes its tests and fails on real data:
- * every one of this project's first three real-data findings was a false
- * positive that every unit test passed. The envelope in particular has to be
- * exact, because it is what separates the tool refusing an edit from the
- * person's own hook refusing it.
- */
+/** Fixtures use the harness's real messages; the envelope must be exact to tell tool from hook. */
 const HARNESS = {
   notRead:
     '<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>',
@@ -640,8 +579,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it("never blames the person's own hook for blocking an edit", async () => {
-    // The product-level error this detector is built around: telling someone
-    // their safety rail is a problem is worse than saying nothing.
+    // Calling someone's own safety rail a problem is worse than saying nothing.
     const a = editCall('/repo/src/api.ts');
     expect(await run([a, failure(a, HARNESS.hook), editCall('/repo/src/api.ts')])).toEqual([]);
   });
@@ -679,8 +617,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it('still fires when the harness reword leaves the reason unknown', async () => {
-    // The point of the label tier. A new message costs a label, never the
-    // detection — losing a label is cosmetic, losing a detection is silent.
+    // A new message costs a label, never the detection.
     const a = editCall('/repo/src/api.ts');
     const f = await run([a, failure(a, HARNESS.reworded), editCall('/repo/src/api.ts')]);
     expect(f).toHaveLength(1);
@@ -688,8 +625,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it('does not blame the agent when a sibling call cancelled its edit', async () => {
-    // Found by reading 991 real findings: 32 were this. The edit never ran, so
-    // re-issuing it is correct behaviour and reporting it is a false positive.
+    // The edit never ran, so re-issuing it is correct.
     const a = editCall('/repo/src/api.ts');
     expect(failureKindOf(HARNESS.cascade)).toBe('cascade');
     expect(await run([a, failure(a, HARNESS.cascade), editCall('/repo/src/api.ts')])).toEqual([]);
@@ -703,11 +639,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it('pairs a verdict with the call BEFORE it when an id is reused', async () => {
-    // A tool-call id is not unique across a transcript: one file in the pinned
-    // corpus reuses 90 of them, and 91 results there have a same-id call
-    // sitting after them. Keeping the last occurrence bound verdicts to the
-    // wrong call — visible as evidence citing a verdict at seq 627 for an edit
-    // at seq 628. Found by reading evidence; every test passed regardless.
+    // Tool-call ids are not unique: a result binds to the nearest call before it, not the last with that id.
     const first = ev({
       turnType: 'tool_use', toolName: 'Edit', filePath: '/repo/a.ts',
       toolCallId: 'reused', argHash: hash('first'), seq: 10,
@@ -730,8 +662,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it('needs the retry to come after the verdict, not just after the attempt', async () => {
-    // Otherwise a second edit issued in the same block — before the harness
-    // had answered — would read as the agent pushing on after being told no.
+    // Otherwise a second edit sent before the harness answered would read as pushing on after a no.
     const a = ev({
       turnType: 'tool_use', toolName: 'Edit', filePath: '/repo/a.ts',
       toolCallId: 'c1', argHash: hash('a'), seq: 10,
@@ -748,8 +679,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it('ends the attempt at the next instruction from the person', async () => {
-    // An edit to the same file after the person speaks again belongs to the
-    // next request, not to the refusal. Measured: 12 of 939 instances.
+    // An edit after the person speaks again belongs to the next request.
     const a = editCall('/repo/src/api.ts');
     const f = await run([
       a,
@@ -761,9 +691,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it('reads the envelope, never the sentence inside it', async () => {
-    // `failureKind` comes from the frame the harness emits. Proof it is the
-    // frame doing the work: an unrecognised message in a known envelope still
-    // produces a finding (above), and a known reason in NO envelope does not.
+    // The envelope does the work: a known reason outside any envelope is not a finding.
     expect(failureKindOf(HARNESS.notRead)).toBe('tool');
     expect(failureKindOf(HARNESS.reworded)).toBe('tool');
     expect(failureKindOf(HARNESS.hook)).toBe('hook');
@@ -772,9 +700,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it('names a reason only inside the harness envelope', async () => {
-    // A file's own contents quoted back must not read as a harness verdict —
-    // the mistake that made a line-numbered Read of a doc file look like a
-    // permission denial.
+    // A file's own contents quoted back must not read as a harness verdict.
     const quoted = ev({
       turnType: 'tool_result',
       isError: true,
@@ -785,8 +711,7 @@ describe('edit_retry — the harness refused, the agent pushed on', () => {
   });
 
   it('gives every reason a line of advice', () => {
-    // CLAUDE.md allows two outputs: evidence, and something applicable. A
-    // reason with no advice is a dimension that cannot pay for itself.
+    // Every reason needs advice: CLAUDE.md allows evidence and something applicable.
     for (const text of [HARNESS.notRead, HARNESS.stale, HARNESS.ambiguous]) {
       const r = reasonOf(ev({ turnType: 'tool_result', isError: true, failureKind: 'tool', textSummary: text }));
       expect(r, text).toBeDefined();
@@ -852,9 +777,7 @@ describe('redundant_call — same call, same answer, nothing changed between', (
   });
 
   it('sees a repeat spread across the session, not only consecutive ones', async () => {
-    // The whole reason this aggregates rather than walking consecutive runs:
-    // measured on real data, a call repeated with unrelated work between is
-    // invisible to a consecutive-run rule.
+    // A repeat with unrelated work between is still a repeat: aggregated, not consecutive.
     const events: Event[] = [];
     for (const t of [0, 20, 40]) {
       const c = call('go generate', at(t));
@@ -868,7 +791,7 @@ describe('redundant_call — same call, same answer, nothing changed between', (
   });
 
   it('reconciles two actors into one session finding', async () => {
-    // A call is redundant with respect to the SESSION, not one actor's slice.
+    // Redundant with respect to the session, not one actor's slice.
     const events: Event[] = [];
     for (const [i, t] of [0, 5, 10].entries()) {
       const sc = i % 2 === 1 ? { isSidechain: true, sidechainId: 'sc1' } : {};
@@ -883,13 +806,7 @@ describe('redundant_call — same call, same answer, nothing changed between', (
     expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
   });
 
-  /**
-   * Insert an event genuinely between the first and last call.
-   *
-   * `seq` is assigned when an event is created, not by array position, so
-   * splicing into the array does not place it between them — the guard reads
-   * `seq`, and an appended event sits after everything.
-   */
+  /** Insert an event between the first and last call. The guard reads `seq`, not array position. */
   const between = (events: Event[], e: Event): Event[] => {
     const calls = events.filter((x) => x.turnType === 'tool_use');
     const mid = ((calls[0] as Event).seq + (calls[1] as Event).seq) / 2;
@@ -897,7 +814,6 @@ describe('redundant_call — same call, same answer, nothing changed between', (
   };
 
   it('does not fire when an edit happened between', async () => {
-    // The guard carrying the most weight: 278 of 298 raw groups on real data.
     // Re-running after a change is `fail_fix_fail`, not a redundant call.
     const events = between(
       tightRun('npm test', '2 failed'),
@@ -915,9 +831,7 @@ describe('redundant_call — same call, same answer, nothing changed between', (
   });
 
   it('treats a slow repeat as waiting, not looping', async () => {
-    // Polling is usually `sleep 60 && <cmd>`, which a detector may not read.
-    // Measured, the two populations separate on the gap: polls cluster at
-    // 60-72s, real repeats are seconds apart.
+    // Polls (`sleep 60 && …`) separate from real repeats on the gap alone.
     const events: Event[] = [];
     for (const t of [0, 70, 140]) {
       const c = call('gh run view 123', at(t));
@@ -946,8 +860,7 @@ describe('redundant_call — same call, same answer, nothing changed between', (
   });
 
   it('never treats a polling tool as a loop', async () => {
-    // Kept alongside the gap rule: BashOutput on a finished job returns
-    // instantly and identically, so only the name separates it from a loop.
+    // BashOutput on a finished job returns instantly and identically; only the name separates it.
     const events: Event[] = [];
     for (const t of [0, 2, 4]) {
       callN += 1;
@@ -979,9 +892,7 @@ describe('redundant_call — same call, same answer, nothing changed between', (
 
 describe('countDenominators — usage is counted once per response', () => {
   it('does not sum the same usage once per block', () => {
-    // A response is written as several records, each repeating the SAME usage.
-    // Measured on a real session: 934 of 1,531 responses span more than one
-    // record, which inflated every token figure by 2.49x.
+    // One response spans several records that repeat the same usage: count it once (`oncePerResponse`).
     const tokens = { input: 0, output: 500, cacheRead: 0, cacheCreation: 100 };
     const events = [1, 2, 3].map((n) => ({
       uuid: `u${n}`,
@@ -998,9 +909,7 @@ describe('countDenominators — usage is counted once per response', () => {
   });
 
   it('is not fooled by two token-bearing events sharing a uuid', () => {
-    // Measured: 16 pinned-corpus sessions carry token-bearing events with a
-    // duplicated uuid, so an earlier fix that keyed the dedup set on uuid
-    // matched both siblings and reintroduced the double count it replaced.
+    // Uuids are duplicated too, so dedup must not key on uuid alone.
     const tokens = { input: 0, output: 500, cacheRead: 0, cacheCreation: 0 };
     const events = [
       { uuid: 'same', sessionId: 's1', seq: 1, turnType: 'assistant_msg' as const, responseId: 'a', tokens },
@@ -1043,14 +952,13 @@ describe('redundant_call — two is a repeat, but never for an edit', () => {
   };
 
   it('flags the same call twice with the same answer', () => {
-    // Three was the old floor and found 6 findings in 1,139 sessions.
+    // Two is a repeat.
     const groups = repeatGroups(pair('Read')).filter((g) => isRedundant(g, pair('Read')));
     expect(groups.length).toBe(1);
   });
 
   it('never flags a repeated edit, whatever the count', () => {
-    // Measured: 92 of 97 such pairs made a REAL change — the output is the
-    // file's new contents, so "same answer" does not mean "nothing happened".
+    // An edit's output is the file's new contents, so "same answer" does not mean nothing happened.
     for (const tool of ['Edit', 'Write']) {
       const events = pair(tool);
       expect(repeatGroups(events).filter((g) => isRedundant(g, events)).length).toBe(0);
@@ -1058,11 +966,7 @@ describe('redundant_call — two is a repeat, but never for an edit', () => {
   });
 
   it('never pairs a call with itself when an id is reused', () => {
-    // Measured: one pinned fixture reuses 90 tool-call ids, and a last-wins
-    // lookup made two results resolve to the SAME call — which read as that
-    // call repeating itself. All 45 findings on the pinned corpus were this,
-    // and none were genuine. Threshold 3 hid it; a fake pair needs only one
-    // collision.
+    // Tool-call ids are not unique: two results bound to one call must not count as a repeat.
     n = 0;
     const call = ev({ turnType: 'tool_use', toolName: 'Read', toolCallId: 'dup', filePath: '/f.ts', argHash: 'same' });
     const events = [
@@ -1074,8 +978,7 @@ describe('redundant_call — two is a repeat, but never for an edit', () => {
   });
 
   it('keeps every guard that made it precise', () => {
-    // An edit between the calls still disqualifies a non-edit repeat: the
-    // threshold moved, nothing was loosened.
+    // An edit between the calls still disqualifies a non-edit repeat.
     const events = pair('Read');
     events.splice(4, 0, {
       uuid: 'mid', sessionId: 's1', seq: 3.5, turnType: 'tool_use', toolName: 'Edit', filePath: '/x.ts',

@@ -1,64 +1,7 @@
 /**
- * Claude Code transcript parser.
- *
- * Every structural decision here is grounded in measurement over 2,336 real
- * records across 3 archived sessions (2026-10-15). See docs/log-formats.md for
- * the observed record inventory.
- *
- * Three findings shaped this file, and two of them contradicted the design:
- *
- * 1. FILE ORDER IS AUTHORITATIVE, not the parentUuid path.
- *    The design said "reconstruct the active leaf path, then index". Measured:
- *    the longest path covers 1325 of 1695 records (78.2%), and walking it would
- *    DROP 46 real records — 39 of them `tool_result`s, which is exactly what
- *    no_verification and fail_fix_fail depend on. Those records are not
- *    abandoned work; they are parallel tool calls, where an assistant tool_use
- *    and a user tool_result legitimately share a parent.
- *    File order covers 100% and is already topologically sorted (0
- *    parent-after-child violations), so it is used for sequencing.
- *
- * 2. `attachment` records sit INSIDE the parentUuid chain, not hanging off it.
- *    Filtering them before walking the tree orphans every record beneath them —
- *    it turned 1 root into 305. So they are traversed through and skipped only
- *    at emit time.
- *
- * 3. tool_use pairs with tool_result by `tool_use_id`, not by tree position.
- *
- * 4. A REWIND LEAVES ITS ABANDONED BRANCH IN THE FILE, UNMARKED.
- *    Observed 2026-10-15 in a session rewound on purpose: the pre-rewind records
- *    remain, nothing is truncated, no new file is created, and there is no
- *    `isRewound` / `prunedAt` / marker of any kind. 38 of 71 records were dead.
- *    So abandonment is derivable only structurally — see `markAbandoned`.
- *
- * parentUuid is still kept on every event: it is needed for grouping, and for
- * detecting genuinely abandoned subtrees if a rewind ever appears in real data.
- * No rewind has been observed yet, so that handling stays unwritten rather than
- * guessed at.
- *
- * ── Where these types come from ──────────────────────────────────────────────
- *
- * The INNER `message` object is an Anthropic API message, and its types ARE
- * published — so they are imported from `@anthropic-ai/sdk` rather than
- * redeclared. The SDK's own guidance is explicit about this: "Don't define
- * custom types for SDK data structures… defining your own duplicates what the
- * SDK already provides and loses type safety."
- *
- * The OUTER envelope (`type`, `uuid`, `parentUuid`, `isSidechain`, `cwd`,
- * `gitBranch`, and the non-message record types) is **not published anywhere
- * authoritative.** Checked 2026-10-15:
- *
- *   - `@anthropic-ai/claude-agent-sdk` exports `getSessionMessages()` and a
- *     `SessionMessage` type — but it is a *transformed* view, not the raw
- *     record: snake_case fields, `message: unknown` (so the part we most need
- *     is untyped), and `type: 'user' | 'assistant' | 'system'` only, which
- *     drops `queue-operation` and `file-history-snapshot` — our interrupt and
- *     revert signals. It also reads the live project directory, which is the
- *     one place we must not read from, since the harness deletes it.
- *   - Community write-ups exist and are often labelled "official". They are not.
- *
- * So `RawRecord` below is ours by necessity, and is therefore derived from
- * measurement and documented in docs/log-formats.md with observed counts. If
- * Anthropic ever publishes the envelope, this is the type to delete.
+ * Claude Code transcript parser. Sequencing uses file order, not the parentUuid path; noise records
+ * stay in the tree; rewinds are found structurally. Evidence for each: docs/log-formats.md.
+ * The record envelope is not published, so `RawRecord` is ours; the inner `message` uses SDK types.
  */
 
 import type {
@@ -75,28 +18,25 @@ import { redact } from '../redact.ts';
 import { outputDigest, isPlausibleTimestamp } from '../normalise.ts';
 import type { Event, TurnType } from '../types.ts';
 
-/**
- * A `user` record whose string content is one of these wrappers is a slash-command
- * echo, not a human speaking. Measured: 13 of 69 "prompts" across 3 real sessions.
- */
+/** A `user` record whose string content starts with one of these is a slash-command echo, not a human. */
 const META_CONTENT =
   /^\s*<(local-command-(caveat|stdout|stderr)|command-name|command-message|command-args|system-reminder)\b/;
 
 /** Record types that carry no analysable signal. Traversed, never emitted. */
 const NOISE_TYPES = new Set([
-  'attachment', // 710 of 2336 — the single most common type, almost all hook_success
+  'attachment', // mostly hook_success
   'last-prompt',
   'mode',
   'permission-mode',
   'atis-latch',
   'ai-title',
   'agent-name',
-  // Found only in a public corpus of 231 transcripts spanning 42 versions:
+  // Seen only in the public corpus:
   'progress', // hook progress ticks
   'frame-link', // artifact frame reference
 ]);
 
-export type ParseResult = {
+export type ParseOutput = {
   events: Event[];
   /** Unknown record types, counted. A format change should degrade coverage, not crash. */
   unknown: Record<string, number>;
@@ -117,20 +57,10 @@ type RawRecord = {
   sessionId?: string;
   timestamp?: string;
   isSidechain?: boolean;
-  /**
-   * Set on the post-compaction summary the harness writes as a `user` record.
-   *
-   * It carries the replacement context, not a human instruction, so it must not
-   * be read as a prompt — see the `user` case.
-   */
+  /** Set on the post-compaction summary written as a `user` record; not a prompt. */
   isCompactSummary?: boolean;
   cwd?: string;
-  /**
-   * An Anthropic API message. `assistant` records carry a response-shaped
-   * `Message` (content is `ContentBlock[]`); `user` records carry a
-   * request-shaped `MessageParam` (content is `string | ContentBlockParam[]`).
-   * Partial, because a record on disk may predate or postdate this build.
-   */
+  /** An API message: `Message` on assistant records, `MessageParam` on user records. Partial across versions. */
   message?: Partial<Message> & Partial<MessageParam>;
   subtype?: string;
   operation?: string;
@@ -141,17 +71,8 @@ type RawRecord = {
 };
 
 /**
- * A content block as it arrives from untrusted JSON on disk.
- *
- * Deliberately flat rather than a union of the SDK's discriminated members: the
- * `type` tag has to be read before anything can be narrowed, and the file may
- * contain Claude Code-only kinds (`advisor_tool_result`) that are not in the
- * SDK union at all.
- *
- * Every field is still **typed from the SDK**, so an upstream rename or type
- * change breaks this build rather than silently parsing to `undefined`. That is
- * the actual benefit of depending on the published types — not the shape, the
- * early warning.
+ * A content block from untrusted JSON: flat, since `type` must be read first and Claude Code adds kinds
+ * the SDK union lacks. Fields are SDK-typed so an upstream rename breaks the build.
  */
 type AnyBlock = {
   type?: string;
@@ -166,35 +87,8 @@ type AnyBlock = {
 };
 
 /**
- * Short, single-line, length-capped — and **redacted**.
- *
- * Redaction happens here, at the point the summary is created, rather than
- * later at display time. Since we keep no transcript copies, an `Event` is
- * already the only version that will exist; a secret that survives into one has
- * nowhere else to be caught.
- *
- * Note the order: redact BEFORE truncating. Truncating first could cut a token
- * in half and leave a fragment that no rule matches — half a key is still a
- * leak, and a shorter one is not a safer one.
- */
-/**
- * Every path that reaches an `Event` goes through here.
- *
- * There were three assignment sites and the first fix only covered one, leaking
- * 59 paths from `file-history-*` records. A single choke point means a new site
- * cannot quietly forget.
- */
-/**
- * Stable digest of a tool call's arguments.
- *
- * Keys are sorted so that `{a:1,b:2}` and `{b:2,a:1}` are the same call, and the
- * canonical form is redacted before hashing — a hash of a secret should not be
- * usable as a confirmation oracle, and redacting also makes two users' home
- * paths agree, which is what we want for "same call?".
- *
- * Returns undefined for a call with no arguments at all, so a detector can tell
- * "no arguments" from "arguments we failed to read" instead of treating every
- * such call as identical.
+ * Stable digest of a tool call's arguments: keys sorted, redacted before hashing so the hash is no
+ * oracle for a secret. `undefined` for no arguments, so "none" differs from "unreadable".
  */
 function argDigest(input: unknown): string | undefined {
   if (input === undefined || input === null) return undefined;
@@ -208,19 +102,15 @@ function argDigest(input: unknown): string | undefined {
   return createHash('sha256').update(redact(canonical).text).digest('hex').slice(0, 16);
 }
 
+/** Every path that reaches an `Event` goes through here, so redaction cannot be forgotten. */
 function cleanPath(p: string | undefined): string | undefined {
   return p === undefined ? undefined : redact(p).text;
 }
 
-/**
- * How much of a user prompt survives.
- *
- * Six times the default, because the prompt is the one field a judge reads for
- * meaning rather than identity. Still a cap: an enormous pasted log should not
- * become the whole packet.
- */
-export const PROMPT_SUMMARY_MAX = 1200;
+/** Prompt cap: larger than the 200 default because the judge reads prompts for meaning. */
+const PROMPT_SUMMARY_MAX = 1200;
 
+/** Single-line, capped, redacted at construction. Redact before truncating: half a key still leaks. */
 function summarise(s: unknown, max = 200): string | undefined {
   if (typeof s !== 'string') return undefined;
   const flat = s.replace(/\s+/g, ' ').trim();
@@ -228,34 +118,13 @@ function summarise(s: unknown, max = 200): string | undefined {
   const clean = redact(flat).text;
   if (clean.length <= max) return clean;
 
-  // The marker is space-separated because `/home/…` would otherwise read `…` as
-  // the username and mask it to `/home/[USER]`, inventing a path segment that
-  // was never there.
-  //
-  // **Head-only, deliberately.** `src/packet.ts` keeps head *and* tail for the
-  // judge, where an agent's verdict sits at the end and must survive. This is
-  // the display path: a terminal row, guarded by tests from the redactor
-  // commit that this cut must not break a replacement token.
+  // Space before `…` so `/home/…` is not masked as a username. Head-only: this is the display path.
   return redactToFixedPoint(`${clean.slice(0, max)} …`);
 }
 
 /**
- * Redact until the text stops changing.
- *
- * One pass suffices for whole text, but truncation can leave a dangling
- * construct whose marker the next pass then consumes: cutting
- * `API_TOKEN=secret` at the `=` leaves `API_TOKEN= …`, and `secret-assignment`
- * allows whitespace after the separator, so it swallows the marker as the value.
- * No secret is exposed either way — redaction already ran before the cut — but
- * the output would not be stable.
- *
- * Iterating makes the invariant hold *by construction*: every emitted summary
- * is a fixed point of `redact`. That is what lets scripts/verify-corpus.ts treat
- * any re-redaction change as proof a field reached an `Event` without passing
- * the redactor — the bug that leaked 347 home paths through `filePath`.
- *
- * The bound is a guard against a future rule pair that oscillates, not an
- * expectation; observed convergence is one or two passes.
+ * Redact until the text stops changing: a cut can leave `KEY= …`, which the next pass would consume.
+ * Every summary is a fixed point of `redact`, which scripts/verify-corpus.ts relies on to detect leaks.
  */
 function redactToFixedPoint(s: string, limit = 4): string {
   let cur = s;
@@ -268,26 +137,8 @@ function redactToFixedPoint(s: string, limit = 4): string {
 }
 
 /**
- * Build the optional `textSummary` property in one step. Calling `summarise()`
- * inside a ternary defeats narrowing under `exactOptionalPropertyTypes`.
- */
-/**
- * Judge mode: keep the **full redacted text** alongside the capped summary.
- *
- * ── Why this is module state rather than a threaded option ─────────────────
- *
- * `sum()` is called from eight places, always inside the object literal that
- * becomes an event, and always immediately before `push` assigns the `seq`.
- * Threading a flag to all eight would touch every record type for a feature
- * only one caller wants; adding a field to `Event` would risk persisting it.
- *
- * So `sum` leaves the full text here and `push` claims it under the seq it is
- * about to assign. Parsing is not reentrant and Node is single-threaded, so
- * the handoff is a local one despite the module scope. `withFullText()` owns
- * the lifetime and always clears it.
- *
- * **Never stored.** The map lives in `ParseResult` and dies with it;
- * `textSummary` remains the only form that reaches disk.
+ * Judge mode: keep the full redacted text beside the capped summary. Module state because `sum` is
+ * called right before `push` assigns the seq; `withFullText` owns the lifetime. Never stored.
  */
 let keepFullText = false;
 let pendingFullText: string | undefined;
@@ -307,12 +158,12 @@ export function withFullText<T>(fn: () => T): { result: T; fullText: Map<number,
 
 let capturedFullText = new Map<number, string>();
 
+/** The optional `textSummary` in one step (a ternary would defeat `exactOptionalPropertyTypes` narrowing). */
 function sum(s: unknown, max?: number): { textSummary: string } | Record<string, never> {
   const t = max === undefined ? summarise(s) : summarise(s, max);
   if (keepFullText && typeof s === 'string') {
     const flat = s.replace(/\s+/g, ' ').trim();
-    // Redacted here, exactly as the summary is — the uncapped form must not be
-    // the one that skips redaction.
+    // Redacted exactly as the summary is.
     if (flat !== '') pendingFullText = redactToFixedPoint(redact(flat).text);
   }
   return t === undefined ? {} : { textSummary: t };
@@ -330,13 +181,8 @@ function toolResultText(content: unknown): string | undefined {
 }
 
 /**
- * `Exit code N` appears as the first line of Bash tool_result content — but
- * ONLY on failure. Measured across 3 sessions: the sole exit code ever present
- * is 1; successful commands carry no prefix at all.
- *
- * So the semantics are asymmetric and detectors must not invert them: a missing
- * exit code means "succeeded, or not a shell command", never "unknown". That
- * distinction is what keeps `error_ignored` from firing on every Read call.
+ * `Exit code N` appears only on failure, so a missing code means "succeeded, or not a shell command",
+ * never "unknown". See docs/log-formats.md.
  */
 function extractExitCode(text: string | undefined): number | undefined {
   if (!text) return undefined;
@@ -345,29 +191,8 @@ function extractExitCode(text: string | undefined): number | undefined {
 }
 
 /**
- * Who rejected a failed call, read off the harness's framing.
- *
- * Envelope only — never the sentence inside it. `<tool_use_error>` is a
- * delimiter the harness emits, the way a JSON key is; "File has not been read
- * yet" is prose that can be reworded. Detection depends on the first and only
- * presentation depends on the second, so a reworded message costs a label and
- * never a finding.
- *
- * Two messages *inside* the envelope name a different rejecter, so they are
- * read here too. This is not the envelope rule leaking — it is the same
- * question answered correctly:
- *
- *   - `Sibling tool call errored` — the call never ran. Re-issuing it is right,
- *     not waste, so it must not read as the tool refusing this call.
- *   - `File is covered by a Read deny rule in your permission settings` — the
- *     person's own settings. Same class as a hook or a decline.
- *
- * Both were found by reading 991 real findings: 32 of them were a cascade and 1
- * a permission rule, i.e. 3.2% of what the first version reported.
- *
- * Returns `other` rather than guessing when the framing is unfamiliar: a new
- * harness version adding a frame should show up as an unclassified failure, not
- * get silently folded into `tool`.
+ * Who rejected a failed call, read from the harness's envelope, never the prose inside it, plus two inner
+ * messages that name another rejecter (a sibling cascade; a Read deny rule). Unfamiliar framing is `other`.
  */
 export function failureKindOf(text: string | undefined): NonNullable<Event['failureKind']> {
   if (text === undefined) return 'other';
@@ -378,7 +203,7 @@ export function failureKindOf(text: string | undefined): NonNullable<Event['fail
     if (inner.startsWith('File is covered by a Read deny rule')) return 'permission';
     return 'tool';
   }
-  // `PreToolUse:Edit`, `PostToolUse:Write`, … — the user's own hook, by name.
+  // The user's own hook, by name.
   if (/^(?:Pre|Post)ToolUse:\w+ hook error:/.test(t)) return 'hook';
   if (t.startsWith("The user doesn't want to proceed")) return 'denied';
   if (t.startsWith('Claude requested permissions')) return 'permission';
@@ -386,15 +211,8 @@ export function failureKindOf(text: string | undefined): NonNullable<Event['fail
 }
 
 /**
- * Does this command throw away part of its own output?
- *
- * Matched on the shell's own grammar — a pipe into `head` or `tail` — which is
- * POSIX and closed, not a guess about what a tool does. Deliberately narrow:
- * this exists so a detector can lower its confidence, and over-claiming here
- * would lower it on calls that were in fact fully observed.
- *
- * The flag is not negative evidence. `sed -n '1,30p'` truncates too and is not
- * matched; see `Event.truncatesOwnOutput`.
+ * Does this command pipe into `head` or `tail`? Narrow on purpose: it only lowers confidence.
+ * Not negative evidence: `sed -n '1,30p'` truncates too and is not matched.
  */
 export function truncatesOutput(command: string | undefined): boolean {
   if (command === undefined) return false;
@@ -425,16 +243,8 @@ function tokensOf(usage: Partial<Usage> | undefined): Event['tokens'] | undefine
 }
 
 /**
- * Pull the most useful identifying argument out of a tool call.
- *
- * These are **structured evidence fields**, not summaries — `constraint_decay`
- * compares `command` against a stated rule, so `npm install lodash` must survive
- * verbatim. But they routinely contain absolute paths, which carry the username.
- *
- * So they get the same redactor as everything else: it rewrites `/Users/alice`
- * to `~` while leaving the command and path structure intact. Measured on real
- * transcripts, 347 events carried a raw home path through these two fields alone
- * — they bypass `summarise()`, so forgetting them leaked silently.
+ * The identifying argument of a tool call, kept verbatim but redacted (home paths become `~`):
+ * these fields bypass `summarise()`.
  */
 function toolTarget(name: string | undefined, input: unknown): {
   filePath?: string;
@@ -465,20 +275,10 @@ type TreeNode = {
 };
 
 /**
- * Which subagent each sidechain record belongs to.
- *
- * `isSidechain` says only *that* a record is a subagent's work, never *whose*.
- * Measured on the public corpus: 712 sidechain events across 90 files, and the
- * transcript carries no subagent id on any of them. Without this, every
- * subagent in a file collapses into one interleaved pseudo-thread — and since
- * the whole reason sidechains are separated is that a parallel fan-out reads the
- * same files legitimately, merging two subagents' reads reproduces exactly the
- * `reading_spiral` false positive the separation exists to prevent.
- *
- * A subagent's work is a contiguous subtree, so the topmost sidechain ancestor
- * identifies the invocation that spawned it. That root uuid becomes the id.
+ * Which subagent each sidechain record belongs to. `isSidechain` says only that, not whose, so the
+ * topmost sidechain ancestor's uuid is used as the id; otherwise parallel subagents merge into one thread.
  */
-export function attributeSidechains(nodes: TreeNode[]): Map<string, string> {
+function attributeSidechains(nodes: TreeNode[]): Map<string, string> {
   const byUuid = new Map(nodes.map((n) => [n.uuid, n]));
   const out = new Map<string, string>();
 
@@ -486,8 +286,7 @@ export function attributeSidechains(nodes: TreeNode[]): Map<string, string> {
     if (!n.isSidechain) continue;
     let top = n.uuid;
     let cur: string | null = n.parentUuid;
-    // Cycles cannot occur in a well-formed transcript, but a corrupt file must
-    // not hang the parser — Principle Zero outranks completeness here.
+    // Cycle guard: a corrupt file must not hang the parser.
     const seen = new Set<string>([n.uuid]);
     while (cur !== null && !seen.has(cur)) {
       seen.add(cur);
@@ -503,33 +302,10 @@ export function attributeSidechains(nodes: TreeNode[]): Map<string, string> {
 }
 
 /**
- * Which records sit on a branch the user walked away from.
- *
- * File order is topological, so **the last record in the file is on the live
- * path**. Walking up its `parentUuid` chain gives the live spine; any sibling
- * subtree hanging off that spine was not continued.
- *
- * The discriminator is then: **does that subtree contain a human prompt?**
- *
- *   - A rewind's dead branch does — it is a whole conversation segment.
- *   - A parallel tool call's sibling is a `tool_result` stub and never does.
- *
- * That distinction matters because an earlier attempt at this used subtree size
- * ("one side dies early, the other continues"), which flagged all 42 parallel
- * tool calls in a real session.
- *
- * **Sidechains are excluded explicitly.** A subagent's work hangs off the main
- * spine and carries its own injected prompt, so the human-prompt test would
- * classify an entire fan-out as abandoned. On a public corpus of 99
- * sidechain-bearing transcripts this happened to produce 0 false positives — but
- * only incidentally, which is the worst reason for something to be correct. The
- * exclusion makes it intentional: a subagent branch was never a branch the user
- * walked away from.
- *
- * Verified on 231 public transcripts across 42 harness versions plus 4 local
- * sessions: 52 abandoned main-thread events, 0 in any sidechain.
+ * Which records sit on a branch the user walked away from: an off-spine subtree that contains a human
+ * prompt (parallel tool-call siblings never do). Sidechains are excluded. See docs/log-formats.md.
  */
-export function markAbandoned(nodes: TreeNode[]): Set<string> {
+function markAbandoned(nodes: TreeNode[]): Set<string> {
   if (nodes.length === 0) return new Set();
   const byUuid = new Map(nodes.map((n) => [n.uuid, n]));
   const kids = new Map<string, TreeNode[]>();
@@ -578,7 +354,7 @@ export function markAbandoned(nodes: TreeNode[]): Set<string> {
   return dead;
 }
 
-export function parseTranscript(lines: Iterable<string>, fallbackSessionId = ''): ParseResult {
+export function parseTranscript(lines: Iterable<string>, fallbackSessionId = ''): ParseOutput {
   const events: Event[] = [];
   const unknown: Record<string, number> = {};
   const skipped: Record<string, number> = {};
@@ -592,8 +368,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
   // tool_use_id → tool name, so a tool_result can name the tool it belongs to.
   const toolById = new Map<string, string>();
 
-  // Collected for the abandonment pass, which needs the whole file: the live
-  // spine is only known once the final record has been read.
+  // For the abandonment pass, which needs the whole file.
   const nodes: TreeNode[] = [];
   /** Per-path file version, so a *rising* version marks a real change. */
   const fileVersions = new Map<string, number>();
@@ -612,15 +387,11 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       continue;
     }
 
-    // Some exports omit `type` and carry only `role`. Observed in 2 of 160
-    // SWE-chat transcripts: 103 records, 24 of them real human prompts, all
-    // silently counted as `(missing)` and dropped. The shape is otherwise a
-    // normal user/assistant record, so the role supplies the type.
+    // Some exports carry only `role`; it supplies the type.
     const type = r.type ?? (r.role === 'user' || r.role === 'assistant' ? r.role : '(missing)');
     if (NOISE_TYPES.has(type)) {
       bump(skipped, type);
-      // Still part of the tree: a branch point's parent was an `attachment` in
-      // the observed rewind, so skipping them here would break the spine walk.
+      // Still part of the tree, or the spine walk breaks.
       if (r.uuid !== undefined) {
         nodes.push({
           uuid: r.uuid,
@@ -640,8 +411,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       uuid: r.uuid ?? `synthetic-${seq}`,
       parentUuid: r.parentUuid ?? null,
       isSidechain: r.isSidechain === true,
-      // Omitted rather than coerced to ''. A `file-history-snapshot` has no
-      // timestamp, and an empty string is a type lying about the data.
+      // Omitted, not '', when absent (e.g. `file-history-snapshot`).
       ...(isPlausibleTimestamp(r.timestamp) ? { ts: r.timestamp } : {}),
     };
 
@@ -655,8 +425,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       events.push({ ...base, seq: seq++, turnType, ...extra });
     };
 
-    // Every record with a uuid joins the tree — including noise types, which sit
-    // *inside* the parentUuid chain rather than hanging off it.
+    // Every record with a uuid joins the tree.
     if (r.uuid !== undefined) {
       const c = r.message?.content;
       nodes.push({
@@ -672,72 +441,32 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
     switch (type) {
       case 'user': {
         const content = r.message?.content;
-        // ── A compaction summary is not a human speaking ──────────────────
-        //
-        // The same principle as the slash-command echo below, and it was
-        // costing something: the harness writes the post-compaction summary as
-        // a `type: 'user'` record, so it parsed as a real prompt. `edit_retry`
-        // ends a span at the next user prompt, which means every compaction
-        // silently truncated a span that should have continued.
-        //
-        // Marked `compaction` rather than skipped, and deliberately alongside
-        // the `compact_boundary` record: the public corpus carries only one of
-        // the two shapes, so recognising both is what keeps a compaction from
-        // going undetected. Consumers take the *first* one after a point, so a
-        // pair costs nothing.
+        // A compaction summary is not a prompt; marked `compaction` alongside `compact_boundary`,
+        // since the corpus carries only one of the two shapes. Consumers take the first.
         if (r.isCompactSummary === true) {
           push('system', { systemKind: 'compaction', textSummary: 'compaction:summary' });
           break;
         }
 
-        // ── `isMeta` is the harness saying "not a human speaking" ───────────
-        //
-        // Same class of signal as `isCompactSummary` above, and it was not
-        // being read. The harness writes a slash command's **own stdout** back
-        // as a `type: 'user'` record with `isMeta: true` and array content —
-        // and because the array branch below recognises only `tool_result`,
-        // text blocks fell through and became `user_prompt`.
-        //
-        // Measured on a real session (`d372b7c1`, 2026-10-23): two of its four
-        // user-side turns were agentsensei's own output, counted as the
-        // developer's prompts. The judge then anchored a `constraint_violation`
-        // on turn 8 — our own report text — and reported that the agent had
-        // violated an instruction nobody ever gave.
-        //
-        // That is this project analysing itself and billing for it: the
-        // observer effect CLAUDE.md exists to prevent, arriving through the
-        // data rather than through the context window.
+        // `isMeta`: a slash command's own stdout (ours included), not the developer speaking.
         if (r.isMeta === true) {
           push('local_command', { ...sum(toolResultText(content) ?? '') });
           break;
         }
         if (typeof content === 'string') {
-          // A slash-command echo is not a human speaking.
-          // ── The prompt is the signal, so it gets a bigger cap ───────────
-          //
-          // 200 characters truncated **45% of user prompts**, discarding 5.9M
-          // characters across 400 corpus sessions — and the research this
-          // project's dimension table comes from detects misalignment from
-          // developer pushback, which is to say from exactly this text. A
-          // half-sentence cannot be judged.
-          //
-          // Raised only here. Tool output, commands and results keep the 200
-          // cap: they are compared by digest, not read, and widening them
-          // would grow every skeleton for nothing.
+          // Prompts get the larger cap; other text keeps 200 (compared by digest, not read).
           const isPrompt = !META_CONTENT.test(content);
           push(isPrompt ? 'user_prompt' : 'local_command', {
             ...(isPrompt ? sum(content, PROMPT_SUMMARY_MAX) : sum(content)),
           });
         } else if (Array.isArray(content)) {
-          // A user record holding tool_result blocks is the harness replying to
-          // the agent, not the human speaking.
+          // tool_result blocks are the harness replying, not the human.
           for (const b of content as AnyBlock[]) {
             if (b?.type === 'tool_result') {
               const text = toolResultText(b.content);
               const exitCode = extractExitCode(text);
               const toolName = b.tool_use_id ? toolById.get(b.tool_use_id) : undefined;
-              // Hash the FULL output before `sum()` truncates it to 200 chars.
-              // Redacted first, so the digest cannot confirm a secret.
+              // Digest the full output, redacted first so it cannot confirm a secret.
               const outHash = text === undefined ? undefined : outputDigest(redact(text).text);
               push('tool_result', {
                 ...(toolName !== undefined ? { toolName } : {}),
@@ -761,13 +490,8 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       case 'assistant': {
         const content = r.message?.content;
         const tokens = tokensOf(r.message?.usage);
-        // The API response this record belongs to.
-        //
-        // **One response is written as several records**, each repeating the
-        // same `message.id` *and* the same `usage`. Measured on a real session:
-        // 934 of 1,531 responses span more than one record, up to seven. Summing
-        // usage per record therefore counts it once per block — a 2.49x
-        // overcount of every token figure.
+        // One response spans several records repeating the same `message.id` and `usage`;
+        // count usage once per response (`responseId`), not per record.
         const responseId = typeof r.message?.id === 'string' ? r.message.id : undefined;
         if (!Array.isArray(content)) break;
         for (const b of content as AnyBlock[]) {
@@ -783,15 +507,11 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
                 ...(argDigest(b.input) !== undefined
                   ? { argHash: argDigest(b.input) as string }
                   : {}),
-                // The size of what the agent wrote to make this call. Measured:
-                // for a refused edit the discarded `old_string`/`new_string` is
-                // ~50x the error text, so this is the dominant cost and the one
-                // thing only a hash was kept of.
+                // Size of the call's arguments: the dominant cost of a refused edit.
                 ...(b.input !== undefined
                   ? { argBytes: Buffer.byteLength(JSON.stringify(b.input)) }
                   : {}),
-                // Recorded here so a detector never has to read the command to
-                // know its own output was clipped before we saw it.
+                // So a detector never reads the command to learn this.
                 ...(truncatesOutput(target.command) ? { truncatesOwnOutput: true } : {}),
                 ...(tokens !== undefined ? { tokens } : {}),
           ...(responseId !== undefined ? { responseId } : {}),
@@ -799,8 +519,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
               break;
             }
             case 'advisor_tool_result': {
-              // The advisor tool returns its result inline in the assistant
-              // record rather than as a separate user tool_result record.
+              // The advisor's result is inline in the assistant record.
               push('tool_result', {
                 toolName: 'advisor',
                 ...sum(b.content),
@@ -818,7 +537,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
               break;
             }
             default:
-              // advisor_tool_result and future block types: counted, not dropped silently.
+              // Unknown block types: counted, not dropped silently.
               bump(unknown, `assistant.content.${b?.type ?? 'unknown'}`);
           }
         }
@@ -826,18 +545,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       }
 
       case 'system': {
-        // ── Compaction, as current transcripts actually record it ───────────
-        //
-        // The `type: 'summary'` branch below handles what the public corpus
-        // emits. **Real local transcripts use this instead**, and the parser
-        // missed it entirely: a real session reported zero compactions, so
-        // `systemKind: 'compaction'` was silently never set on current data —
-        // despite that session having compacted three times, each time from
-        // about a million tokens down to thirty thousand.
-        //
-        // `compactMetadata` carries exact token counts — `preTokens`,
-        // `postTokens`, `cumulativeDroppedTokens` — which beats any estimate we
-        // could make, and is the harness's own accounting rather than ours.
+        // Compaction as local transcripts record it; `compactMetadata` has the harness's exact token counts.
         if (r.subtype === 'compact_boundary') {
           const meta = (r as { compactMetadata?: Record<string, unknown> }).compactMetadata ?? {};
           const n = (k: string): number | undefined =>
@@ -862,8 +570,8 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       }
 
       case 'queue-operation': {
-        // Observed operations: enqueue, remove, dequeue. A mid-turn message the
-        // user sent while the agent was working — the interrupt signal.
+        // enqueue / remove / dequeue. Not by itself an interrupt:
+        // CLAUDE.md "A mechanism is not a behaviour".
         push('queue_operation', {
           ...(r.operation !== undefined ? { queueOpSubtype: r.operation } : {}),
           ...sum(r.content),
@@ -872,9 +580,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       }
 
       case 'file-history-snapshot': {
-        // The harness tracks files, not tools, so a rising `version` is
-        // tool-agnostic proof that a file changed — it catches an MCP server's
-        // write and anything else a name allowlist cannot know about.
+        // A rising `version` is tool-agnostic proof a file changed.
         const backups = (r.snapshot?.trackedFileBackups ?? {}) as Record<
           string,
           { version?: unknown } | undefined
@@ -886,8 +592,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
           const prior = fileVersions.get(path);
           if (prior !== undefined && version <= prior) continue;
           fileVersions.set(path, version);
-          // A first sighting at version 1 is the snapshot being established, not
-          // an edit; only an increase proves a change during this session.
+          // A first sighting is the baseline; only an increase is a change.
           if (prior !== undefined) {
             const clean = cleanPath(path);
             if (clean !== undefined) changed.push(clean);
@@ -903,16 +608,10 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
         break;
       }
 
-      // ── Types that appear only in the public corpus ─────────────────────
-      //
-      // None of these occur in local transcripts, which is why testing against
-      // someone else's data mattered: three carry signal the detectors want,
-      // and all three were being silently counted as "unknown".
+      // Types seen only in the public corpus.
 
       case 'summary': {
-        // What compaction leaves behind. `leafUuid` anchors it to the turn it
-        // replaced — the reference `context_rationale_erosion` needs to tell a
-        // dropped rationale from a dropped action.
+        // What compaction leaves behind; `leafUuid` anchors it to the turn it replaced.
         const sm = r as { summary?: unknown; leafUuid?: unknown };
         push('system', {
           systemKind: 'compaction',
@@ -923,9 +622,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       }
 
       case 'cost-state': {
-        // Session totals. The lines-added/removed counters are a real progress
-        // signal for outcome classification, and this is where
-        // `spend_without_progress` finally gets an input.
+        // Session totals, including lines added/removed.
         const cs = r as {
           totalLinesAdded?: unknown;
           totalLinesRemoved?: unknown;
@@ -943,8 +640,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
       }
 
       case 'pr-link': {
-        // A pull request was opened — one of the strongest convergence signals
-        // available. Work that reached a PR was not abandoned.
+        // A pull request was opened.
         const pr = r as { prNumber?: unknown; prRepository?: unknown };
         push('system', {
           systemKind: 'pr-link',
@@ -990,13 +686,11 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
     }
   }
 
-  // Counts abandoned EVENTS, not abandoned records — the dead subtree also
-  // contains noise records that never become events, and reporting those would
-  // not match any number a caller can act on.
+  // Counts abandoned events, not records (noise records never become events).
   return { events, unknown, malformed, skipped, abandoned };
 }
 
 /** Convenience wrapper for a whole file's contents. */
-export function parseTranscriptText(text: string, fallbackSessionId = ''): ParseResult {
+export function parseTranscriptText(text: string, fallbackSessionId = ''): ParseOutput {
   return parseTranscript(text.split('\n'), fallbackSessionId);
 }

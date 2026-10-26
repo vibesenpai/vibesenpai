@@ -1,25 +1,13 @@
 /**
- * Parser validation against public transcripts. Run via scripts/verify-corpus.sh
- * — it fetches the pinned corpora first. See that script for what this caught.
- *
- * Two things are asserted here rather than eyeballed:
- *
- *   1. **No leaks.** Redaction must be a *no-op* on everything we emit. If
- *      re-redacting any Event field changes it, that field reached us by a path
- *      that skipped the redactor — which is exactly how `filePath` and `command`
- *      carried 347 raw home paths while `summarise()` looked clean.
- *   2. **The baseline holds.** Counts are compared against scripts/corpus.json.
- *      Drift fails loudly instead of being read past.
- *
- * Both exit non-zero, so this is a gate and not a report.
+ * Parser gate over the pinned public corpora (run via scripts/verify-corpus.sh). Exits non-zero on
+ * a leak (re-redacting any emitted field changes it) or on count drift from scripts/corpus.json.
  */
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { join } from 'node:path';
-import { basename, dirname } from 'node:path';
+import { join, basename, dirname } from 'node:path';
 import { parse } from '../src/parsers/index.ts';
 import { redact } from '../src/redact.ts';
-import { buildSkeletons, render } from '../src/skeleton.ts';
+import { buildSkeletons, renderSkeleton } from '../src/skeleton.ts';
 import { runDetectors, detectorsFor, countDenominators } from '../src/detect/index.ts';
 import type { Event } from '../src/types.ts';
 
@@ -40,43 +28,18 @@ let sidechainEvents = 0;
 const failures: string[] = [];
 
 /**
- * Skeleton compression, measured per session rather than in aggregate.
- *
- * The aggregate ratio over this corpus is 1.28%, which is a flattering number:
- * it is dominated by a handful of very large transcripts. Per file the median is
- * 5.2% and 69 of 223 files exceed the 5–10% target — all of them tiny fixtures
- * where there is simply no bulk to strip. The worst is a 0.6 KB file holding a
- * single record, at 34.9%.
- *
- * So the target is asserted where it means something: a session of >= 20 events.
- * At that size 0 of 37 files exceed 10% (median 1.6%, max 6.8%). Reporting the
- * aggregate alone would have hidden the shape entirely.
- *
- * The denominator is whole raw JSONL bytes, which is the generous reading — the
- * file also holds records the skeleton never claimed to cover. Stated rather
- * than quietly chosen, and the size gate is what keeps it honest.
+ * Skeleton compression per session. The 5-10% target is asserted only for sessions of >= 20
+ * events; tiny fixtures have no bulk to strip. Denominator: whole raw JSONL bytes.
  */
 const REAL_SESSION_EVENTS = 20;
 let skeletonWindows = 0, sidechainWindows = 0, elidedWindows = 0;
 let rawBytes = 0, skeletonBytes = 0;
 const realRatios: number[] = [];
 
-/**
- * Detector results, kept in the gate rather than measured by hand.
- *
- * This was a manual step and it showed: a path-dedup fix changed `editCount`
- * from 1,155 to 791, and the only
- * reason anyone noticed was being asked whether the corpus had been re-run.
- * Detectors are the product now, so their behaviour belongs in the same gate
- * that guards the parser.
- */
+/** Detector results, kept in the gate so a behaviour change shows up as drift. */
 const parsedSessions: { project: string; events: Event[] }[] = [];
 
-/**
- * Fields are checked by enumeration rather than by a hand-written list, so a new
- * string field added to `Event` is covered the day it appears. A list would have
- * to be remembered, and the leak we actually shipped came from forgetting one.
- */
+/** Fields checked by enumeration, so a new string field on `Event` is covered automatically. */
 const leaks: { file: string; field: string; before: string; after: string }[] = [];
 
 function checkEvent(e: Event, file: string): void {
@@ -112,15 +75,14 @@ for (const f of files) {
 
   if (r.events.length > 0) {
     const sks = buildSkeletons('corpus', r.events);
-    const rendered = sks.map(render).join('\n');
+    const rendered = sks.map(renderSkeleton).join('\n');
     skeletonWindows += sks.length;
     sidechainWindows += sks.filter((s) => s.sidechainId !== undefined).length;
     elidedWindows += sks.filter((s) => s.elided !== undefined).length;
     const raw = Buffer.byteLength(readFileSync(f, 'utf8'));
     rawBytes += raw;
     skeletonBytes += Buffer.byteLength(rendered);
-    // Skeleton lines are emitted text, so they must satisfy the same no-op
-    // invariant as Event fields — the rendering is a second path to a leak.
+    // Skeleton lines are emitted text: the same no-op redaction invariant applies.
     if (redact(rendered).text !== rendered) {
       leaks.push({ file: f.replace(`${root}/`, ''), field: 'skeleton:render', before: rendered.slice(0, 200), after: '' });
     }
@@ -132,11 +94,7 @@ for (const f of files) {
   }
 }
 
-// ── Detectors ───────────────────────────────────────────────────────────────
-// `detectorFindings` is 0 while the registry is empty after the 2026-10-19
-// reset, and the gate still runs: it is what proves the runner, denominators
-// and token totals hold across every pinned corpus, and it is what will catch
-// the first real finding moving the baseline off zero.
+// Detectors
 const detectors = detectorsFor('all');
 const byDimension: Record<string, number> = {};
 let detFindings = 0;
@@ -178,7 +136,7 @@ console.log(`\nSIDECHAIN events: ${sidechainEvents}`);
 console.log(`\nunknown types:`, Object.keys(unknownTypes).length ? unknownTypes : '(none)');
 if (failures.length) { console.log('\nFAILURES:'); for (const f of failures.slice(0, 8)) console.log('  ✗', f); }
 
-// ── Leak gate ───────────────────────────────────────────────────────────────
+// Leak gate
 console.log(`\nleak check: ${totalEvents} events, ${leaks.length} field(s) redaction would still change`);
 if (leaks.length) {
   const byField: Record<string, number> = {};
@@ -191,7 +149,7 @@ if (leaks.length) {
   }
 }
 
-// ── Skeleton compression ────────────────────────────────────────────────────
+// Skeleton compression
 realRatios.sort((a, b) => a - b);
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
 const overTarget = realRatios.filter((r) => r > 0.10).length;
@@ -214,7 +172,7 @@ console.log(
 );
 console.log(`  tokens: output ${outputTokens} · cache creation ${cacheCreationTokens}`);
 
-// ── Baseline gate ───────────────────────────────────────────────────────────
+// Baseline gate
 const actual: Record<string, number> = {
   files: files.length,
   parsed: parsedFiles,

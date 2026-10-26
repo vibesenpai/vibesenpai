@@ -1,71 +1,23 @@
 #!/usr/bin/env node
 /**
- * The judge's positive control.
- *
- * Four constructed sessions — three containing an unambiguous instance of a
- * rubric dimension, one containing nothing — run through the real packet
- * builder and the real response gate.
- *
- * ── Why this exists ────────────────────────────────────────────────────────
- *
- * The judge returned `{"findings":[]}` on twelve real sessions, and that is two
- * very different results wearing the same face: a judge that cannot detect, or
- * a sample that contains nothing. Without a positive control there is no way to
- * tell them apart, and the tempting response — soften the prompt until findings
- * appear — would manufacture exactly the false positives this project keeps
- * burying detectors for.
- *
- * First run, after the packet numbering was fixed: **4/4 on both Haiku and
- * Sonnet, nothing dropped, and silence on the clean session.** So the machinery
- * works and the corpus is quiet, which is the far better of the two
- * explanations.
- *
- * ── What it guards ─────────────────────────────────────────────────────────
- *
- * The rubric and the packet are prompt text, which no type checks and no unit
- * test can hold to account. Reword a dimension, drop a window filter, renumber
- * the preamble — any of those can silently stop detection, and the only
- * evidence would be a quiet judge, which looks exactly like a quiet corpus.
- *
- * Run it after touching `src/judge.ts`. It costs one model call.
+ * The judge's positive control: constructed sessions, one per dimension plus clean ones, run
+ * through the real two-stage packet and gate. Tells "cannot detect" from "nothing to detect".
+ * Run after changing the judge prompt or packet; costs model calls.
  *
  *   node --experimental-strip-types scripts/judge-control.ts [model]
  */
 
 
-import { buildSession, parseExtract, parseLabels, renderExtract, renderLabel, type JudgeDimension } from '../src/judge.ts';
-import { callModel } from '../src/model.ts';
+import { parseExtract, parseLabels, renderExtract, renderLabel, type JudgeDimension } from '../src/judge/prompt.ts';
+import { buildSession } from '../src/judge/packet.ts';
+import { callModel } from '../src/judge/model.ts';
 import type { Event } from '../src/types.ts';
 
 type Control = { sessionId: string; expect: JudgeDimension | null; turns: Partial<Event>[] };
 
 /**
- * Deliberately blatant.
- *
- * A control that needs careful reading tests the reader, not the judge. These
- * ask only "can it detect at all", which is the question a silent result
- * cannot answer on its own.
- *
- * ── There is deliberately no `other` control ───────────────────────────────
- *
- * `other` ships — the escape hatch, their S8 — and two attempts at a control
- * for it both failed, informatively:
- *
- *   "developer asks about X, agent asks back about Y"
- *      -> judged `misread_intent`, and the judge was right: that IS "the agent
- *         misinterpreted what the developer wanted"
- *   "developer asks for a shell command, agent returns a JSON object"
- *      -> judged `constraint_violation`, also right under the current wording:
- *         a format asked for literally is an instruction stated literally
- *
- * So the four cover more than expected. A control whose expected answer the
- * judge can defensibly dispute is not a control — it is a gate that goes red
- * forever and teaches everyone to ignore the gate.
- *
- * `other` is therefore for shapes nobody has thought of, which is what it was
- * for. It fired 11 times across 319 labelled-clean sessions, so it is
- * reachable; it is just not constructible to order. Its **descriptors** are the
- * thing to read, and `JudgeFinding.otherDescriptor` now persists them.
+ * Deliberately blatant: these test whether the judge can detect at all.
+ * No `other` control: every attempt was defensibly labelled as another dimension.
  */
 export const CONTROLS: Control[] = [
   {
@@ -106,20 +58,8 @@ export const CONTROLS: Control[] = [
   },
   {
     /**
-     * **A real transcript, and the exact false positive that killed the rule
-     * version of this dimension.**
-     *
-     * From corpus session `054bd433`, turns 58-63, reproduced faithfully. The
-     * command is `test && lint`; exit 1 comes from **lint**, and the agent
-     * says so — "Tests pass, just a formatting issue" — then fixes it. That is
-     * accurate reporting, not a misreport.
-     *
-     * A structural rule cannot tell this from a lie: `exit code 1` beside a
-     * success claim is byte-identical either way, and only the failure text
-     * says which half of the `&&` broke. `src/detect/inaccurate-self-report.ts`
-     * died on precisely this shape, 0 true positives against 5 false ones.
-     *
-     * If the judge ever flags this, it has inherited the same defect.
+     * Real transcript (corpus `054bd433`, turns 58-63): exit 1 came from lint and the agent
+     * said so. The false positive that killed the rule version (GRAVEYARD.md); must stay clean.
      */
     sessionId: 'ctrl-honest-partial',
     expect: null,
@@ -136,8 +76,7 @@ export const CONTROLS: Control[] = [
     ],
   },
   {
-    // **The one that matters most.** A judge scoring 3/3 by reporting something
-    // everywhere is worthless, and this is the only row that can catch it.
+    // Catches a judge that reports something everywhere.
     sessionId: 'ctrl-clean',
     expect: null,
     turns: [
@@ -162,7 +101,7 @@ export function controlSessions(): ReturnType<typeof buildSession>[] {
       ts: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
       ...t,
     })) as Event[];
-    // Controls are constructed, so the "full text" is simply what they say.
+    // Constructed, so the full text is the summary.
     const full = new Map<number, string>();
     for (const e of events) if (e.textSummary !== undefined) full.set(e.seq, e.textSummary);
     return buildSession(c.sessionId, events, full);
@@ -183,11 +122,7 @@ async function main(): Promise<void> {
   const model = process.argv[2] ?? 'haiku';
   const sessions = controlSessions();
 
-  // ── Two stages, because that is what ships ───────────────────────────────
-  //
-  // This control existed to catch a prompt change going too far, and until now
-  // it exercised `renderPacket`/`parseResponse` — the single-pass path the
-  // product no longer uses. A gate guarding a path nobody runs is not a gate.
+  // Two stages, the path that ships.
   const extracted = parseExtract(call(renderExtract(sessions), model), sessions);
   const dropped = [...extracted.dropped];
   const findings =

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseTranscriptText } from '../src/parsers/claude-code.ts';
-import { buildSkeletons, toLines, render, estimateTokens } from '../src/skeleton.ts';
+import { buildSkeletons, toLines, renderSkeleton, estimateTokens } from '../src/skeleton.ts';
 import { SCHEMA } from '../src/schema.ts';
 import type { Event, SkeletonLine } from '../src/types.ts';
 
@@ -36,8 +36,6 @@ describe('skeleton — line mapping', () => {
   });
 
   it('folds a SUCCESSFUL tool result into its tool line', () => {
-    // This is where the compression comes from: a read that worked says nothing
-    // a detector needs.
     const { lines } = toLines([
       ev({ turnType: 'tool_use', uuid: 'a', toolName: 'Read', filePath: 'auth.ts' }),
       ev({ turnType: 'tool_result', uuid: 'b', toolCallId: 't1', exitCode: 0 }),
@@ -62,8 +60,6 @@ describe('skeleton — line mapping', () => {
   });
 
   it('promotes a git commit and a revert to meta lines', () => {
-    // Outcome classification is the input-starved part of the design, and these
-    // are the two `meta` kinds that would otherwise be unreachable.
     const { lines } = toLines([
       ev({ turnType: 'tool_use', uuid: 'a', toolName: 'Bash', command: 'git commit -m "fix"' }),
       ev({ turnType: 'tool_use', uuid: 'b', toolName: 'Bash', command: 'git reset --hard HEAD~1' }),
@@ -73,8 +69,7 @@ describe('skeleton — line mapping', () => {
   });
 
   it('keeps enough of a command to tell two invocations apart', () => {
-    // Two words collapsed 111 distinct `uv run <script>` calls into one target,
-    // destroying exactly the discrimination a detector needs.
+    // Two words once collapsed distinct `uv run <script>` calls into one target.
     const { lines } = toLines([
       ev({ turnType: 'tool_use', uuid: 'a', toolName: 'Bash', command: 'uv run scripts/ingest.py' }),
       ev({ turnType: 'tool_use', uuid: 'b', toolName: 'Bash', command: 'uv run scripts/report.py' }),
@@ -108,8 +103,7 @@ describe('skeleton — line mapping', () => {
   });
 
   it('drops an assistant record carrying no text', () => {
-    // It would render as a bare `A  …`, and any tool calls it held already have
-    // their own lines. 21.3% of lines on a tool-heavy real session.
+    // It would render as a bare `A  …`; its tool calls have their own lines.
     const { lines, dropped } = toLines([
       ev({ turnType: 'assistant_msg', uuid: 'a' }),
       ev({ turnType: 'assistant_msg', uuid: 'b', textSummary: 'actually saying something' }),
@@ -128,13 +122,12 @@ describe('skeleton — line mapping', () => {
   });
 
   it('carries the abandoned flag onto the line', () => {
-    // CLAUDE.md: abandoned work is flagged, never dropped — discarding it would
-    // hide that the work happened at all.
+    // Abandoned work is flagged, never dropped.
     const { lines } = toLines([
       ev({ turnType: 'user_prompt', uuid: 'a', textSummary: 'try again', abandoned: true }),
     ]);
     expect(lines[0]).toMatchObject({ abandoned: true });
-    expect(render({ ...stampLike(), sessionId: 's1', window: w(), lines })).toContain('[abandoned]');
+    expect(renderSkeleton({ ...stampLike(), sessionId: 's1', window: w(), lines })).toContain('[abandoned]');
   });
 });
 
@@ -194,8 +187,6 @@ describe('skeleton — windowing', () => {
 
 describe('skeleton — sidechains get their own windows', () => {
   it('separates a subagent thread from the main thread', () => {
-    // Merging would make every healthy parallel fan-out look like a reading
-    // spiral; dropping would leave 712 public-corpus events with no coverage.
     const events = [
       ev({ turnType: 'user_prompt', uuid: 'a', seq: 0, textSummary: 'go' }),
       ev({ turnType: 'tool_use', uuid: 'b', seq: 1, isSidechain: true, sidechainId: 'sc1', toolName: 'Read', filePath: 'x.ts' }),
@@ -212,9 +203,7 @@ describe('skeleton — sidechains get their own windows', () => {
 });
 
 describe('skeleton — token budget, with elision recorded', () => {
-  // Twelve short lines never approach 2K tokens, so this path would never run on
-  // real data. An untested elision rule is exactly how a skeleton silently drops
-  // the decisive turn.
+  // Short lines never hit 2K tokens on real data, so this path needs a forced test.
   const huge = 'x'.repeat(8000);
 
   it('elides to get under budget and records that it did', () => {
@@ -225,7 +214,7 @@ describe('skeleton — token budget, with elision recorded', () => {
     ];
     const sk = buildSkeletons('s1', events, { tokenBudget: 200 })[0]!;
     expect(sk.elided).toBeDefined();
-    expect(estimateTokens(render(sk))).toBeLessThanOrEqual(260); // budget + the notice
+    expect(estimateTokens(renderSkeleton(sk))).toBeLessThanOrEqual(260); // budget + the notice
   });
 
   it('never drops a user prompt or a failure to save budget', () => {
@@ -237,8 +226,8 @@ describe('skeleton — token budget, with elision recorded', () => {
     const sk = buildSkeletons('s1', events, { tokenBudget: 50 })[0]!;
     expect(kinds(sk.lines)).toContain('user');
     expect(kinds(sk.lines)).toContain('result');
-    expect(render(sk)).toContain('the decisive turn');
-    expect(render(sk)).toContain('FAIL here');
+    expect(renderSkeleton(sk)).toContain('the decisive turn');
+    expect(renderSkeleton(sk)).toContain('FAIL here');
   });
 
   it('prints the elision rather than hiding it', () => {
@@ -247,7 +236,7 @@ describe('skeleton — token budget, with elision recorded', () => {
       ev({ turnType: 'assistant_msg', uuid: 'b', seq: 1, textSummary: huge }),
     ];
     const sk = buildSkeletons('s1', events, { tokenBudget: 20 })[0]!;
-    expect(render(sk)).toMatch(/shortened or dropped \(token-budget\)/);
+    expect(renderSkeleton(sk)).toMatch(/shortened or dropped \(token-budget\)/);
   });
 
   it('leaves a window under budget completely alone', () => {
@@ -269,7 +258,7 @@ describe('skeleton — rendering', () => {
     ].join('\n');
 
     const r = parseTranscriptText(text);
-    const out = render(buildSkeletons('s1', r.events)[0]!);
+    const out = renderSkeleton(buildSkeletons('s1', r.events)[0]!);
 
     expect(out).toContain('U  fix the login bug');
     expect(out).toContain('→  Read auth.ts');
@@ -282,12 +271,7 @@ describe('skeleton — rendering', () => {
 
 describe('skeleton — compression is measured, not assumed', () => {
   it('reduces a realistic session to well under 10% of the raw JSONL', () => {
-    // Ratio is rendered-skeleton bytes over whole raw JSONL bytes — the same
-    // denominator scripts/verify-corpus.ts uses, so the two numbers are
-    // comparable. It is the *generous* reading, since the file also holds
-    // records the skeleton never claimed to cover; the gate compensates by
-    // asserting it only on sessions large enough for the ratio to mean
-    // anything.
+    // Rendered bytes over whole raw JSONL bytes, the same denominator as scripts/verify-corpus.ts.
     const records: string[] = [
       j({ type: 'user', uuid: 'p', parentUuid: null, message: { content: 'refactor the auth module and make the tests pass' } }),
     ];
@@ -310,7 +294,7 @@ describe('skeleton — compression is measured, not assumed', () => {
     const text = records.join('\n');
 
     const r = parseTranscriptText(text);
-    const rendered = buildSkeletons('s1', r.events).map(render).join('\n');
+    const rendered = buildSkeletons('s1', r.events).map(renderSkeleton).join('\n');
     const ratio = Buffer.byteLength(rendered) / Buffer.byteLength(text);
 
     expect(r.events.length).toBeGreaterThan(40);
@@ -324,9 +308,7 @@ describe('skeleton — compression is measured, not assumed', () => {
 });
 
 describe('skeleton — per-window accounting', () => {
-  // These go through buildSkeletons deliberately. The earlier `dropped` tests
-  // called toLines directly, which is why a thread total being stamped onto
-  // every window went unnoticed.
+  // Through buildSkeletons, not toLines, to catch per-window attribution.
   const threadWithDrops = (): Event[] => {
     const out: Event[] = [];
     for (let i = 0; i < 24; i++) {
@@ -340,12 +322,9 @@ describe('skeleton — per-window accounting', () => {
   it('counts drops per window, not once per thread', () => {
     const sk = buildSkeletons('s1', threadWithDrops(), { width: 12 });
     expect(sk).toHaveLength(2);
-    // Not 12/12: each dropped record is attributed to the line it precedes, and
-    // the first line has none before it while the thread's trailing drop joins
-    // the final window. 11 + 13 = 24, which is the property that matters.
+    // Each drop belongs to the line it precedes; the trailing drop joins the final window.
     expect(sk[0]!.dropped?.['system:cost-state']).toBe(11);
     expect(sk[1]!.dropped?.['system:cost-state']).toBe(13);
-    // The bug this replaces: the thread total stamped onto every window.
     expect(sk[0]!.dropped?.['system:cost-state']).not.toBe(24);
   });
 
@@ -372,13 +351,12 @@ describe('skeleton — per-window accounting', () => {
   });
 
   it('reports a non-zero elided count when only prose was stripped', () => {
-    // The first budget pass strips assistant text without removing lines.
-    // Reporting 0 would print "0 line(s) ..." into the evidence a user reads.
+    // The first budget pass strips prose without removing lines.
     const sk = buildSkeletons('s1', [
       ev({ turnType: 'user_prompt', uuid: 'a', seq: 0, textSummary: 'go' }),
       ev({ turnType: 'assistant_msg', uuid: 'b', seq: 1, textSummary: 'y'.repeat(4000) }),
     ], { tokenBudget: 60 })[0]!;
     expect(sk.elided!.lines).toBeGreaterThan(0);
-    expect(render(sk)).not.toContain('0 line(s)');
+    expect(renderSkeleton(sk)).not.toContain('0 line(s)');
   });
 });

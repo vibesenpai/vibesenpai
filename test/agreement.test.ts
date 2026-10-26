@@ -1,17 +1,4 @@
-/**
- * The surfaces must agree.
- *
- * This file exists because two of them did not, and it was found by reading
- * output rather than by a test: `standing` reported 23 findings while the HTML
- * report reported 22, because one summed occurrences and the other counted
- * grouped findings. A reader who opens both sees a discrepancy they cannot
- * explain, and the natural conclusion is that the tool is unreliable.
- *
- * Five surfaces render the same facts — `now`, `standing`, the text report, the
- * HTML report, and the session-start block — and every one of them built its
- * own totals. `leadSegments` is now the single place that turns those facts
- * into a sentence; these tests pin that it stays single.
- */
+/** The five surfaces must agree on totals; `leadSegments` is the single place that phrases them. */
 import { describe, expect, it } from 'vitest';
 import { leadSegments, type LeadFacts } from '../src/render.ts';
 
@@ -26,10 +13,7 @@ const facts = (over: Partial<LeadFacts> = {}): LeadFacts => ({
 
 describe('the lead attributes the price to the tier that produced it', () => {
   it('never implies the judge findings cost tokens', () => {
-    // The line used to read `11,000+ tokens written and discarded · 23
-    // findings`, which invites exactly one reading: that twenty-three findings
-    // cost eleven thousand tokens. Nineteen of them have no price at all —
-    // `costFor` handles `edit_retry` and `redundant_call` and nothing else.
+    // The token figure must not read as the cost of every finding: only some dimensions are priced.
     const seg = leadSegments(facts());
     expect(seg.rest).toContain('on 4 findings');
     expect(seg.rest).toContain('19 more flagged by a model');
@@ -56,8 +40,7 @@ describe('the lead attributes the price to the tier that produced it', () => {
   });
 
   it('keeps the denominator when nothing was found', () => {
-    // A clean bill of health, per PLAN.md:21. "no findings" alone reads as
-    // "we did not look"; the denominator is what makes it a real statement.
+    // "no findings" needs its denominator, or it reads as "we did not look".
     const seg = leadSegments(facts({ ruleCount: 0, judgedCount: 0, total: 0, wasted: 0 }));
     expect(seg.figure).toBeUndefined();
     expect(seg.rest).toBe('no findings across 2460 edits');

@@ -1,46 +1,6 @@
 /**
- * The store.
- *
- * ── Why a database at all ──────────────────────────────────────────────────
- *
- * Not size. The flat files this replaces total ~25 KB, and a heavy user reaches
- * a few megabytes — JSON is fine at that scale and would stay fine.
- *
- * It is that **every writer read-modify-writes whole state**, so the last write
- * wins and the others are lost. Measured on the real store:
- *
- *     two writers, each adding one ledger entry
- *     before: 12     after: 13     expected: 14
- *
- * That costs money and consent, not just tidiness:
- *
- * - A session marked judged by one writer is **un-marked** by another, so it is
- *   judged again. That is the double-spend this project has already patched
- *   once, with a marker that narrows the window rather than closing it.
- * - `judge --disable --apply` during a pass is **silently undone**: the pass
- *   holds a copy taken before you disabled it and writes the whole object back.
- *   A user turns the model off and the tool turns it back on.
- * - Token totals are read-modify-write too, so the spend figure we show is an
- *   under-count.
- *
- * ── Why SQLite, and why not DuckDB ─────────────────────────────────────────
- *
- * Workload shape, not availability. SQLite is **single-writer, multi-reader,
- * transactional**, which is exactly this pipeline: one detached producer and
- * several instant readers. DuckDB is faster at columnar scans over large data —
- * meaningless at this size — and is optimised for a single process, which is
- * the thing we need least. It is also a tens-of-megabyte native binary, and
- * **the plugin ships as a git clone with no `node_modules` and no install
- * step**, so anything needing compilation breaks the install story.
- *
- * `node:sqlite` is built in. `PLAN.md` chose it long before this file existed,
- * RC status and all, with `better-sqlite3` named as the fallback.
- *
- * ── Why this is the only module that imports it ────────────────────────────
- *
- * The module is a release candidate, and `DatabaseSync` is already a deprecated
- * alias for `Database`. One import site means one place to change when that
- * lands, and one place to swap for `better-sqlite3` if the RC API bites.
+ * The SQLite store. A database because concurrent writers lost updates as whole-state JSON;
+ * `node:sqlite` because it is built in and the plugin has no install step. The only module that imports it.
  */
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -48,10 +8,7 @@ import * as sqlite from 'node:sqlite';
 
 import { SCHEMA } from './schema.ts';
 
-/**
- * `Database` is the current name; `DatabaseSync` is the deprecated alias this
- * Node still ships. Prefer the new one so the rename is a no-op when it lands.
- */
+/** Prefer `Database`; `DatabaseSync` is the deprecated alias older Node ships. */
 type Ctor = new (path: string, options?: { timeout?: number }) => Db;
 const DatabaseCtor = ((sqlite as Record<string, unknown>)['Database'] ??
   (sqlite as Record<string, unknown>)['DatabaseSync']) as unknown as Ctor;
@@ -67,36 +24,8 @@ export type Db = {
   close(): void;
 };
 
-export const STORE_FILE = 'store.db';
+const STORE_FILE = 'store.db';
 
-/**
- * The schema.
- *
- * ── The grain, declared ────────────────────────────────────────────────────
- *
- * One row of `occurrence` is **one anchored instance** — the atomic fact. Not
- * a grouped finding, which is what the file it replaces stored:
- *
- *     edit_retry: 4 occurrences across 2 sessions, 3 files
- *       but only ONE subject was kept
- *
- * Two of those three files were simply gone, because the aggregation had been
- * frozen into storage and could not be asked a different question. Storing the
- * atomic row makes "top subject", "across N files" and per-session counts all
- * queries, and none of them privileged over the others.
- *
- * `finding` is deliberately **not a table**. It is a `GROUP BY dimension,
- * subject`, which is what a finding has always meant.
- *
- * ── Progress and cost are separate, and that is the point ──────────────────
- *
- * `ledger` says *we have results for these bytes*. `spend` says *we paid*.
- * Coupling them is the documented pitfall of incremental pipelines, and this
- * project hit it: the ledger advances after stage A, so a stage-B failure
- * loses those episodes permanently — the code says so in a comment and accepts
- * it. Separated, a stage-B failure re-bills rather than discarding results
- * already paid for, which for an evidence tool is the right way round.
- */
 /** Kept separate so the one migration below can rebuild exactly this. */
 const RUN_DDL = `
 CREATE TABLE IF NOT EXISTS run (
@@ -144,6 +73,35 @@ CREATE TABLE IF NOT EXISTS skipped (
 );
 `;
 
+/** How far into an oversized turn the judge has read; the byte ledger can only say "up to turn k". */
+const PART_DDL = `
+CREATE TABLE IF NOT EXISTS part_cursor (
+  session_id TEXT PRIMARY KEY,
+  seq        INTEGER NOT NULL,
+  chars      INTEGER NOT NULL,
+  at         TEXT NOT NULL
+);
+`;
+
+/**
+ * What the person set aside. A dismissal hides, never deletes (rule findings are re-derived each pass).
+ * Key by scope: `subject` = subjectId, `finding` = per-session id, `judged` = judge occurrence id.
+ * Ids and enums only, no transcript content.
+ */
+const DISMISSAL_DDL = `
+CREATE TABLE IF NOT EXISTS dismissal (
+  key       TEXT PRIMARY KEY,
+  scope     TEXT NOT NULL,   -- 'subject' | 'finding' | 'judged'
+  dimension TEXT NOT NULL,
+  reason    TEXT NOT NULL,   -- 'wrong' | 'noise' | 'cleared'
+  at        TEXT NOT NULL
+);
+`;
+
+/**
+ * One `occurrence` row is one anchored instance; a finding is a GROUP BY, not a table.
+ * `ledger` (progress) and `spend` (cost) are separate, so a failed stage re-bills rather than losing results.
+ */
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
@@ -219,39 +177,18 @@ CREATE TABLE IF NOT EXISTS spend (
 -- rather than inferred, which is what the session-start line needs.
 ${RUN_DDL}
 ${SKIPPED_DDL}
+${PART_DDL}
+${DISMISSAL_DDL}
 `;
 
-/**
- * Open the store, creating it if needed.
- *
- * `WAL` is what lets a reader read while the producer writes — without it the
- * whole pipeline serialises on the slowest thing in it. `busy_timeout` means a
- * writer waits for a lock instead of throwing, which matters because the
- * alternative is a hook that fails for a reason the user cannot act on.
- */
+/** Open the store, creating it if needed. WAL lets readers read during a write; busy_timeout waits rather than throws. */
 export function openStore(archive: string): Db {
   mkdirSync(archive, { recursive: true, mode: 0o700 });
   const file = join(archive, STORE_FILE);
   const db = new DatabaseCtor(file, { timeout: 5000 });
 
-  // ── 0600, because SQLite does not do it for us ───────────────────────────
-  //
-  // Every flat file in this archive is written `mode: 0o600`. `node:sqlite`
-  // takes no mode option and creates the database under the process umask —
-  // 022 on this machine — so the store arrived **world-readable** while the
-  // `index.json` beside it was `-rw-------`. It holds file paths and redacted
-  // transcript quotes, and `-wal` holds rows not yet committed.
-  //
-  // The directory is 0700, which contains it. That is not a reason to skip
-  // the file mode: the flat store set 0600 *inside* that same directory, and
-  // dropping a layer silently is how a privacy posture decays.
-  //
-  // One chmod covers all three files. Verified rather than assumed: with only
-  // `store.db` tightened, SQLite created `-wal` and `-shm` at 0600 as well,
-  // because it matches the companions to the main database's mode.
-  //
-  // Unconditional, so a store created before this fix is repaired on the next
-  // open — and wrapped, because Principle Zero outranks a tightened mode.
+  // node:sqlite takes no mode option and follows the umask, so set 0600; -wal and -shm follow it.
+  // Wrapped: Principle Zero outranks a tightened mode.
   try {
     chmodSync(file, 0o600);
   } catch {
@@ -262,71 +199,39 @@ export function openStore(archive: string): Db {
   db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA foreign_keys = ON');
 
-  // ── Only initialise when it is actually needed ──────────────────────────
-  //
-  // This used to run the DDL on every open, which looks harmless — the
-  // statements are `IF NOT EXISTS` — and is not: **DDL takes a write lock**,
-  // so merely opening the store to read it would block behind a producer's
-  // open transaction. A test caught it as `database is locked` after the full
-  // five-second busy timeout, which is exactly the failure a reader must never
-  // have.
-  //
-  // So the existence check is a read, and the write path runs once per store.
-  // ── The one migration this store has needed ─────────────────────────────
-  //
-  // `run` gained `session_id` and `duration_ms`, and `CREATE TABLE IF NOT
-  // EXISTS` does not add columns to a table that already exists. Recreating it
-  // is lossless **because it has never held a row** — it was declared for
-  // progress tracking and nothing ever wrote to it, which is precisely why it
-  // could be changed freely.
-  //
-  // Deliberately not a migration framework. One table, verified empty, with
-  // the reason it is safe stated rather than assumed; a second case would
-  // deserve a real one.
+  // DDL takes a write lock, so a plain open must not run it; check existence with a read.
+  // Hand-written migrations for `run` and `session`: add columns, rebuild only when empty.
   try {
     const cols = (db.prepare('PRAGMA table_info(run)').all() as { name: string }[]).map(
       (c) => c.name,
     );
-    // Missing entirely, or present with the old shape. The first case is not
-    // hypothetical: an earlier version of this migration dropped the table and
-    // left nothing behind, because the rebuild lived in a branch that only
-    // runs for a brand-new store.
+    // Missing entirely, or present with the old shape.
     if (cols.length === 0) {
       db.exec(RUN_DDL);
     } else if (!cols.includes('session_id') || !cols.includes('packet_tokens')) {
-      // ── Add columns when there are rows worth keeping ──────────────────
-      //
-      // The drop-and-recreate below is lossless only while the table is
-      // empty, which it no longer is once passes have recorded themselves.
-      // Refusing to drop was right and stopping there was not: the column
-      // never arrived, every read of it threw, and the whole Analysis block
-      // vanished behind a catch. Found by looking at the output.
+      // Add columns first: the drop below is lossless only on an empty table.
       for (const col of ['session_id TEXT', 'duration_ms INTEGER', 'packet_tokens INTEGER']) {
         const name = col.split(' ')[0] as string;
         if (cols.includes(name)) continue;
         try {
           db.exec(`ALTER TABLE run ADD COLUMN ${col}`);
         } catch {
-          // Already there, or a shape we cannot repair — the drop below is
-          // the fallback for an empty table.
+          // Already there, or unrepairable; the drop below covers an empty table.
         }
       }
       const held = (db.prepare('SELECT COUNT(*) c FROM run').get() as { c: number }).c;
       if (held === 0) {
-        // Dropped **and recreated right here**, not left to the DDL below:
-        // that path runs only when the whole store is uninitialised, which an
-        // existing store is not. The first version of this migration dropped
-        // the table and never rebuilt it, which a check of the real archive
-        // caught — `run columns:` came back empty.
+        // Recreated here: the DDL below runs only for an uninitialised store.
         db.exec('DROP TABLE run');
         db.exec(RUN_DDL);
       }
     }
     // Added after `run`, so an existing store has neither.
     db.exec(SKIPPED_DDL);
+    db.exec(PART_DDL);
+    db.exec(DISMISSAL_DDL);
 
-    // `session` gained `packet_tokens` the same way, and is empty for the same
-    // reason `run` was: declared early, wired late.
+    // `session` gained `packet_tokens` the same way.
     const scols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map(
       (c) => c.name,
     );
@@ -368,11 +273,7 @@ function initialised(db: Db): boolean {
 
 /**
  * Run `fn` inside one transaction, rolling back if it throws.
- *
- * `BEGIN IMMEDIATE` takes the write lock up front rather than on first write.
- * Deferred, two writers can both start, both read, and one then fails to
- * upgrade — which is the lost update this store exists to prevent, reproduced
- * with extra steps.
+ * `BEGIN IMMEDIATE` takes the write lock up front, so two writers cannot both read then lose an update.
  */
 export function transact<T>(db: Db, fn: () => T): T {
   db.exec('BEGIN IMMEDIATE');
@@ -390,14 +291,7 @@ export function transact<T>(db: Db, fn: () => T): T {
   }
 }
 
-/**
- * Record what a model call cost.
- *
- * Deliberately **not** in the same transaction as the findings. We paid the
- * moment the call returned, and that is true whether or not anything
- * downstream succeeded. Making the spend conditional on success is how a tool
- * ends up under-reporting what it charged someone.
- */
+/** Record what a model call cost. Deliberately outside the findings' transaction: we paid either way. */
 export function addSpend(
   db: Db,
   delta: { calls?: number; tokensIn?: number; tokensOut?: number },
@@ -421,13 +315,7 @@ export function readSpend(db: Db): { calls: number; tokensIn: number; tokensOut:
   };
 }
 
-/**
- * Advance how far a session has been analysed.
- *
- * `MAX` rather than assignment, so a pass that resumed from an older offset
- * cannot drag the watermark backwards — which would re-bill bytes already
- * paid for and reported.
- */
+/** Advance how far a session has been analysed. `MAX`, so a resumed pass never moves it backwards. */
 export function advanceLedger(db: Db, sessionId: string, bytes: number): void {
   db.prepare(
     `INSERT INTO ledger(session_id, judged_bytes, at) VALUES (?, ?, ?)
@@ -435,11 +323,6 @@ export function advanceLedger(db: Db, sessionId: string, bytes: number): void {
        SET judged_bytes = MAX(judged_bytes, excluded.judged_bytes),
            at = excluded.at`,
   ).run(sessionId, bytes, new Date().toISOString());
-}
-
-export function judgedBytes(db: Db, sessionId: string): number {
-  const row = db.prepare('SELECT judged_bytes FROM ledger WHERE session_id = ?').get(sessionId);
-  return row === undefined ? 0 : Number(row['judged_bytes']);
 }
 
 export type OccurrenceRow = {
@@ -454,14 +337,7 @@ export type OccurrenceRow = {
   at: string;
 };
 
-/**
- * Record occurrences.
- *
- * `ON CONFLICT DO UPDATE` rather than `INSERT`, because the id is a content
- * hash: a retried pass produces identical ids and must not duplicate anything.
- * That is the whole of our idempotency, and it comes free from a key the
- * project already had.
- */
+/** Record occurrences. Ids are content hashes, so upserting makes a retried pass idempotent. */
 export function putOccurrences(db: Db, rows: OccurrenceRow[]): void {
   const put = db.prepare(
     `INSERT INTO occurrence
@@ -499,72 +375,7 @@ export function putEvidence(
   for (const r of rows) put.run(r.occurrenceId, r.anchor, r.kind, r.quote ?? null);
 }
 
-/** Occurrences for one session, newest first. */
-export function occurrencesFor(db: Db, sessionId: string): OccurrenceRow[] {
-  return db
-    .prepare('SELECT * FROM occurrence WHERE session_id = ? ORDER BY at DESC')
-    .all(sessionId)
-    .map(toOccurrence);
-}
-
-/**
- * What a "finding" has always meant: a dimension and subject, with its count.
- *
- * A query rather than a table, which is what makes the other questions —
- * how many files, which session, how recent — answerable at all.
- */
-export function groupedFindings(
-  db: Db,
-  opts: { tier?: 'rule' | 'judge' } = {},
-): { dimension: string; subject: string; tier: string; occurrences: number; sessions: number }[] {
-  const where = opts.tier === undefined ? '' : 'WHERE tier = ?';
-  const params = opts.tier === undefined ? [] : [opts.tier];
-  return db
-    .prepare(
-      `SELECT dimension, subject, tier,
-              COUNT(*) AS occurrences,
-              COUNT(DISTINCT session_id) AS sessions
-       FROM occurrence ${where}
-       GROUP BY dimension, subject, tier
-       ORDER BY occurrences DESC`,
-    )
-    .all(...params)
-    .map((r) => ({
-      dimension: String(r['dimension']),
-      subject: String(r['subject']),
-      tier: String(r['tier']),
-      occurrences: Number(r['occurrences']),
-      sessions: Number(r['sessions']),
-    }));
-}
-
-function toOccurrence(r: Record<string, unknown>): OccurrenceRow {
-  return {
-    id: String(r['id']),
-    sessionId: String(r['session_id']),
-    dimension: String(r['dimension']),
-    tier: String(r['tier']) === 'judge' ? 'judge' : 'rule',
-    subject: String(r['subject']),
-    ...(r['anchor_uuid'] === null ? {} : { anchorUuid: String(r['anchor_uuid']) }),
-    confidence: String(r['confidence']),
-    ...(r['reason'] === null ? {} : { reason: String(r['reason']) }),
-    at: String(r['at']),
-  };
-}
-
-/**
- * Record that a pass has started, and what it is reading.
- *
- * ── Why a table and not the marker ─────────────────────────────────────────
- *
- * `judge.running` answers "is something running" and nothing else: it holds a
- * timestamp that is never read, carries no session id, is written by the
- * *spawner* rather than the pass, and is deleted by whichever pass exits
- * first. A reader cannot learn from it what is being read, how long it has
- * been going, or whether the thing in flight concerns them.
- *
- * This table was declared for exactly that and never written to.
- */
+/** Record that a pass has started and which session it is reading. */
 export function startRun(db: Db, kind: string, sessionId?: string): string {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   db.prepare(
@@ -586,12 +397,7 @@ export function endRun(
   ).run(new Date().toISOString(), status, durationMs ?? null, packetTokens ?? null, id);
 }
 
-/**
- * The pass in flight, if there is one.
- *
- * Bounded by `staleMs` for the same reason the marker is: a killed process
- * leaves its row open, and a reader must not wait for ever on a corpse.
- */
+/** The pass in flight, if any. Bounded by `staleMs`: a killed process leaves its row open. */
 export function currentRun(
   db: Db,
   staleMs: number,
@@ -614,13 +420,7 @@ export function currentRun(
   };
 }
 
-/**
- * How long a call really takes on this machine, from completed runs.
- *
- * Returns `undefined` until there is enough history to beat the constant,
- * because a mean of one is not a measurement. The median, not the mean: one
- * pathological session should not move the estimate everyone else sees.
- */
+/** Median duration of recent completed runs; `undefined` until there are `minRuns`. */
 export function measuredCallMs(db: Db, minRuns = 3): number | undefined {
   const rows = db
     .prepare('SELECT duration_ms FROM run WHERE duration_ms IS NOT NULL ORDER BY started_at DESC LIMIT 20')
@@ -631,22 +431,8 @@ export function measuredCallMs(db: Db, minRuns = 3): number | undefined {
 }
 
 /**
- * How long a pass takes **per token read**, from this machine's own history.
- *
- * ── Why a rate rather than a median ────────────────────────────────────────
- *
- * `measuredCallMs` took the median duration across recent runs regardless of
- * what they read, and the first three recorded were ~3s each on packets of
- * ~1,700 tokens. Multiplying that across a queue whose largest session is
- * 66,196 tokens produced an estimate calibrated on its smallest members —
- * which is how the surface came to claim "about 3 minutes" for a backlog of
- * 217,567 tokens.
- *
- * Duration is only interpretable against the size it was spent on, so the two
- * are recorded together and divided.
- *
- * Returns `undefined` until two runs of **different** sizes exist: a rate from
- * one point, or from several of the same size, is the same mistake again.
+ * Median ms per packet token over recent runs; duration means nothing without the size it read.
+ * `undefined` until runs of at least two different sizes exist.
  */
 export function measuredMsPerToken(db: Db, minRuns = 2): number | undefined {
   const rows = db
@@ -663,26 +449,41 @@ export function measuredMsPerToken(db: Db, minRuns = 2): number | undefined {
   return rates[Math.floor(rates.length / 2)];
 }
 
-/**
- * Mark a session no packet can hold.
- *
- * ── Why this is not a breaker failure ──────────────────────────────────────
- *
- * It used to be. A session whose smallest unit exceeds the budget called
- * `recordFailure` and returned without advancing the watermark, so the drain
- * selected it again on the next idle turn boundary — and five of those trip
- * the breaker, which disables the judge **entirely**.
- *
- * The breaker exists for transient faults: the model unreachable, a timeout, a
- * malformed reply. A turn that is simply too large is a permanent property of
- * the data, and counting it as a fault conflates "something is broken" with
- * "this one does not fit".
- */
+/** Mark a session no packet can hold. Not a breaker failure: the breaker is for transient faults. */
 export function markSkipped(db: Db, sessionId: string, reason: string): void {
   db.prepare(
     'INSERT INTO skipped(session_id, reason, at) VALUES (?, ?, ?) ' +
       'ON CONFLICT(session_id) DO UPDATE SET reason = excluded.reason, at = excluded.at',
   ).run(sessionId, reason, new Date().toISOString());
+}
+
+/** A session that has been read is not skipped, whatever an older pass decided. */
+export function unmarkSkipped(db: Db, sessionId: string): void {
+  db.prepare('DELETE FROM skipped WHERE session_id = ?').run(sessionId);
+}
+
+/** Where to resume inside an oversized turn; `undefined` clears it. */
+export function setPartCursor(
+  db: Db,
+  sessionId: string,
+  cursor: { seq: number; chars: number } | undefined,
+): void {
+  if (cursor === undefined) {
+    db.prepare('DELETE FROM part_cursor WHERE session_id = ?').run(sessionId);
+    return;
+  }
+  db.prepare(
+    'INSERT INTO part_cursor(session_id, seq, chars, at) VALUES (?, ?, ?, ?) ' +
+      'ON CONFLICT(session_id) DO UPDATE SET seq = excluded.seq, chars = excluded.chars, at = excluded.at',
+  ).run(sessionId, cursor.seq, cursor.chars, new Date().toISOString());
+}
+
+export function partCursors(db: Db): Record<string, { seq: number; chars: number }> {
+  const out: Record<string, { seq: number; chars: number }> = {};
+  for (const r of db.prepare('SELECT session_id, seq, chars FROM part_cursor').all()) {
+    out[String(r['session_id'])] = { seq: Number(r['seq']), chars: Number(r['chars']) };
+  }
+  return out;
 }
 
 /** Sessions the drain should pass over, with why. */
@@ -695,25 +496,30 @@ export function skippedSessions(db: Db): { sessionId: string; reason: string }[]
   ).map((r) => ({ sessionId: r.session_id, reason: r.reason }));
 }
 
-/**
- * Record what a session will cost the judge to read.
- *
- * Written by the **standing** pass, which parses every transcript anyway and
- * spends no model tokens doing it. The judge then needs no estimate, and
- * neither does the surface that reports how long the queue will take.
- */
-export function putSessionCost(
-  db: Db,
-  rows: { id: string; project: string; sizeBytes: number; packetTokens: number }[],
-): void {
+/** What a session will cost the judge to read, written by the standing pass (no model tokens). */
+export type SessionCostRow = {
+  id: string;
+  project: string;
+  sizeBytes: number;
+  packetTokens: number;
+  /** The session's own span, from its events. Absent when no event carries a time. */
+  firstTs?: string;
+  lastTs?: string;
+};
+
+export function putSessionCost(db: Db, rows: SessionCostRow[]): void {
+  // Overwrite the span, not widen it: the latest parse of a live session is the one to trust.
   const put = db.prepare(
-    'INSERT INTO session(id, project, size_bytes, updated_at, packet_tokens) ' +
-      'VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET ' +
+    'INSERT INTO session(id, project, first_ts, last_ts, size_bytes, updated_at, packet_tokens) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET ' +
+      'first_ts = excluded.first_ts, last_ts = excluded.last_ts, ' +
       'size_bytes = excluded.size_bytes, packet_tokens = excluded.packet_tokens, ' +
       'updated_at = excluded.updated_at',
   );
   const at = new Date().toISOString();
-  for (const r of rows) put.run(r.id, r.project, r.sizeBytes, at, r.packetTokens);
+  for (const r of rows) {
+    put.run(r.id, r.project, r.firstTs ?? null, r.lastTs ?? null, r.sizeBytes, at, r.packetTokens);
+  }
 }
 
 /** What each session will cost, for sizing the queue. */
@@ -722,4 +528,70 @@ export function sessionCosts(db: Db): Map<string, number> {
     .prepare('SELECT id, packet_tokens FROM session WHERE packet_tokens IS NOT NULL')
     .all() as { id: string; packet_tokens: number }[];
   return new Map(rows.map((r) => [r.id, r.packet_tokens]));
+}
+
+export type DismissScope = 'subject' | 'finding' | 'judged';
+/** `wrong` leaves every count; `noise` and `cleared` are hidden but still counted. */
+export type DismissReason = 'wrong' | 'noise' | 'cleared';
+
+export type DismissalRow = {
+  key: string;
+  scope: DismissScope;
+  dimension: string;
+  reason: DismissReason;
+  at: string;
+};
+
+/** Record dismissals. Re-dismissing a key keeps the newer, more specific reason. */
+export function putDismissals(db: Db, rows: DismissalRow[]): void {
+  const put = db.prepare(
+    'INSERT INTO dismissal(key, scope, dimension, reason, at) VALUES (?, ?, ?, ?, ?) ' +
+      'ON CONFLICT(key) DO UPDATE SET reason = excluded.reason, at = excluded.at',
+  );
+  for (const r of rows) put.run(r.key, r.scope, r.dimension, r.reason, r.at);
+}
+
+/** Undo. Returns how many were actually there, so "restored 0" is not a lie. */
+export function removeDismissals(db: Db, keys: string[]): number {
+  const del = db.prepare('DELETE FROM dismissal WHERE key = ?');
+  let n = 0;
+  for (const k of keys) {
+    const before = db.prepare('SELECT 1 FROM dismissal WHERE key = ?').get(k);
+    if (before === undefined) continue;
+    del.run(k);
+    n += 1;
+  }
+  return n;
+}
+
+export function readDismissals(db: Db): DismissalRow[] {
+  return (
+    db.prepare('SELECT key, scope, dimension, reason, at FROM dismissal ORDER BY at DESC').all() as {
+      key: string;
+      scope: string;
+      dimension: string;
+      reason: string;
+      at: string;
+    }[]
+  ).map((r) => ({
+    key: r.key,
+    scope: r.scope as DismissScope,
+    dimension: r.dimension,
+    reason: r.reason as DismissReason,
+    at: r.at,
+  }));
+}
+
+/** Open the store, run `fn`, close it. Any failure reads as `undefined`. */
+export function withStore<T>(archive: string, fn: (db: Db) => T): T | undefined {
+  try {
+    const db = openStore(archive);
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return undefined;
+  }
 }

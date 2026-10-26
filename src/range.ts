@@ -1,49 +1,24 @@
+import { isoDay } from './format.ts';
 /**
- * Date ranges for the retrospective surface, and the depth each range can
- * honestly be answered at.
- *
- * ── Why depth is a first-class output ────────────────────────────────────────
- *
- * We keep no transcript copies, so history is bounded by the harness's TTL. A
- * range reaching back before the first scan cannot be answered with tool calls
- * and outcomes — only with prompts, from `history.jsonl`, which survives
- * cleanup.
- *
- * The tempting behaviour is to return what we have and say nothing. That is the
- * one thing we must not do: a report covering September that silently analysed
- * only the last six days reads as "you improved", when the truth is "we cannot
- * see September". So every range is split into the part we can answer fully and
- * the part we can only answer shallowly, and both are labelled.
- *
- * This module is pure — no clock, no filesystem. The current time and the
- * catalogue's coverage arrive as parameters, so labelling is testable without
- * mocking time.
+ * Date ranges for the retrospective surface, each split by the depth it can be answered at,
+ * so missing history is labelled rather than read as improvement. Pure: no clock, no filesystem.
  */
 
-export type Depth =
+type Depth =
   /** Tool calls, outcomes, every detector. Within the catalog's coverage. */
   | 'full'
   /** Prompts only, from `history.jsonl`. Before the first scan. */
   | 'prompt-level'
   /** Nothing survives for this period. Reported, never silently empty. */
   | 'none'
-  /**
-   * We have not looked yet. Distinct from `none` on purpose: telling someone
-   * their transcripts were deleted when in fact no scan has run is a false
-   * cause, and it sends them looking for data loss that never happened.
-   */
+  /** No scan has run yet. Distinct from `none`, which would imply data loss. */
   | 'unscanned';
 
 export type DateRange = { from: Date; to: Date };
 
-export type RangeSegment = DateRange & { depth: Depth };
+type RangeSegment = DateRange & { depth: Depth };
 
-/**
- * Parse `--last 7d` / `30d` / `12w` / `6m`.
- *
- * Returns undefined rather than throwing on a malformed value, so the caller
- * decides whether that is a usage error or a fallback.
- */
+/** Parse `--last 7d` / `30d` / `12w` / `6m`. Undefined, not a throw, on a malformed value. */
 export function parseLast(spec: string, now: Date): DateRange | undefined {
   const m = /^(\d+)([dwm])$/.exec(spec.trim());
   if (m === null) return undefined;
@@ -67,22 +42,17 @@ export function parseDate(spec: string): Date | undefined {
   return dt;
 }
 
-export type RangeInput = {
+type RangeInput = {
   last?: string;
   since?: string;
   until?: string;
 };
 
-export type RangeResult =
+type RangeResult =
   | { ok: true; range: DateRange }
   | { ok: false; error: string };
 
-/**
- * Resolve the range flags into one window.
- *
- * `--last` is mutually exclusive with `--since`/`--until`: accepting both would
- * force a precedence rule that nobody could guess from the output.
- */
+/** Resolve the range flags into one window. `--last` excludes `--since`/`--until`. */
 export function resolveRange(input: RangeInput, now: Date): RangeResult {
   const hasExplicit = input.since !== undefined || input.until !== undefined;
 
@@ -98,7 +68,7 @@ export function resolveRange(input: RangeInput, now: Date): RangeResult {
   }
 
   if (!hasExplicit) {
-    // A default is better than a required flag here: the common case is "recent".
+    // Default: the last 7 days.
     return { ok: true, range: parseLast('7d', now) as DateRange };
   }
 
@@ -121,17 +91,8 @@ export function resolveRange(input: RangeInput, now: Date): RangeResult {
   return { ok: true, range };
 }
 
-export type CoverageInput = {
-  /**
-   * The periods catalogued transcripts actually cover — one interval per
-   * session, in any order, overlaps allowed.
-   *
-   * A single "data starts here" boundary was tried first and is wrong: on real
-   * data this machine has one session on 23 August and three from 12 October,
-   * with **nothing in September**. A boundary at the earliest record would
-   * report 49 days of full depth over a month that holds no sessions at all —
-   * the same false claim the depth labelling exists to prevent, just inverted.
-   */
+type CoverageInput = {
+  /** One interval per session, any order, overlaps allowed, so gaps between sessions stay visible. */
   covered: DateRange[];
   /** True once at least one session is catalogued. */
   scanned: boolean;
@@ -158,16 +119,11 @@ function mergeRanges(ranges: DateRange[]): DateRange[] {
 }
 
 /**
- * Split a range into the parts we can answer fully and the parts we cannot.
- *
- * Gaps between sessions are reported, not glossed. Segments come back in
- * chronological order and never overlap. An empty array is impossible — a range
- * always gets at least one segment, because "we have nothing for this period" is
- * an answer and silence is not.
+ * Split a range into fully and shallowly answerable parts: chronological, non-overlapping,
+ * and never empty.
  */
 export function segmentByDepth(range: DateRange, cov: CoverageInput): RangeSegment[] {
-  // The shallow floor differs by *why* we have nothing: never looked, versus
-  // looked and the transcripts are gone.
+  // Never looked, versus looked and found nothing.
   const shallow: Depth = cov.hasPromptHistory
     ? 'prompt-level'
     : cov.scanned
@@ -205,23 +161,8 @@ export function segmentByDepth(range: DateRange, cov: CoverageInput): RangeSegme
 
 const DAY = 86_400_000;
 
-function iso(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/** How many days a segment spans, rounded up, minimum 1. */
-export function spanDays(seg: DateRange): number {
-  return Math.max(1, Math.ceil((seg.to.getTime() - seg.from.getTime()) / DAY));
-}
-
-/**
- * Human duration for a segment.
- *
- * Sub-day spans are not rounded up to `1d`: the gap between the last session and
- * now is routinely a few hours, and printing "1d no data" for it invents most of
- * a day of missing history.
- */
-export function spanLabel(seg: DateRange): string {
+/** Human duration for a segment. Sub-day spans show hours, not a rounded-up `1d`. */
+function spanLabel(seg: DateRange): string {
   const ms = seg.to.getTime() - seg.from.getTime();
   if (ms < DAY) {
     const hours = Math.round(ms / 3_600_000);
@@ -231,19 +172,13 @@ export function spanLabel(seg: DateRange): string {
 }
 
 /**
- * The coverage notice printed above a report.
- *
- * Every line states what we have, never a cause we cannot establish. `none`
- * deliberately does **not** say "the harness deleted these": a gap between
- * sessions is far more often a period nobody worked than one where data was
- * lost, and we have no way to tell the two apart for any period before our
- * first scan. Blaming deletion for a quiet weekend is the same class of error
- * as claiming coverage we do not have.
+ * The coverage notice printed above a report. States what we have, never a cause: `none`
+ * does not claim deletion, since a gap is usually a period nobody worked.
  */
 export function describeCoverage(segments: RangeSegment[]): string[] {
   const out: string[] = [];
   for (const s of segments) {
-    const period = `${iso(s.from)} → ${iso(s.to)}`;
+    const period = `${isoDay(s.from)} → ${isoDay(s.to)}`;
     const span = spanLabel(s);
     switch (s.depth) {
       case 'full':

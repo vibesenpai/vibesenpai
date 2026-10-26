@@ -1,11 +1,13 @@
 # agentsensei
 
+<p align="center"><img src="assets/brand/hero-16x9.jpg" width="720" alt="The mascot: an old sensei in a straw hat, pointing at turn 41 in a transcript, where an edit was refused because the file was not read first."></p>
+
 [![CI](https://github.com/crozzfire/agentsensei/actions/workflows/ci.yml/badge.svg)](https://github.com/crozzfire/agentsensei/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen.svg)](package.json)
 
-**See what your coding agent's mistakes cost you — in tokens, with the exact
-turns, using the AI you already pay for.**
+**Find out why your agents failed you.** It reads your own sessions and shows
+you the exact turns, what you'd asked for, and what it cost.
 
 Your agent edits a file it hasn't read. The harness refuses. It reads the file
 and tries again. That round trip cost you tokens, it happens in **one session in
@@ -77,8 +79,8 @@ thing you never notice in the moment and that costs real tokens.
   is *silver agreement*, not precision, because those labels were themselves
   model-produced. There is no gold tier yet, so there is no headline accuracy
   figure, and we will not invent one.
-- **One thing at a time.** `fix` returns a single change, or says plainly that
-  no fix exists. A tool that hands you six things to fix has handed you nothing
+- **One recommendation at a time.** `fix` returns a single recommendation, or
+  says plainly that no fix exists. A tool that hands you six things to fix has handed you nothing
   to do.
 
 Your transcripts are read in place — `scan` prints `copied nothing` and means
@@ -106,7 +108,7 @@ You get three commands:
 
 ```
 /agentsensei:insights              what happened in this session
-/agentsensei:fix              the one change worth making
+/agentsensei:fix              a recommendation, with its evidence
 /agentsensei:report  a self-contained HTML report
 ```
 

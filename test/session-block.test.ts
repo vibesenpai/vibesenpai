@@ -1,15 +1,9 @@
-/**
- * The session-start report.
- *
- * This prints at the top of every session through `systemMessage`, which
- * reaches the user and not the model. It is the most-seen output the tool has,
- * so these tests are mostly about restraint: what it refuses to say, and how
- * short it stays.
- */
+/** The session-start `systemMessage` block: the most-seen output, so mostly tests of restraint. */
 
 import { describe, expect, it } from 'vitest';
-import { costLine, dimensionLine, MAX_DIMENSIONS, reasonLabel, reasonLines, reportBlock } from '../src/report-line.ts';
+import { cacheLine, dimensionLine, MAX_DIMENSIONS, reasonLines, reportBlock } from '../src/session-block.ts';
 import type { Standing } from '../src/standing.ts';
+import { reasonLabel } from '../src/detect/labels.ts';
 
 const base = (over: Partial<Standing> = {}): Standing => ({
   v: 1,
@@ -35,7 +29,6 @@ const base = (over: Partial<Standing> = {}): Standing => ({
 describe('report — the real standing from this machine', () => {
   it('produces the agreed block', () => {
     const out = reportBlock(base(), '/agentsensei for the exact turns');
-    // The header now carries the news rather than only naming the tool.
     expect(out).toContain('agentsensei · your last 4 sessions');
     expect(out).toContain('4 edits were rejected and retried, across 3 files');
     expect(out).toContain('most often rosy-seeking-feather.md');
@@ -45,20 +38,17 @@ describe('report — the real standing from this machine', () => {
   });
 
   it('starts on its own line, so it does not run on from the harness prefix', () => {
-    // The harness renders `SessionStart:startup says:` immediately before this,
-    // and without the newline the first line read "says: agentsensei · …".
+    // The harness prints `SessionStart:startup says:` right before this, so start on a new line.
     expect(reportBlock(base()).startsWith('\n')).toBe(true);
   });
 
   it('answers "4 what edits?" by naming the worst file', () => {
-    // The first reader's actual question. One name is enough to recognise;
-    // the rest stays a count so the block height does not grow with the files.
+    // One name to recognise; the rest stays a count so the block does not grow.
     expect(reportBlock(base())).toContain('rosy-seeking-feather.md');
   });
 
   it('keeps every line narrow enough not to wrap', () => {
-    // Measured against a real terminal: ~70 columns available. An earlier
-    // version ran to 87 and wrapped mid-sentence.
+    // ~70 columns are available in a real terminal.
     const lines = reportBlock(base(), '/agentsensei for the exact turns').split('\n');
     expect(Math.max(...lines.map((l) => l.length))).toBeLessThanOrEqual(70);
   });
@@ -71,8 +61,7 @@ describe('report — the real standing from this machine', () => {
 
 describe('report — what it refuses to say', () => {
   it('uses no imperative verb and no severity word', () => {
-    // Same rule the ambient nudge had: a tool that nags about something it is
-    // occasionally wrong about gets uninstalled. Advice lives in `now`.
+    // No advice here; advice lives in `now`.
     const out = reportBlock(base()).toLowerCase();
     for (const nag of ['fix', 'should', 'must', 'avoid', 'warning', 'error', 'bad', '!']) {
       expect(out, `must not contain "${nag}"`).not.toContain(nag);
@@ -87,24 +76,20 @@ describe('report — what it refuses to say', () => {
   });
 
   it('never mentions cacheRead, however tempting a ratio looks', () => {
-    // It re-counts the whole prefix per call, so any ratio on it is pinned near
-    // 1 by construction — p10 0.901 to p90 0.985 across the corpus.
+    // No cache ratio: it is pinned near 1 by construction (DECISIONS.md D49).
     const out = reportBlock(base());
     expect(out).not.toMatch(/hit rate|cache read|cacheRead/i);
   });
 
   it('never mentions file churn', () => {
-    // Measured at 15% correlation against a 9% base rate, and half the
-    // top-churn paths are files whose purpose is to be rewritten. Orientation
-    // does not earn the one place everybody sees.
+    // File churn is not established as waste (GRAVEYARD.md).
     expect(reportBlock(base())).not.toMatch(/rewritten|churn|version/i);
   });
 });
 
 describe('report — the empty and edge cases', () => {
   it('says nothing at all before the first pass has run', () => {
-    // The install just happened and the detached pass is still going. Silence
-    // is right: it will have something next time.
+    // The install just happened and the detached pass is still running: silence.
     expect(reportBlock(undefined)).toBe('');
   });
 
@@ -117,18 +102,16 @@ describe('report — the empty and edge cases', () => {
   });
 
   it('stays silent about a normal cost even with no findings', () => {
-    // Below the corpus p90 the line said "you are normal" every session. The
-    // person who built the metric could not read it; now its presence is the
-    // signal.
+    // The cost line appears only when unusual; its presence is the signal.
     const out = reportBlock(base({ dimensions: [], reasons: {} }));
     expect(out).not.toMatch(/re-ingest|context/i);
     expect(out).toContain('nothing to flag');
   });
 
-  it('speaks up when the cost is genuinely unusual', () => {
-    const hot = base({ dimensions: [], reasons: {}, tokens: { output: 1000, cacheCreation: 200_000 } });
+  it('speaks up when the cache was rebuilt', () => {
+    const hot = base({ dimensions: [], reasons: {}, rebuilds: { count: 3, tokens: 2_400_000 } });
     const out = reportBlock(hot);
-    expect(out).toContain('rebuilt its context far more often than usual');
+    expect(out).toContain('The cache was rebuilt from scratch 3 times');
     expect(out).not.toMatch(/\d+(\.\d+)?×/); // no ratio to decode
   });
 
@@ -152,30 +135,30 @@ describe('report — the empty and edge cases', () => {
     expect(reportBlock(base({ unreadable: 2 }))).toContain('2 sessions could not be read');
   });
 
-  it('says an outlier is unusual without calling it bad', () => {
-    const out = costLine(base({ tokens: { output: 1000, cacheCreation: 200_000 } }));
-    expect(out).toContain('far more often than usual');
-    expect(out).not.toMatch(/high|excessive|too much|bad|wrong/i);
+  it('speaks only of rebuilds, in plain words and with no mark', () => {
+    // No severity on the live surface (CLAUDE.md Principle One), so no `!`.
+    const out = cacheLine(base({ rebuilds: { count: 2, tokens: 1_700_000 } }));
+    expect(out).toBe('The cache was rebuilt from scratch 2 times — 1.7M tokens written again');
+    expect(out).not.toMatch(/!|high|excessive|too much|bad|wrong|should/i);
   });
 
-  it('is silent below the threshold and with no token data', () => {
-    expect(costLine(base())).toBe(''); // 7.5x, below p90
-    expect(costLine(base({ tokens: { output: 0, cacheCreation: 0 } }))).toBe('');
+  it('is silent without rebuilds, however high the cache-write ratio', () => {
+    // Not a p90 cut, which flags 10% of anything by construction.
+    expect(cacheLine(base({ tokens: { output: 1000, cacheCreation: 200_000 } }))).toBe('');
+    expect(cacheLine(base({ rebuilds: { count: 0, tokens: 0 } }))).toBe('');
   });
 });
 
 describe('report — reason keys become English', () => {
   it('translates every key the label tier can produce', () => {
-    // The key is an identifier, not language. A reader should not have to
-    // decode `not-read-first` at the top of every session.
+    // The reason key is an identifier; show words.
     for (const key of ['not-read-first', 'string-not-found', 'stale-read', 'ambiguous-target']) {
       expect(reasonLabel(key)).not.toContain('-');
     }
   });
 
   it('degrades an unknown key rather than dropping it', () => {
-    // A harness rewording produces an unrecognised reason; it must still read
-    // as something, because the finding behind it still stands.
+    // An unrecognised reason still reads as something: the finding stands.
     expect(reasonLabel('some-new-thing')).toBe('some new thing');
   });
 
@@ -190,10 +173,7 @@ describe('report — reason keys become English', () => {
 });
 
 describe('the session-start block can see the model tier', () => {
-  // This block is the most-seen output in the tool — it opens every session —
-  // and it reported one tier of two. `Standing` is persisted state built by the
-  // detector accumulator, so it will never hold judge findings; they arrive as
-  // a tally the caller reads from the judge store.
+  // Judge findings arrive as a tally from the judge store; `Standing` never holds them.
   const tally = [
     { dimension: 'misread_intent', count: 5 },
     { dimension: 'constraint_violation', count: 5 },
@@ -207,8 +187,7 @@ describe('the session-start block can see the model tier', () => {
   });
 
   it('keeps itself to one line, whatever the dimension count', () => {
-    // Five dimensions spelled out would swamp a block whose whole virtue is
-    // being short enough to read at the top of a session.
+    // Spelling out every dimension would swamp a short block.
     const out = reportBlock(base(), undefined, tally);
     const judged = out.split('\n').filter((l) => l.includes('flagged by a model'));
     expect(judged).toHaveLength(1);
@@ -216,8 +195,7 @@ describe('the session-start block can see the model tier', () => {
   });
 
   it('does not say "nothing to flag" when the judge found something', () => {
-    // The empty-standing path. Before, a session whose only findings were the
-    // judge's read as a clean bill of health.
+    // Regression: a session with only judge findings read as clean.
     const empty = { ...base(), dimensions: [], reasons: {} };
     const out = reportBlock(empty, undefined, tally);
     expect(out).not.toContain('nothing to flag');

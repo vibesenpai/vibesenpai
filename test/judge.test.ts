@@ -1,22 +1,12 @@
-/**
- * `src/judge.ts` — and above all, what it refuses.
- *
- * A judge is a detector whose author cannot be code-reviewed, so the gate is on
- * the way out. These tests exist because the very first real judge response
- * invented its evidence: Haiku reported a `constraint_violation` citing turn 4
- * of a session whose packet starts at turn 400, and turn 4 is a
- * `file-history-snapshot` that could not support any claim about a developer.
- * The anchor check dropped it, which is the only reason that run produced
- * nothing instead of something plausible and false.
- */
+/** The judge's packet builder and leak gate, and above all what they refuse. */
 
 import { describe, expect, it } from 'vitest';
 import { redact } from '../src/redact.ts';
-import { buildPacket, renderSession } from '../src/packet.ts';
+import { wouldLeak } from '../src/judge/model.ts';
 import {
-  buildSession, CARRY_MAX_OPEN_FAILURES, openFailuresBefore,
-  PREAMBLE_PROMPT_MAX, renderExtract, type JudgePacketSession,
-} from '../src/judge.ts';
+  buildPacket, renderSession, buildSession, CARRY_MAX_OPEN_FAILURES, estimateTokens, largestFittingWindow, openFailuresBefore, partOfTurn, PREAMBLE_PROMPT_MAX, type JudgePacketSession,
+} from '../src/judge/packet.ts';
+import { renderExtract } from '../src/judge/prompt.ts';
 
 /** A packet whose turns really contain the text a finding must quote. */
 const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => ({
@@ -31,8 +21,7 @@ const packet = (over: Partial<JudgePacketSession> = {}): JudgePacketSession => (
       },
       {
         role: 'AGENT', seqs: [10, 11, 12], text: 'on it\n\n[Bash] pnpm add left-pad',
-        // Two constituents: the prose at 10, the call at 12. A quote from the
-        // call must resolve to 12, not to the block start.
+        // A quote from the call must resolve to 12, not to the block start.
         parts: [{ seq: 10, text: 'on it' }, { seq: 12, text: '[Bash] pnpm add left-pad' }],
       },
     ],
@@ -54,9 +43,7 @@ describe('openFailuresBefore', () => {
   });
 
   it('forgets a failure a later success resolved', () => {
-    // Deliberately over-forgiving: a stale entry invites the judge to hunt for
-    // a claim contradicting a failure that was already fixed, and inviting a
-    // false finding is worse than missing one.
+    // Deliberately over-forgiving: a stale entry would invite a false finding.
     const events = [
       ev(1, { turnType: 'tool_result', toolName: 'Bash', filePath: '/a.ts', isError: true }),
       ev(2, { turnType: 'tool_result', toolName: 'Bash', filePath: '/a.ts', isError: false }),
@@ -79,9 +66,7 @@ describe('openFailuresBefore', () => {
 
 describe('the packet', () => {
   it('sends the whole session, not a filtered slice of it', () => {
-    // The old packet kept only prompt-bearing windows, which showed the judge
-    // **3-7%** of a long session — it was asked what went wrong with work it
-    // could not see. Merging and tiering replaced filtering.
+    // Every turn is shown; merging and tiering replaced filtering to prompt windows.
     const events = [
       { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: 'do the thing' },
       { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'tool_use', toolName: 'Bash', command: 'pnpm test' },
@@ -100,31 +85,24 @@ describe('the packet', () => {
       { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'user_prompt', textSummary: 'no new deps' },
     ];
     const s = buildSession('s1', events as never, new Map());
-    // The cross-window constraint memory: a rule stated early must be visible
-    // when judging late. ~288 tokens at p50 buys the largest dimension.
+    // A rule stated early must be visible when judging late.
     expect(s.prompts).toHaveLength(2);
     expect(s.prompts[0]?.text).toHaveLength(PREAMBLE_PROMPT_MAX);
     expect(s.prompts[1]?.text).toBe('no new deps');
-    // Labelled by turn, so the packet has ONE numbering scheme. Bracket
-    // indices made models cite `[3]` as turn 3.
+    // Labelled by turn, so the packet has one numbering scheme.
     expect(s.prompts.map((p) => p.turn)).toEqual([1, 2]);
     expect(s.turns).toContain(1);
   });
 
   it('labels prompts by turn, never by position', () => {
-    // The bug that produced three "hallucinations": the preamble numbered
-    // prompts [1] [2] [3] while windows said `turn NNN`, and models cited the
-    // bracket numbers. The reasoning was sometimes sound; the citation was
-    // answering a question the packet asked badly.
+    // Bracket indices in the preamble made models cite `[3]` as turn 3.
     const text = renderExtract([packet()]);
     expect(text).toContain('turn 9:');
     expect(text).not.toMatch(/^\s*\[\d+\]/m);
   });
 
   it('leaves harness task-notifications out of the preamble', () => {
-    // They arrive as user turns and are long. Quoting the harness back at a
-    // judge asking "what did the developer want" invites a finding about a
-    // constraint nobody set.
+    // Harness notifications are not the developer's words.
     const events = [
       { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: '<task-notification> id 123' },
       { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'user_prompt', textSummary: 'real request' },
@@ -133,25 +111,117 @@ describe('the packet', () => {
     expect(s.prompts.map((p) => p.text)).toEqual(['real request']);
   });
 
-  // The prompt's own wording is asserted in test/two-stage.test.ts, where the
-  // stage-A assertion is the right way round: it must NOT offer a dimension.
-  // This block tests `buildSession`, which both stages share.
+  it('does not call a session oversized because its first event makes no turn', () => {
+    // Regression: a first event that makes no turn must not mark the session unreadable.
+    const events = [
+      { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: '' },
+      { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'user_prompt', textSummary: 'do the thing' },
+      { uuid: 'c', sessionId: 's1', seq: 3, turnType: 'tool_use', toolName: 'Bash', command: 'pnpm test' },
+    ];
+    expect(buildSession('s1', events.slice(0, 1) as never, new Map()).packet.turns).toHaveLength(0);
+    const win = largestFittingWindow('s1', events as never, new Map(), undefined, 60_000);
+    expect(win?.turns).toBe(3);
+    expect(win?.session.packet.turns.length).toBeGreaterThan(0);
+  });
+
+  it('still returns nothing when no window holding a turn fits', () => {
+    const events = [
+      { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: '' },
+      { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'user_prompt', textSummary: 'do the thing' },
+    ];
+    // A budget that holds the empty frame and nothing more.
+    const frame = estimateTokens(renderExtract([buildSession('s1', events.slice(0, 1) as never, new Map())]));
+    expect(largestFittingWindow('s1', events as never, new Map(), undefined, frame)).toBeUndefined();
+  });
+
+  it('reads a turn too large for any packet in parts, losing nothing', () => {
+    // Only a developer's message can exceed the budget (agent turns are capped).
+    const words = Array.from({ length: 4000 }, (_, i) => `word${i}`);
+    // Markers scattered through, so some cut lands near one.
+    for (let i = 50; i < words.length; i += 97) words[i] = '[REDACTED:api-key]';
+    const long = words.join(' ');
+    const events = [
+      { uuid: 'a', sessionId: 's1', seq: 0, turnType: 'user_prompt', textSummary: '' },
+      { uuid: 'b', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: long },
+      { uuid: 'c', sessionId: 's1', seq: 2, turnType: 'assistant_msg', textSummary: 'done' },
+    ];
+    const full = new Map([[1, long]]);
+    const budget = 6000;
+    expect(largestFittingWindow('s1', events as never, full, undefined, budget)).toBeUndefined();
+
+    const sent: string[] = [];
+    let resume: { seq: number; chars: number } | undefined;
+    for (let pass = 0; pass < 100; pass += 1) {
+      const part = partOfTurn('s1', events as never, full, undefined, budget, resume);
+      expect(part).toBeDefined();
+      if (part === undefined) break;
+      expect(part.seq).toBe(1);
+      expect(part.turns, 'the window ends at the long turn').toBe(2);
+      expect(estimateTokens(renderExtract([part.session]))).toBeLessThanOrEqual(budget);
+      const body = part.session.packet.turns.find((t) => t.seqs.includes(1))?.text ?? '';
+      expect(body).toMatch(/^\[one message sent in parts: characters \d+-\d+ of \d+\]\n/);
+      const chunk = body.replace(/^[^\n]*\n/, '');
+      // A cut never splits a redaction marker.
+      expect(chunk).not.toMatch(/\[[^\]]*$/);
+      expect(chunk).not.toMatch(/^[^\[]*\]/);
+      sent.push(chunk);
+      if (part.end === part.length) break;
+      resume = { seq: part.seq, chars: part.end };
+    }
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.join(''), 'every character, once, in order').toBe(long);
+  });
+
+  it('never cuts a redacted secret into a part the leak gate refuses', () => {
+    // A refusal here would repeat every pass and trip the breaker. Text is pre-redacted, as the
+    // parser does, with assignment shapes dense enough that cuts land beside them.
+    const shapes = [
+      'API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789',
+      'export TOKEN: ghp_abcdefghijklmnopqrstuvwxyz0123456789AB',
+      'password = hunter2-correct-horse-battery',
+      'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlc2ln',
+    ];
+    const raw = Array.from({ length: 1200 }, (_, i) => (i % 7 === 0 ? shapes[i % shapes.length] : `w${i}`)).join(' ');
+    const text = redact(raw).text;
+    expect(text).toContain('[REDACTED:');
+    const events = [{ uuid: 'b', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: text }];
+    const full = new Map([[1, text]]);
+
+    for (const budget of [2500, 2777, 3100, 3500, 4200]) {
+      const sent: string[] = [];
+      let resume: { seq: number; chars: number } | undefined;
+      for (let pass = 0; pass < 200; pass += 1) {
+        const part = partOfTurn('s1', events as never, full, undefined, budget, resume);
+        if (part === undefined) throw new Error(`no part at budget ${budget}`);
+        expect(wouldLeak(renderExtract([part.session])), `budget ${budget}, part ${pass}`).toBe(false);
+        sent.push((part.session.packet.turns[0]?.text ?? '').replace(/^[^\n]*\n/, ''));
+        if (part.end === part.length) break;
+        resume = { seq: part.seq, chars: part.end };
+      }
+      expect(sent.length).toBeGreaterThan(1);
+      expect(sent.join('')).toBe(text);
+    }
+  });
+
+  it('starts the turn again when the cursor names a different one', () => {
+    const long = 'x '.repeat(30_000);
+    const events = [{ uuid: 'b', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: long }];
+    const part = partOfTurn('s1', events as never, new Map([[1, long]]), undefined, 6000, { seq: 99, chars: 500 });
+    expect(part?.session.packet.turns[0]?.text).toMatch(/^\[one message sent in parts: characters 1-/);
+  });
+
+  // Prompt wording is pinned in test/two-stage.test.ts; this tests the shared `buildSession`.
 });
 
 describe('the redaction gate refuses rather than redacts', () => {
   it('a packet containing a secret is not clean, so the send must abort', () => {
-    // The product asserts `redact(packet) === packet` immediately before the
-    // call. This test holds the *predicate* to account: it must notice, not
-    // quietly fix. Measured: 50% of corpus sessions carry secret-class content
-    // at full fidelity, and tool output is where it concentrates.
+    // The predicate must notice unredacted text, not quietly fix it.
     const dirty = 'turn 1 | AGENT\n[Bash] export TOKEN=sk-ant-api03-REDACTEDLOOKALIKE123456';
     expect(redact(dirty).text).not.toBe(dirty);
   });
 
   it('a packet built by the builder is already clean', () => {
-    // Belt and braces: the builder redacts as its last construction step, so
-    // the gate should never fire on its output. Verified over 200 real
-    // sessions during development; this pins the contract.
+    // The builder redacts last, so the gate never fires on its output.
     const events = [
       { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt', textSummary: 'ship it' },
       { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'tool_use', toolName: 'Bash', command: 'echo hi' },
@@ -164,12 +234,7 @@ describe('the redaction gate refuses rather than redacts', () => {
 
 describe('the preamble and the turns agree on what the developer said', () => {
   it('keeps a slash command in the preamble, not just in the turns', () => {
-    // There were two `isHarnessNoise` functions with one name and different
-    // behaviour: `packet.ts` deliberately kept `<command-name>` while
-    // `judge.ts` still filtered it. So a slash command survived into the turn
-    // body and was stripped from the preamble that claims to list "what the
-    // developer asked for, in order" — the one place it most needed to be. One
-    // gold episode's entire evidence is a `<command-name>` record.
+    // Regression: the preamble once filtered `<command-name>` while the turn body kept it.
     const events = [
       { uuid: 'a', sessionId: 's1', seq: 1, turnType: 'user_prompt' },
       { uuid: 'b', sessionId: 's1', seq: 2, turnType: 'assistant_msg' },

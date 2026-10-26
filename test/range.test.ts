@@ -5,10 +5,11 @@ import {
   resolveRange,
   segmentByDepth,
   describeCoverage,
-  spanDays,
-} from '../src/report.ts';
+} from '../src/range.ts';
 
 const NOW = new Date('2026-10-18T12:00:00.000Z');
+const spanDays = (r: { from: Date; to: Date }): number =>
+  Math.max(1, Math.ceil((r.to.getTime() - r.from.getTime()) / 86_400_000));
 const d = (s: string): Date => new Date(`${s}T00:00:00.000Z`);
 
 describe('report — relative ranges', () => {
@@ -31,8 +32,7 @@ describe('report — absolute dates', () => {
   });
 
   it('rejects a date that does not exist', () => {
-    // `Date.UTC` silently rolls 02-31 into March, which would make a report
-    // quietly cover a different period than the one asked for.
+    // `Date.UTC` silently rolls 02-31 into March.
     expect(parseDate('2026-02-31')).toBeUndefined();
     expect(parseDate('2026-13-01')).toBeUndefined();
   });
@@ -52,8 +52,7 @@ describe('report — flag resolution', () => {
   });
 
   it('refuses --last together with --since', () => {
-    // Accepting both would force a precedence rule nobody could guess from the
-    // output.
+    // Accepting both would need a precedence rule nobody could guess.
     const r = resolveRange({ last: '7d', since: '2026-01-01' }, NOW);
     expect(r).toMatchObject({ ok: false });
     if (!r.ok) expect(r.error).toMatch(/cannot be combined/);
@@ -78,9 +77,7 @@ describe('report — flag resolution', () => {
 });
 
 describe('report — depth labelling is the point', () => {
-  // We keep no transcript copies, so a range reaching past what we hold cannot
-  // be answered with tool calls. Returning what we have and saying nothing
-  // would read as "you improved" when the truth is "we cannot see it".
+  // We keep no transcript copies, so coverage past what we hold is stated, never implied as improvement.
   const session = (from: string, to: string) => ({ from: d(from), to: d(to) });
   const oct = [session('2026-10-12', '2026-10-18')];
 
@@ -105,17 +102,13 @@ describe('report — depth labelling is the point', () => {
   });
 
   it('reports a GAP between sessions rather than claiming it is covered', () => {
-    // The case that killed the single-boundary design: real data here holds one
-    // session on 23 August and three from 12 October, with nothing in September.
-    // A boundary at the earliest record claimed 49 days of full depth over a
-    // month containing no sessions at all.
+    // A single boundary at the earliest record claimed full depth over a month with no sessions.
     const segs = segmentByDepth({ from: d('2026-08-20'), to: d('2026-10-19') }, {
       covered: [session('2026-08-23', '2026-08-24'), session('2026-10-12', '2026-10-19')],
       scanned: true,
       hasPromptHistory: false,
     });
     expect(segs.map((s) => s.depth)).toEqual(['none', 'full', 'none', 'full']);
-    // The September gap is named explicitly.
     const gap = segs[2]!;
     expect(gap.from).toEqual(d('2026-08-24'));
     expect(gap.to).toEqual(d('2026-10-12'));
@@ -152,8 +145,7 @@ describe('report — depth labelling is the point', () => {
     });
     expect(segs.map((s) => s.depth)).toEqual(['none']);
     expect(describeCoverage(segs)[0]).toMatch(/no transcripts cover this period/);
-    // Must NOT blame deletion: a gap is more often a period nobody worked, and
-    // for anything before the first scan we cannot tell the difference.
+    // Must NOT blame deletion: before the first scan, a gap and a deletion look the same.
     expect(describeCoverage(segs)[0]).not.toMatch(/deleted/);
   });
 
@@ -167,7 +159,6 @@ describe('report — depth labelling is the point', () => {
   });
 
   it('says "not scanned" rather than blaming the harness for deleting', () => {
-    // A false cause sends someone looking for data loss that never happened.
     const segs = segmentByDepth({ from: d('2026-10-01'), to: d('2026-10-18') }, {
       covered: [],
       scanned: false,
@@ -179,8 +170,7 @@ describe('report — depth labelling is the point', () => {
   });
 
   it('gives full depth for the period the data covers, not the day it was read', () => {
-    // The boundary is the record timestamps, never `firstSeenAt`: a scan run
-    // today over last week's transcript covers last week.
+    // The boundary is record timestamps, never `firstSeenAt`.
     const segs = segmentByDepth({ from: d('2026-10-13'), to: d('2026-10-18') }, {
       covered: [session('2026-10-12', '2026-10-18')],
       scanned: true,
@@ -224,8 +214,7 @@ describe('report — coverage notice names the cause', () => {
   });
 
   it('does not round a few hours up to a whole day', () => {
-    // The gap between the last session and now is routinely hours. Printing
-    // "1d no data" for it invents most of a day of missing history.
+    // Hours since the last session are not a day of missing history.
     const lines = describeCoverage([
       {
         from: new Date('2026-10-19T02:47:00.000Z'),

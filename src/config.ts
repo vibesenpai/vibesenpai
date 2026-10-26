@@ -1,12 +1,4 @@
-/**
- * Config resolution. Precedence, highest first:
- *   CLI flag → env var → config file → platform default
- *
- * No hardcoded paths anywhere. Beyond tidiness this is what lets the tool work
- * with non-default harness installs, lets the archive live on an external or
- * encrypted volume, and lets the whole pipeline be tested against fixture
- * directories instead of the real home directory.
- */
+/** Config resolution: CLI flag → env var → config file → platform default. No hardcoded paths. */
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -16,36 +8,11 @@ import type { Preset } from './types.ts';
 export type Config = {
   /** Transcript source directories, searched for *.jsonl. */
   sources: string[];
-  /**
-   * Durable store: the catalog, findings, SQLite. **No transcript copies.**
-   * Deliberately NOT the plugin data dir — it must survive plugin uninstall and
-   * be shared with the CLI, because two stores would mean two different answers.
-   */
+  /** Durable store (catalog, SQLite), never transcript copies. Not the plugin data dir: it outlives uninstall. */
   archive: string;
-  /**
-   * Large, disposable, re-downloadable. Lives in the plugin data dir when
-   * running as a plugin so it is removed on uninstall.
-   */
-  models: string;
-  /**
-   * Which dimensions run by default.
-   *
-   * `core` is the trust-building set: `certain` or `high`, rule-only, no model.
-   * Membership is about precision, never frequency — the three detectors that
-   * led `core` on assumed frequency are the ones in GRAVEYARD.md.
-   */
+  /** Which dimensions run by default. `core` admits by precision, never frequency. */
   preset: Preset;
-  /**
-   * Dimensions to silence, by name.
-   *
-   * A dimension someone does not care about has to be silenceable, or the only
-   * way to stop seeing it is to stop using the tool. Muting is the user's
-   * decision and is never second-guessed: a muted dimension is not computed,
-   * not counted, and not mentioned.
-   *
-   * An unknown name is reported rather than ignored, because a typo that
-   * silently mutes nothing is worse than an error — you would believe it worked.
-   */
+  /** Dimensions to silence: not computed, counted or mentioned. Unknown names are reported. */
   mute: string[];
   configFile: string | undefined;
 };
@@ -54,11 +21,10 @@ export type Config = {
 export type Provenance = Record<keyof Omit<Config, 'configFile'>, Layer>;
 export type Layer = 'flag' | 'env' | 'file' | 'default';
 
-export type ResolveInput = {
+type ResolveInput = {
   flags?: {
     sources?: string[];
     archive?: string;
-    models?: string;
     config?: string;
     preset?: string;
     mute?: string[];
@@ -69,13 +35,7 @@ export type ResolveInput = {
 
 const PRESETS: readonly Preset[] = ['core', 'standard', 'all'];
 
-/**
- * A preset name, or undefined when the value is not one.
- *
- * Returning undefined lets the layer fall through to the next one, and the
- * caller reports what was rejected. Silently coercing a typo to `core` would
- * leave someone believing they had enabled `all`.
- */
+/** A preset name, or undefined so the layer falls through and the rejection is reported. */
 function asPreset(v: unknown): Preset | undefined {
   return typeof v === 'string' && (PRESETS as readonly string[]).includes(v)
     ? (v as Preset)
@@ -160,17 +120,6 @@ export function resolveConfig(input: ResolveInput = {}): {
     join(dataHome, 'agentsensei'),
   );
 
-  // As a plugin, Claude Code hands us a per-plugin data dir. Models go there so
-  // they are removed on uninstall; the archive never does.
-  const [models, pModels] = pick(
-    'models',
-    flags.models,
-    env['AGENTSENSEI_MODELS'],
-    env['CLAUDE_PLUGIN_DATA']
-      ? join(env['CLAUDE_PLUGIN_DATA'], 'models')
-      : join(archive, 'models'),
-  );
-
   const [preset, pPreset] = pick(
     'preset',
     asPreset(input.flags?.preset),
@@ -186,11 +135,10 @@ export function resolveConfig(input: ResolveInput = {}): {
   );
 
   return {
-    config: { sources, archive, models, preset, mute, configFile },
+    config: { sources, archive, preset, mute, configFile },
     provenance: {
       sources: pSources,
       archive: pArchive,
-      models: pModels,
       preset: pPreset,
       mute: pMute,
     },

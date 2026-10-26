@@ -1,16 +1,10 @@
 /**
- * The anchor, which is the one thing in the packet that can be silently wrong.
- *
- * A truncated block is the case that mattered and had no test. `parts` used to
- * hold character offsets into the merged block, so truncating the block moved
- * them; `buildTurns` discarded them rather than guess, and `turnForQuote` fell
- * back to the block's first `seq` with no error anywhere. Measured over 87 real
- * findings, 45 resolved through that fallback and sat a median 460 `seq` from
- * their evidence — reported to the user as the turn where their problem was.
+ * Quote anchoring in the judge packet. Regression: truncating a merged block once made quotes
+ * fall back silently to the block's first `seq`, far from their evidence.
  */
 
 import { describe, expect, it } from 'vitest';
-import { agentBudget, buildPacket, buildTurns, renderSession, truncate, turnsForQuote } from '../src/packet.ts';
+import { agentBudget, buildPacket, buildTurns, renderSession, truncate, turnsForQuote } from '../src/judge/packet.ts';
 import type { Event } from '../src/types.ts';
 
 let seq = 0;
@@ -26,14 +20,8 @@ function ev(partial: Partial<Event> & Pick<Event, 'turnType'>): Event {
 }
 
 /**
- * One merged agent block big enough to be truncated, with distinct text at the
- * start and the end so a quote can tell which constituent turn it came from.
- *
- * **Consecutive same-role turns merge into ONE**, which is the whole reason the
- * packet is affordable — so 80 assistant messages are 1 merged turn, not 80,
- * and the budget tier is `agentBudget(2)` = 5000. The filler therefore has to
- * clear 5000 characters, not 500. Getting this wrong is what made the first
- * version of this test pass vacuously against the bug it exists to catch.
+ * One merged agent block big enough to truncate, with distinct start and end text.
+ * Consecutive same-role turns merge, so the budget is `agentBudget(2)` = 5000 chars, not 500.
  */
 function longAgentBlock(): { events: Event[]; full: Map<number, string> } {
   seq = 0;
@@ -60,8 +48,7 @@ describe('turnsForQuote — the anchor survives truncation', () => {
     expect(agent).toBeDefined();
     const block = agent as NonNullable<typeof agent>;
 
-    // The precondition: this block really was cut, so the old code path would
-    // have discarded `parts` and fallen back to the block start.
+    // Precondition: this block really was cut.
     expect(block.text).toContain('chars omitted');
     expect(block.seqs.length).toBeGreaterThan(2);
 

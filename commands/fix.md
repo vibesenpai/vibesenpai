@@ -1,5 +1,5 @@
 ---
-description: One evidence-backed change to try, from your own sessions
+description: A recommendation from your own sessions, with its evidence
 allowed-tools: Bash(node:*)
 ---
 

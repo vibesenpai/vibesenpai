@@ -1,33 +1,7 @@
 /**
- * Pull SWE-chat's own annotations, to answer which dimensions developers
- * actually hit.
- *
- * ── Why this reads Parquet and why that is dev-only ─────────────────────────
- *
- * The per-turn annotations — `prompt_pushback`, `prompt_intent`, `category`,
- * `bash_category`, `queue_op_subtype` — exist for all 11,607,572 turns and are
- * validated in the dataset's paper. They are the answer to "what is common",
- * and no probe we write over raw transcripts can beat a label the authors
- * annotated and published.
- *
- * `docs/eval.md` sanctions the dependency: "Parquet is read exactly once, during
- * fixture extraction, and stays a dev-only dependency that never reaches the
- * runtime path." It lives here, in `scripts/`, and `src/` keeps zero runtime
- * dependencies.
- *
- * ── Why this downloads 70 MB and not 6 GB ───────────────────────────────────
- *
- * Parquet is columnar and HuggingFace serves byte ranges, so only the columns we
- * ask for are fetched. `content` is 4,885 MB of the 6,127 MB file; the thirteen
- * label columns together are **70 MB — 1.1% of the bytes for 100% of the
- * labels**. Prompt text comes from the transcripts instead, which we need
- * anyway.
- *
- * ── Gated ───────────────────────────────────────────────────────────────────
- *
- * Requires an approved HuggingFace token at ~/.cache/huggingface/token. The gate
- * is `auto`, so accepting the terms grants access immediately. Pinned to a
- * dataset revision so a re-run reads the same data.
+ * Dev-only: pull SWE-chat's per-turn annotations (label columns only, ~70 MB of a 6 GB
+ * Parquet file, via byte ranges). Parquet as a dev-only dependency: see docs/eval.md.
+ * Needs a HuggingFace token at ~/.cache/huggingface/token.
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -38,17 +12,7 @@ import { asyncBufferFromUrl, parquetMetadataAsync, parquetReadObjects } from 'hy
 const REVISION = '202b071f18e03c79df5a7287565ce2ebc5ee7756';
 const DATASET = 'SALT-NLP/SWE-chat';
 
-/**
- * Every column we need, and nothing more.
- *
- * Each column in each row group is a separate byte range, so the column count
- * multiplies the request count: 1,161 row groups x 13 columns was ~15,000
- * requests and tripped HuggingFace's rate limit (3,000 per 300s) outright.
- * Nine columns is 10,449, which the throttle below can sustain.
- *
- * `word_count` (15 MB), `file_path` and `is_continuation` were dropped: nothing
- * in the measurement reads them.
- */
+/** Every column we need and no more: each column per row group is a separate request. */
 const LABEL_COLUMNS = [
   'session_id',
   'turn_number',
@@ -62,22 +26,13 @@ const LABEL_COLUMNS = [
   'tool_name',
 ] as const;
 
-/**
- * Throttled, retrying fetch.
- *
- * HuggingFace allows 3,000 range requests per 300 seconds. Reading one column
- * chunk is one request, so a full scan needs ~10k and must pace itself. A plain
- * run fails with `fetch failed 429` partway through and loses everything, since
- * hyparquet surfaces the rejection rather than retrying.
- */
+/** Throttled, retrying fetch: HuggingFace allows 3,000 requests per 300s and hyparquet does not retry a 429. */
 function installThrottledFetch(perSecond = 9): void {
   const real = globalThis.fetch;
   const minGap = 1000 / perSecond;
   let last = 0;
 
-  // Typed off the real `fetch` rather than naming `RequestInfo`: that type
-  // comes from the DOM lib, which this project does not load, and only shows up
-  // once `scripts/` is under the typechecker.
+  // Typed off the real `fetch`: `RequestInfo` needs the DOM lib, which is not loaded.
   globalThis.fetch = async (
     input: Parameters<typeof real>[0],
     init?: Parameters<typeof real>[1],
@@ -121,12 +76,8 @@ function token(): string {
 }
 
 /**
- * The **canonical** parquet URL, on the `refs/convert/parquet` branch.
- *
- * Not `/api/datasets/.../parquet/...`: that endpoint redirects, and partway
- * through a column scan the redirect started answering range requests with 400.
- * The resolve URL serves ranges directly and is what the dataset's own
- * `/parquet` listing hands out.
+ * The canonical parquet URL on `refs/convert/parquet`. Not `/api/datasets/.../parquet/...`,
+ * whose redirect started answering range requests with 400 mid-scan.
  */
 function parquetUrl(config: string): string {
   return `https://huggingface.co/datasets/${DATASET}/resolve/refs%2Fconvert%2Fparquet/${config}/train/0000.parquet`;
@@ -134,12 +85,7 @@ function parquetUrl(config: string): string {
 
 export type PullOptions = { outDir: string; limitRows?: number };
 
-/**
- * Stream the label columns to JSONL, one row group at a time.
- *
- * Row-group chunking matters: the file has 1,161 groups and 11.6M rows, and
- * holding them all in memory would be gigabytes of objects for no reason.
- */
+/** Stream the label columns to JSONL, one row group at a time, to keep memory flat. */
 export async function pullTurnLabels(opts: PullOptions): Promise<number> {
   installThrottledFetch();
   const auth = { headers: { Authorization: `Bearer ${token()}` } };
@@ -158,9 +104,7 @@ export async function pullTurnLabels(opts: PullOptions): Promise<number> {
     bounds.push((bounds.at(-1) as number) + Number(rg.num_rows));
   }
 
-  // Counts are accumulated in memory; only the rows we need for a per-session
-  // join get written. Writing every annotated row would be ~1.3 GB of JSONL for
-  // numbers that fit in a few kilobytes.
+  // Counts stay in memory; only rows needed for a per-session join are written.
   const tally = new Map<string, Map<string, number>>();
   const bump = (col: string, value: unknown): void => {
     if (value == null || value === '') return;
@@ -186,14 +130,11 @@ export async function pullTurnLabels(opts: PullOptions): Promise<number> {
     })) as Row[];
 
     for (const r of rows) {
-      // Everything is counted...
       for (const col of ['turn_type', 'role', 'prompt_pushback', 'prompt_intent', 'category',
         'bash_category', 'queue_op_subtype', 'tool_name'] as const) {
         bump(col, r[col]);
       }
-      // ...but only annotated *prompt* turns are written, because those are the
-      // rows a per-session join actually needs. Tool rows are 2M and are only
-      // ever read as counts.
+      // Everything is counted, but only annotated prompt turns are written.
       if (r['prompt_pushback'] == null && r['prompt_intent'] == null) continue;
       chunks.push(JSON.stringify(r, bigIntSafe));
     }
@@ -210,8 +151,6 @@ export async function pullTurnLabels(opts: PullOptions): Promise<number> {
   }
   if (chunks.length > 0) appendChunk(out, chunks);
 
-  // The counts are the headline answer, so they are written as their own file
-  // rather than printed and lost.
   const counts: Record<string, Record<string, number>> = {};
   for (const [col, m] of tally) {
     counts[col] = Object.fromEntries([...m].sort((a, b) => b[1] - a[1]));
@@ -224,16 +163,12 @@ export async function pullTurnLabels(opts: PullOptions): Promise<number> {
   return written;
 }
 
-/**
- * Int64 columns arrive as `BigInt`, which `JSON.stringify` refuses to serialise.
- * Numbers are safe here: turn numbers and word counts are far below 2^53.
- */
+/** Int64 columns arrive as `BigInt`; these values are far below 2^53, so Number is safe. */
 function bigIntSafe(_key: string, value: unknown): unknown {
   return typeof value === 'bigint' ? Number(value) : value;
 }
 
 function appendChunk(path: string, lines: string[]): void {
-  // Appended rather than held, so memory stays flat over 11.6M rows.
   appendFileSync(path, `${lines.join('\n')}\n`);
 }
 
@@ -262,15 +197,7 @@ if (import.meta.filename === process.argv[1]) {
   }
 }
 
-/**
- * Fetch a pinned list of transcripts.
- *
- * Pinned by **revision**, not `main`: both the dataset and this list must be
- * fixed for a measurement to be reproducible. Fetched to a scratch directory and
- * never vendored — committing other people's transcripts would break the same
- * rule that stops us copying the user's, and these are 707 real repositories'
- * sessions.
- */
+/** Fetch a pinned list of transcripts at a pinned revision to a scratch dir; never vendored. */
 export async function pullTranscripts(
   paths: string[],
   outDir: string,

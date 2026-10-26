@@ -1,31 +1,14 @@
-/**
- * `src/judge-store.ts` — the state that decides whether money gets spent.
- */
+/** `src/judge/` state, schedule and lock: what decides whether money gets spent. */
 
 import { describe, expect, it } from 'vitest';
 import { endRun, markSkipped, measuredMsPerToken, openStore, startRun } from '../src/store.ts';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  BYTES_PER_TURN,
-  DEFAULT_SETTINGS,
-  FALLBACK_MS_PER_TOKEN,
-  JUDGE_RUNNING_STALE_MS,
-  analysisBlock,
-  clearJudgeRunning,
-  dueForJudging,
-  emptyState,
-  findingsFor,
-  judgeRunning,
-  oldestUnread,
-  readJudgeState,
-  recordPass,
-  recordSpend,
-  takeJudgeLock,
-  writeSettings,
-} from '../src/judge-store.ts';
+import { DEFAULT_SETTINGS, emptyState, findingsFor, readJudgeState, recordPass, recordSpend, writeSettings } from '../src/judge/state.ts';
+import { BYTES_PER_TURN, FALLBACK_MS_PER_TOKEN, analysisBlock, dueForJudging, oldestUnread } from '../src/judge/schedule.ts';
+import { JUDGE_RUNNING_STALE_MS, clearJudgeRunning, judgeRunning, takeJudgeLock } from '../src/judge/lock.ts';
 
 const archive = (): string => mkdtempSync(join(tmpdir(), 'as-judge-'));
 
@@ -51,16 +34,7 @@ describe('settings live alone, and that is the point', () => {
     expect(readJudgeState(dir).settings).toEqual(DEFAULT_SETTINGS);
   });
 
-  // ── The consent race, which used to be real ──────────────────────────────
-  //
-  // Settings shared `judge.json` with the ledger, the findings and the usage
-  // counters. A pass holds whole state in memory for up to six minutes and
-  // rewrote all of it on the way out — so a user who ran `judge --disable
-  // --apply` mid-pass had it silently set back to `true`. The user turns the
-  // model off and the tool turns it on.
-  //
-  // The fix is structural rather than a lock: **no producer opens the settings
-  // file**, so a pass cannot undo a decision it never reads.
+  // No producer opens the settings file, so a running pass cannot undo `--disable`.
   it('survives a pass that started before the user disabled it', () => {
     const dir = archive();
     writeSettings(dir, { ...DEFAULT_SETTINGS, enabled: true });
@@ -79,10 +53,7 @@ describe('settings live alone, and that is the point', () => {
   });
 
   it('records what a call cost even when the work after it fails', () => {
-    // Spend is not conditional on success: the money left the account when the
-    // call returned. The watermark is conditional, because it means "we have
-    // results", and advancing it first is how this project lost paid-for
-    // episodes whenever stage B threw.
+    // Spend is recorded even on failure; the watermark advances only with results.
     const dir = archive();
     recordSpend(dir, { calls: 1, tokensIn: 58_161, tokensOut: 3_962 });
 
@@ -95,8 +66,7 @@ describe('settings live alone, and that is the point', () => {
 
 describe('dueForJudging', () => {
   it('waits for a cadence worth of new bytes', () => {
-    // Stop fires at every response boundary — ~788 times in one real session —
-    // and an invocation costs 26,384 tokens of overhead before our packet.
+    // Stop fires at every response boundary, and each call has large fixed overhead.
     const s = emptyState();
     const need = s.settings.cadence * BYTES_PER_TURN;
     expect(dueForJudging(s, 'x', need - 1)).toBe(false);
@@ -104,8 +74,7 @@ describe('dueForJudging', () => {
   });
 
   it('measures from where the last pass stopped, not from zero', () => {
-    // The ledger is a byte offset precisely so a growing session stays
-    // judgeable: a boolean would judge it once at turn 50 and never at 800.
+    // A byte offset, so a growing session stays judgeable.
     const s = emptyState();
     s.ledger['x'] = 100_000;
     expect(dueForJudging(s, 'x', 100_000 + 1)).toBe(false);
@@ -126,11 +95,7 @@ describe('findingsFor', () => {
 });
 
 describe('an unreadable store is not an empty one', () => {
-  // `readProgress` catches — it must, Principle Zero outranks a correct count
-  // — but it returned a value **identical to an empty store**. So
-  // `judge --status` printed `judged 0 session(s) · 0 finding(s)` over a
-  // database it had failed to open, which is this project's own
-  // `inaccurate_self_report` dimension appearing in its own status output.
+  // A store that fails to open must not read as an empty one.
   const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-unreadable-'));
 
   it('flags a store that is not a database', () => {
@@ -141,8 +106,7 @@ describe('an unreadable store is not an empty one', () => {
   });
 
   it('does not flag a healthy store, however empty', () => {
-    // The flag means "could not read", never "found nothing" — otherwise the
-    // honest case starts reporting unknown and the warning becomes noise.
+    // "Could not read", never "found nothing".
     const dir = scratch();
     const state = readJudgeState(dir);
     expect(state.storeUnreadable).toBeUndefined();
@@ -156,21 +120,14 @@ describe('an unreadable store is not an empty one', () => {
   });
 
   it('says unknown rather than a number', () => {
-    const src = readFileSync('src/cli.ts', 'utf8');
+    const src = ['src/cli.ts', ...readdirSync('src/cmd').map((f) => `src/cmd/${f}`)].map((f) => readFileSync(f, 'utf8')).join('\n');
     expect(src).toMatch(/storeUnreadable === true/);
     expect(src).toMatch(/the store could not be read/);
   });
 });
 
 describe('a pass that finds nothing still records that it looked', () => {
-  // `judge.ts` returned on `episodes.length === 0` without calling
-  // `recordPass`, and its own comment called that **the common case** — so
-  // most sessions never left `unread`. Visible on a real machine as
-  // `0 of 29 sessions read` after five completed passes, against an empty
-  // ledger.
-  //
-  // Worse than cosmetic: an unmarked session is re-read and re-paid for by
-  // every pass that reaches it, which is the waste this tool exists to detect.
+  // An empty extract must still advance the ledger, or the session is re-read and re-paid every pass.
   const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-clean-'));
 
   it('advances the watermark with no findings', () => {
@@ -186,8 +143,7 @@ describe('a pass that finds nothing still records that it looked', () => {
   });
 
   it('means a clean session stops being unread', () => {
-    // The drain walks `oldestUnread`, which reads the ledger. A session that
-    // never advanced it would be selected for ever.
+    // The drain walks `oldestUnread`, so an unadvanced session would be selected forever.
     const dir = scratch();
     const sizes = [{ id: 's1', sizeBytes: 4242, mtimeMs: 1 }];
     expect(oldestUnread(readJudgeState(dir), sizes)).toBe('s1');
@@ -196,27 +152,19 @@ describe('a pass that finds nothing still records that it looked', () => {
   });
 
   it('is what judge.ts actually does on an empty extract', () => {
-    const src = readFileSync('scripts/judge.ts', 'utf8');
-    const clean = /episodes\.length === 0[\s\S]{0,1400}?\n  \}/.exec(src)?.[0] ?? '';
+    const src = readFileSync('src/judge/run.ts', 'utf8');
+    const clean = /episodes\.length === 0[\s\S]{0,1400}?\n    \}/.exec(src)?.[0] ?? '';
     expect(clean, 'the clean-batch branch moved').not.toBe('');
-    expect(clean).toMatch(/recordPass\(config\.archive, \[\], offsets\)/);
+    expect(clean).toMatch(/recordPass\(archive, \[\], batch\.offsets, batch\.parts\)/);
   });
 });
 
 describe('a session too big for one packet is read, not abandoned', () => {
-  // It used to call `recordFailure` and return without advancing the
-  // watermark. Harmless while the Stop hook only judged the live session;
-  // once it began draining the backlog it would select the same session on
-  // every idle turn boundary, and five of those trip the breaker and disable
-  // the judge entirely.
-  //
-  // Measured on a real archive: 1 of 29 sessions is over budget, at 66,196
-  // tokens against a 60,000 ceiling — and it windows into 4,710 turns then
-  // 1,357. Two passes, nothing abandoned.
+  // An over-budget session is windowed and resumed, not retried until the breaker trips.
   const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-window-'));
 
   it('windows rather than giving up', () => {
-    const src = readFileSync('scripts/judge.ts', 'utf8');
+    const src = readFileSync('src/judge/run.ts', 'utf8');
     expect(src, 'oversize is no longer a breaker failure').not.toMatch(
       /recordFailure\([^)]*exceeds the judge budget alone/,
     );
@@ -224,11 +172,7 @@ describe('a session too big for one packet is read, not abandoned', () => {
   });
 
   it('resumes at or before the last turn sent, never after it', () => {
-    // The watermark is bytes and the window is turns, so the two map through a
-    // ratio. Rounding down is what makes the round trip safe: a resume lands
-    // at or before where we stopped, so turns overlap rather than being
-    // skipped — and overlap is free, because occurrence ids are content
-    // hashes.
+    // Bytes map to turns by ratio; rounding down means resumes overlap (free: ids are content hashes) rather than gap.
     const totalEvents = 6067;
     const size = 26_272_768;
     const sentThrough = 4710;
@@ -239,8 +183,6 @@ describe('a session too big for one packet is read, not abandoned', () => {
   });
 
   it('still overlaps rather than gaps when the session has grown', () => {
-    // A growing session increases both the size and the event count, which
-    // moves the resume point earlier still.
     const watermark = Math.floor((4710 / 6067) * 26_272_768);
     const grownSize = 26_272_768 * 2;
     const grownEvents = 6067 * 2;
@@ -262,8 +204,28 @@ describe('a session too big for one packet is read, not abandoned', () => {
     expect(oldestUnread(readJudgeState(dir), sizes), 'the drain moves on').toBe('next');
   });
 
+  it('keeps a part cursor with the watermark, and clears a skip once anything is read', () => {
+    const dir = scratch();
+    const db = openStore(dir);
+    markSkipped(db, 'big', 'a single turn exceeds the judge budget');
+    db.close();
+
+    // Part of one turn read: the watermark has not moved, the cursor has.
+    recordPass(dir, [], new Map(), new Map([['big', { seq: 7, chars: 120_000 }]]));
+    let state = readJudgeState(dir);
+    expect(state.parts?.['big']).toEqual({ seq: 7, chars: 120_000 });
+    expect(state.ledger['big'] ?? 0).toBe(0);
+    expect(state.skipped ?? [], 'a session being read is not skipped').not.toContain('big');
+
+    // The last part: the turn is done, so the cursor goes and the watermark moves.
+    recordPass(dir, [], new Map([['big', 5000]]), new Map([['big', undefined]]));
+    state = readJudgeState(dir);
+    expect(state.parts?.['big']).toBeUndefined();
+    expect(state.ledger['big']).toBe(5000);
+  });
+
   it('keeps that away from the breaker, which is for transient faults', () => {
-    const src = readFileSync('scripts/judge.ts', 'utf8');
+    const src = readFileSync('src/judge/run.ts', 'utf8');
     const branch = /const win = largestFittingWindow[\s\S]{0,800}?skipSession[^\n]*\n/.exec(src)?.[0] ?? '';
     expect(branch, 'the windowing branch moved').not.toBe('');
     expect(branch, 'too large is permanent, not a fault').not.toMatch(/recordFailure/);
@@ -272,16 +234,17 @@ describe('a session too big for one packet is read, not abandoned', () => {
 });
 
 describe('the estimate is sized by what is there, not by how many', () => {
-  // It was `unread × a per-session constant`, which assumes sessions are
-  // interchangeable. Measured across 29 real ones, their packets span 1,075
-  // to 66,196 tokens — so a queue of small sessions looked identical to one
-  // holding a 66k session.
-  //
-  // Nothing cheap predicts the size either: tokens per KB spans 1.5 to 9.4,
-  // and tokens against event count is not even monotonic (6,067 events →
-  // 66,196 tokens; 7,013 → 55,691, because same-role turns merge). So it is
-  // measured by the standing pass, which parses every transcript anyway.
+  // Sized from per-session packet costs measured by the standing pass, not count × constant.
   const line = (o: Parameters<typeof analysisBlock>[0]) => analysisBlock(o).join(' | ');
+
+  it('divides by the batches that run at once, never by more than the queue fills', () => {
+    const base = { total: 10, read: 4, unread: 6, msPerToken: 1, budget: 60_000 };
+    // 180k tokens is three full batches: three at once takes a third as long.
+    expect(line({ ...base, queueTokens: 180_000, concurrency: 1 })).toMatch(/about 6 minutes/);
+    expect(line({ ...base, queueTokens: 180_000, concurrency: 3 })).toMatch(/about 2 minutes/);
+    // 20k tokens is one batch, however many calls are allowed at once.
+    expect(line({ ...base, queueTokens: 20_000, concurrency: 3 })).toMatch(/40 seconds/);
+  });
 
   it('shrinks when the queue is small, even with many sessions', () => {
     const many = line({ total: 30, read: 0, unread: 28, queueTokens: 20_000 });
@@ -291,16 +254,11 @@ describe('the estimate is sized by what is there, not by how many', () => {
   });
 
   it('overestimates rather than under, with nothing measured yet', () => {
-    // Before the standing pass has run there are no sizes, so each unread
-    // session is assumed to be a full-budget packet. Wrong, and wrong in the
-    // direction that does not promise a reader something it cannot deliver.
+    // No sizes yet: assume a full-budget packet each.
     const blind = line({ total: 28, read: 0, unread: 28 });
     const measured = line({ total: 28, read: 0, unread: 28, queueTokens: 217_567 });
     expect(blind).not.toBe(measured);
-    // Doubled when the fallback rate was corrected: 0.5 ms/token assumed a
-    // full packet costs the average call, and a real machine showed 1.135.
-    // Over-stating is the direction that lets learning shrink the number
-    // rather than grow it.
+    // The fallback rate errs high, so learning shrinks the estimate.
     expect(blind).toMatch(/56 minutes/);
   });
 
@@ -319,11 +277,7 @@ describe('the estimate is sized by what is there, not by how many', () => {
 });
 
 describe('a rate needs two sizes, not two samples', () => {
-  // `measuredCallMs` took a median of durations regardless of what they read.
-  // The first three recorded were ~3s each on packets of ~1,700 tokens, which
-  // says nothing about a 60,000-token one — and multiplying it across the
-  // queue is how the surface came to claim "about 3 minutes" for 217,567
-  // tokens of work.
+  // A rate needs runs of different sizes; same-size samples say nothing about larger packets.
   const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-rate-'));
 
   it('refuses when every run read the same amount', () => {
@@ -347,13 +301,7 @@ describe('a rate needs two sizes, not two samples', () => {
 });
 
 describe('two passes cannot take the same work', () => {
-  // The lock was `judgeRunning()` then `writeFileSync()` — a check and an act
-  // with a gap, where the write succeeds whether or not a file is there. Two
-  // hooks firing together both saw "not running" and both wrote.
-  //
-  // It mattered less when a pass judged one named session; two passes at
-  // least did different work. A pass now takes everything pending, so two of
-  // them read the same sessions and bill for both.
+  // Take-or-fail in one operation; a check-then-write let two hooks both take the lock.
   const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-lock2-'));
 
   it('is take-or-fail in one operation', () => {
@@ -363,8 +311,7 @@ describe('two passes cannot take the same work', () => {
   });
 
   it('is not released by a process that does not hold it', () => {
-    // Whichever pass finished first used to delete the shared marker, freeing
-    // a lock the other was still working under.
+    // Only the holder may release.
     const dir = scratch();
     takeJudgeLock(dir);
     clearJudgeRunning(dir, 999_999);
@@ -374,14 +321,7 @@ describe('two passes cannot take the same work', () => {
   });
 
   it('breaks a lock whose owner died', () => {
-    // Staleness is measured against the lock's own mtime, so a caller passing
-    // a clock far in the future makes *any* lock look stale — including one
-    // it just created. That is an artefact of injecting time, not a
-    // behaviour: in use, `now` and the mtime are the same clock.
-    //
-    // So this asserts the thing that is real — a dead owner's lock does not
-    // block for ever — and leaves re-entry to the test above, which uses the
-    // real clock.
+    // Injected time makes any lock look stale, so this only asserts a dead owner does not block forever.
     const dir = scratch();
     takeJudgeLock(dir);
     expect(takeJudgeLock(dir), 'held').toBe(false);
@@ -397,21 +337,12 @@ describe('two passes cannot take the same work', () => {
 });
 
 describe('learning must shrink the estimate, never grow it', () => {
-  // A user watched progress go 19 of 31 → 29 of 31 while the time left went
-  // 2 minutes → 5. Both numbers were right for what was known: the small
-  // sessions had been read, leaving the two biggest (123,867 tokens of the
-  // original 220,312), *and* the rate had switched from a fallback of 0.5
-  // ms/token to a learned 1.135.
-  //
-  // The queue growing heavier as the light work clears is honest. The rate
-  // being optimistic until measured is not, and it is the half that is fixable.
+  // The fallback rate must not be optimistic, or the estimate grows as work clears.
   it('starts above what a real machine turned out to show', () => {
     expect(FALLBACK_MS_PER_TOKEN).toBeGreaterThan(0.5);
   });
 
   it('is within reach of the measured rate, not merely large', () => {
-    // A wildly conservative default would always shrink and never be useful.
-    // This one is close enough that the correction is small.
     expect(FALLBACK_MS_PER_TOKEN).toBeLessThan(1.135 * 1.5);
   });
 });

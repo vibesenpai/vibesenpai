@@ -5,9 +5,7 @@ const H = '/Users/testuser';
 const r = (s: string) => redact(s, { home: H });
 
 describe('redact — planted secrets', () => {
-  // Written first and deliberately adversarial: these are the strings that must
-  // never reach the store, since with no transcript copies what we persist is
-  // the only version that will exist.
+  // Strings that must never reach the store.
   const planted: [string, string][] = [
     ['anthropic', 'sk-ant-api03-AbCdEf1234567890xyzAbCdEf'],
     ['openai', 'sk-proj-abcdefghijklmnopqrstuvwxyz0123'],
@@ -18,9 +16,7 @@ describe('redact — planted secrets', () => {
     ['google', 'AIzaSyA1234567890abcdefghijklmnopqrstu'],
     ['mem0', 'm0-abcdefghijklmnopqrstuvwxyz'],
     ['gitlab', 'glpat-AbCdEf1234567890xy'],
-    // Added after a bare one survived into an Event during this project's own
-    // work: it was caught only via the variable name, so a token pasted into a
-    // prompt would have persisted.
+    // A bare token, not only one assigned to a TOKEN variable.
     ['huggingface', 'hf_AbCdEfGhIjKlMnOpQrStUvWxYz012345'],
     ['stripe', 'sk_live_AbCdEf1234567890xyz'],
     ['sendgrid', 'SG.AbCdEf1234567890xy.AbCdEf1234567890xyz'],
@@ -112,8 +108,7 @@ describe('redact — secret assignments, where entropy rules fail', () => {
 });
 
 describe('redact — evidence must survive', () => {
-  // Over-redaction is not the safe side. Evidence that reads
-  // "[REDACTED] [REDACTED] at [REDACTED]" makes the product useless.
+  // Over-redaction is not the safe side: evidence must survive.
   const keep = [
     ['a shell command', 'npm install lodash'],
     ['a pnpm violation — the actual finding', 'npm run build'],
@@ -174,8 +169,7 @@ describe('redact — paths keep structure, lose identity', () => {
 
 describe('redact — safety properties', () => {
   it('is idempotent: redacting twice equals redacting once', () => {
-    // If a replacement token itself matched a rule, output would depend on how
-    // many times the text had been handled.
+    // A replacement token must not match a rule.
     const messy = [
       'sk-ant-api03-AbCdEf1234567890xyz',
       'PASSWORD=hunter2',

@@ -1,37 +1,12 @@
 /**
- * How often does each dimension actually occur?
- *
- * Every frequency this project publishes comes from here, over the same pinned
- * 1,139-session SWE-chat corpus, so a number in a doc can be reproduced rather
- * than taken on trust. `npm run measure`.
- *
- * ── Rules this script holds itself to ───────────────────────────────────────
- *
- * 1. **Every number carries its denominator.** "23 corrections" means nothing;
- *    "23 of 180 prompts" does.
- * 2. **A built dimension is measured by its own detector, not by a probe that
- *    resembles it.** A detector that disagrees with the measurement justifying
- *    it is wrong, and a probe looser than the detector hides exactly that: the
- *    loose `tool_loop` probe reported 4% of sessions where the real detector
- *    found 0.4%.
- * 3. **A probe over a harness mechanism must first establish that the mechanism
- *    means what its name suggests.** This rule cost most of a week. `enqueue`
- *    is not an interrupt — 3,504 of 3,606 sit at a turn boundary and 1,858
- *    carry `<task-notification>`. `remove` is not a withdrawal; the queue
- *    operations balance. A non-zero exit is not an ignored error; ≥68 of 234
- *    were the agent fixing. Every push is not a premature write. And
- *    `cache_read` is not a hit rate: it re-counts the whole prefix per call, so
- *    `read/(read+creation)` runs p10 0.901 to p90 0.985 whatever anyone does.
- * 4. **Every probe states its confound**, in the table, next to the number.
- * 5. **Where SWE-chat has a label, the label wins.** `prompt_pushback` is
- *    annotated on 201,485 prompts and validated in the paper; our regex is not
- *    evidence against it.
+ * `npm run measure`: how often each dimension occurs over the pinned SWE-chat corpus.
+ * Every published frequency comes from here. Rules: CLAUDE.md "A mechanism is not a behaviour", D52.
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from '../src/parsers/index.ts';
-import { editEvidenceOf } from '../src/edits.ts';
+import { editEvidenceOf } from '../src/detect/tools.ts';
 import { callFailed, countDenominators } from '../src/detect/index.ts';
 import { retriedFailures } from '../src/detect/edit-retry.ts';
 import { isRedundant, repeatGroups } from '../src/detect/redundant-call.ts';
@@ -40,14 +15,8 @@ import { reasonOf } from '../src/detect/labels.ts';
 import type { Event } from '../src/types.ts';
 
 /**
- * How a number was arrived at, which bounds how much it is worth.
- *
- * `detector` is the strongest: the shipped rule itself ran, so the figure and
- * the product cannot disagree. `structural` is a probe over harness-recorded
- * fields for a dimension not yet built. `labelled` defers to SWE-chat's own
- * validated annotations. `lexical` reads text and is an upper bound, never a
- * measurement — no probe here is lexical any more, and the value is kept so
- * that reintroducing one has to be spelled out.
+ * How a number was arrived at. `detector` runs the shipped rule; `structural` probes harness
+ * fields; `labelled` defers to SWE-chat; `lexical` reads text and is only an upper bound.
  */
 type Probe = 'detector' | 'structural' | 'labelled' | 'lexical';
 
@@ -94,8 +63,7 @@ function loadSessions(dir: string, set: 'A' | 'B'): Session[] {
     try { r = parse(join(dir, f), readFileSync(join(dir, f), 'utf8'), id); } catch { continue; }
     if (Object.keys(r.unknown).some((k) => k.startsWith('unsupported-harness'))) continue;
     if (r.events.length === 0) continue;
-    // Project = the repo this session belongs to, which the transcript does not
-    // carry; the session id is a safe stand-in for per-session verification.
+    // The transcript does not carry its repo; the session id stands in.
     out.push({ id, project: id, events: r.events, set });
   }
   return out;
@@ -120,7 +88,7 @@ type ProbeDef = {
 };
 
 const PROBES: ProbeDef[] = [
-  // ── Built: measured by the shipped detector itself ────────────────────────
+  // Built: measured by the shipped detector itself.
   {
     dimension: 'edit_retry',
     denominator: 'per edit',
@@ -129,17 +97,11 @@ const PROBES: ProbeDef[] = [
       'only failureKind "tool" counts, so a denied or hook-blocked edit is excluded; ' +
       'the attempt ends at the next user prompt',
     inCatalogue: true,
-    // The real function the detector calls, not a lookalike. A probe looser
-    // than the detector hides the only disagreement worth knowing about.
+    // The detector's own function, not a lookalike (D52).
     count: (c) => retriedFailures(c.ev).length,
   },
 
-  // ── Measured, not yet built: the next detectors, in build order ───────────
-  // ── Reported as session metadata, not as findings ────────────────────────
-  // Both were planned as detectors and neither survived measurement: churn
-  // correlates with friction at 15% against a 9% base rate, and a
-  // re-ingestion ratio is session-wide with no turn to anchor to. Kept here so
-  // the figures behind that decision stay reproducible. See src/stats.ts.
+  // Session metadata, not findings; kept so the figures behind rejecting them stay reproducible.
   {
     dimension: 'file_churn  [metadata]',
     denominator: 'per session',
@@ -161,8 +123,7 @@ const PROBES: ProbeDef[] = [
     count: (c) => {
       const d = countDenominators(c.ev);
       if (d.tokens.output === 0) return 0;
-      // The re-measured p90. Was 93.4, computed while a split response's
-      // `usage` was summed once per record — see `oncePerResponse`.
+      // p90, with usage counted once per response (`oncePerResponse`).
       return d.tokens.cacheCreation / d.tokens.output > 159.5 ? 1 : 0;
     },
   },
@@ -174,8 +135,7 @@ const PROBES: ProbeDef[] = [
       'aggregation alone is 93% wrong (278 of 298 raw groups had an edit between); the edit, ' +
       'prompt and 60s-gap guards are what make it reportable, and the gap is a threshold',
     inCatalogue: true,
-    // The detector's own grouping and answer test, not a lookalike. The loose
-    // version of this probe said 4% of sessions where the detector finds 0.4%.
+    // The detector's own grouping and answer test (D52).
     count: (c) => repeatGroups(c.ev).filter((g) => isRedundant(g, c.ev)).length,
   },
   {
@@ -186,8 +146,6 @@ const PROBES: ProbeDef[] = [
       'declining is the person exercising control, not friction — frequent and now ' +
       'structurally visible via failureKind, but it is not obvious it should ever be surfaced',
     inCatalogue: true,
-    // Structural at last. This was "needs a structural signal first" until the
-    // parser started recording WHO rejected a call.
     count: (c) => c.ev.filter((e) => e.failureKind === 'denied' || e.failureKind === 'hook').length,
   }
 
@@ -240,8 +198,7 @@ async function main(): Promise<void> {
     denominators.cacheCreation += d.tokens.cacheCreation;
     if (d.tokens.output > 0) reingest.push(d.tokens.cacheCreation / d.tokens.output);
 
-    // What the harness said, per instance. The label tier is cosmetic by
-    // design, so an unrecognised reason is counted rather than hidden.
+    // An unrecognised reason is counted, not hidden.
     for (const hit of retriedFailures(ev)) {
       const r = reasonOf(hit.result) ?? '(unrecognised)';
       reasons.set(r, (reasons.get(r) ?? 0) + 1);
@@ -273,7 +230,7 @@ async function main(): Promise<void> {
     });
   }
 
-  // ── SWE-chat's own labels, where they cover our sessions ──────────────────
+  // SWE-chat's own labels, where they cover our sessions.
   const ids = new Set(sessions.map((s) => s.id));
   const covered = [...labels.entries()].filter(([k]) => ids.has(k.split(':')[0] as string));
   const pushbackCounts = new Map<string, number>();

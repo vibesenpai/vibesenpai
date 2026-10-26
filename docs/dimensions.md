@@ -168,21 +168,12 @@ session-wide ratio has no turn to point at, and CLAUDE.md is explicit that
 nothing is reported as a number without evidence behind it.
 
 What *is* anchorable: **half a session's re-ingestion comes from 6% of its
-turns** (p50; p10 is 1.3%). Concentrated, so the heaviest turns can be named —
-a ranking, needing no threshold.
-
-```
-  Claude re-read this conversation 7x more than it wrote — about 3x your usual.
-  3 turns account for 11% of it.
-
-  Most rewritten: archive.ts, 51 versions across 1 edit (and 7 others).
-```
-
-Both lines are **stated, not judged**, and the first appears only when the
-session is unlike the reader's others. It used to quote `corpus median 17.9`
-— a figure measured over 1,132 SWE-chat sessions, which is to say other
-people's. The baseline is the reader's own history, excluding the session
-being described.
+turns** (p50; p10 is 1.3%). That ranking was shown — "re-read this
+conversation 7x more than it wrote, about 3x your usual; 3 turns account for
+11% of it" — **and removed 2026-10-25 (D66).** A ratio against the reader's own
+history is still a comparison of ordinary numbers, and a ranking of ordinary
+writes is still ordinary; neither gave a reader anything to act on. The one
+cache event shown is the rebuild, below.
 
 **`cacheRead` is recorded and never divided.** It re-counts the whole prefix on
 every call, so `read/(read+creation)` runs p10 0.901 → p90 0.985 by
@@ -209,7 +200,24 @@ thousand tokens. The worst re-cached **797,275 tokens** after a 70-minute gap.
 Nearly every one follows an idle gap far past the 5-minute TTL — 70 minutes,
 3.9 hours, 12.7 hours, 40 hours.
 
-**Reported as metadata, never as a finding.** A write costs 1.25x base against
+**Flagged — the one cache number shown at all (D66).** Measured 2026-10-25 on
+one machine (46 sessions, observed; not a corpus frequency):
+
+```
+  collapses found                 48
+  right after a compaction        10   not rebuilds: a summary replaced the prefix on purpose
+  rebuilds                        38   17.9M tokens written again
+  gap since previous request      p10 76 min · p50 4.9 h · p90 23 h
+  under the 5-minute TTL           1   60k of 17.9M
+```
+
+The largest followed the agent asking something — `AskUserQuestion`,
+`ExitPlanMode` — answered 69 minutes to 25 hours later. Two other cache flags
+were measured and **dropped**: a rebuild with no idle gap (one case, above), and
+one large tool result re-read for many requests (the top cases were files read
+for an edit, a plan, research fetches — legitimate, with nothing to change).
+
+**Stated, never prescribed, and still not a finding.** A write costs 1.25x base against
 0.10x for a read, so a rebuild costs about twelve times what reading would
 have. That multiple is deliberately absent from the output: the only thing a
 reader could do about it is work in shorter sessions, which is the advice this

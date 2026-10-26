@@ -11,8 +11,17 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'agentsensei',
+      // The brand lives in `assets/brand/` at the repo root; the site keeps
+      // copies because Vite will not serve files from outside its own root.
+      logo: { src: './src/assets/mark.svg' },
+      favicon: '/favicon.svg',
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://crozzfire.github.io/agentsensei/og.jpg' } },
+        { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://crozzfire.github.io/agentsensei/og.jpg' } },
+      ],
       description:
-        "See what your coding agent's mistakes cost you — in tokens, with the exact turns, using the AI you already pay for.",
+        "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.",
       social: {
         github: 'https://github.com/crozzfire/agentsensei',
       },

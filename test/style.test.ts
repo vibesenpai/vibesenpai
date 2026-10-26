@@ -1,10 +1,4 @@
-/**
- * `src/style.ts` — and specifically the failure mode it exists to prevent.
- *
- * An escape sequence has length and no width, so padding a styled string
- * destroys every column in the report *only when colour is on* — which is the
- * mode the rest of the suite does not run in. These tests run both modes.
- */
+/** `pad` must measure visible width: escape sequences have length but no width. Tests run both modes. */
 
 import { describe, expect, it } from 'vitest';
 import { pad } from '../src/style.ts';
@@ -34,8 +28,7 @@ describe('pad', () => {
   });
 
   it('never truncates — a value wider than its column keeps all of itself', () => {
-    // Losing a digit would misreport a figure, which is worse than a ragged
-    // column.
+    // Losing a digit misreports a figure; a ragged column is better.
     expect(visible(pad('123456', 3))).toBe('123456');
   });
 });

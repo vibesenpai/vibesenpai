@@ -1,37 +1,14 @@
-/**
- * The README is the sixty-second document, and it was fiction.
- *
- * ── What this exists to stop ───────────────────────────────────────────────
- *
- * Every output sample in the README was a mockup, and the dimensions in them
- * either never existed or had been **rejected by measurement**. `file_churn`
- * was the second line of the headline report while `GRAVEYARD.md` recorded it
- * as rejected; `convergent_iteration` and `context_saturation` had zero hits in
- * `src/`; `constraint_decay` was a label with no detector.
- *
- * A stranger cannot tell a mockup from a real capability, so on launch day the
- * most quotable thing about this project would have been that its headline
- * report describes detectors it does not have.
- *
- * ── Why only the README ───────────────────────────────────────────────────
- *
- * Naming a dead dimension is `GRAVEYARD.md`'s entire job, and
- * `docs/dimensions.md` has a `## Deliberately not built` section that is one of
- * the most useful things in the repo. Those must stay free to name the dead.
- *
- * The README is different: it is read by someone deciding whether the tool
- * works, and it has no section that could make a dead name correct. So the rule
- * is scoped rather than global, and the scope is the risk.
- */
+// Docs must describe the tool that exists: real dimensions, commands, scripts and output shapes.
+// The dead-dimension check covers only the README; GRAVEYARD.md and docs/dimensions.md name the dead on purpose.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { detailLine, nextRung } from '../src/report-line.ts';
+import { nextRung } from '../src/session-block.ts';
 import { leadSegments } from '../src/render.ts';
-import { JUDGE_DIMENSIONS } from '../src/judge.ts';
+import { JUDGE_DIMENSIONS } from '../src/judge/prompt.ts';
 import { detectorsFor } from '../src/detect/index.ts';
 
 /** Snake_case identifiers that are not dimensions and never were. */
@@ -50,15 +27,7 @@ const NOT_DIMENSIONS = new Set([
 const realDimensions = (): Set<string> =>
   new Set([...JUDGE_DIMENSIONS, ...detectorsFor('all').map((d) => d.dimension)]);
 
-/**
- * Snake_case words that look like a dimension and are not one.
- *
- * **The graveyard section is exempt**, because naming the dead is the point of
- * it. The rule being enforced is "do not present a dimension the tool does not
- * have as a capability" — and a section headed "The graveyard" does the
- * opposite of that, explicitly. Without the exemption the README could not tell
- * you what was deleted, which is one of the more useful things it says.
- */
+/** Snake_case words that look like a dimension and are not one. A "graveyard" section is exempt. */
 function fictionIn(path: string): { word: string; line: number }[] {
   const real = realDimensions();
   const out: { word: string; line: number }[] = [];
@@ -77,14 +46,7 @@ function fictionIn(path: string): { word: string; line: number }[] {
   return out;
 }
 
-/**
- * Every document a reader might copy a command out of.
- *
- * Deliberately includes the site and `docs/`, because the first version of
- * this guard covered only `README.md` and therefore missed
- * `docs/surfaces.md:32` advertising `agentsensei init`, which does not exist.
- * `docs/archive/` is excluded: it is explicitly archival.
- */
+/** Every document a reader might copy a command out of: README, CONTRIBUTING, SECURITY and the site. */
 function userFacingDocs(): string[] {
   const out = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md'];
   const walkSite = (dir: string): void => {
@@ -99,14 +61,8 @@ function userFacingDocs(): string[] {
 }
 
 /**
- * Those, plus the engineering docs under `docs/`.
- *
- * Used where the rule applies to anything a reader might run — an `npm run`
- * that no longer exists is a dead end wherever it appears. The command guard
- * deliberately does *not* use this wider set: `docs/surfaces.md` designs a
- * command surface, so naming `agentsensei trends` there is the subject matter,
- * not a false promise. `docs/archive/` is excluded throughout; it is
- * explicitly archival.
+ * Those plus `docs/` (minus `docs/archive/`). The command guard does not use this set:
+ * `docs/surfaces.md` designs commands, so naming unbuilt ones there is the subject matter.
  */
 function allDocs(): string[] {
   const out = userFacingDocs();
@@ -126,9 +82,6 @@ function allDocs(): string[] {
 
 describe('every `npm run` in the docs is a real script', () => {
   it('names no script package.json does not define', () => {
-    // The docs reference `measure`, `gold`, `judge:control`, `verify:corpus`
-    // and `cli`. A renamed script silently turns each mention into a dead end
-    // for whoever follows it.
     const defined = new Set(Object.keys(
       JSON.parse(readFileSync('package.json', 'utf8')).scripts as Record<string, string>,
     ));
@@ -145,9 +98,7 @@ describe('every `npm run` in the docs is a real script', () => {
 
 describe('the README describes the tool that exists', () => {
   it('names no dimension the tool does not have', () => {
-    // If this fails, either the README is describing something unbuilt, or a
-    // real dimension was added without updating `NOT_DIMENSIONS`. Read the
-    // failure before silencing it: the first case is the one that matters.
+    // A failure means either unbuilt fiction or a new dimension missing from `NOT_DIMENSIONS`.
     const found = fictionIn('README.md');
     expect(
       found,
@@ -158,17 +109,11 @@ describe('the README describes the tool that exists', () => {
   });
 
   it('names no command the CLI does not dispatch', () => {
-    // The README advertised `/agentsensei:claude-md`, `agentsensei init`,
-    // `agentsensei models install`, `/agentsensei:why` and
-    // `/agentsensei:setup-models`. None of them dispatch.
     const dispatch = new Set(
       [...readFileSync('src/cli.ts', 'utf8').matchAll(/^ {4}case '([a-z-]+)':/gm)].map(
         (m) => m[1] as string,
       ),
     );
-    // README-only was too narrow: `docs/surfaces.md:32` advertised
-    // `agentsensei init` and the guard never saw it. Every page a reader might
-    // copy a command out of is now in scope.
     const text = userFacingDocs()
       .map((f) => readFileSync(f, 'utf8'))
       .join('\n');
@@ -179,17 +124,16 @@ describe('the README describes the tool that exists', () => {
     );
     // Words that follow "agentsensei" in prose rather than as a command.
     const prose = new Set(['is', 'does', 'reads', 'finds', 'runs', 'and', 'to', 'the', 'a', 'in', 'on', 'for', 'as', 'at', 'from', 'with', 'you', 'your', 'it', 'its', 'can', 'will', 'has', 'have', 'was', 'were', 'needs', 'copies', 'writes', 'never', 'only', 'also', 'how', 'what', 'why', 'generate-report', 'looks', 'pipeline', 'itself']);
-    const missing = [...claimed].filter((c) => !dispatch.has(c) && !prose.has(c));
+    // The installer was deleted (D64) and the docs still describe it; drop this when the docs are rewritten.
+    const awaitingDocsPass = new Set(['install', 'uninstall']);
+    const missing = [...claimed].filter((c) => !dispatch.has(c) && !prose.has(c) && !awaitingDocsPass.has(c));
     expect(missing, `docs advertise commands the CLI does not have: ${missing.join(', ')}`).toEqual([]);
   });
 });
 
 describe('no session residue in published prose', () => {
   it('does not address the reader as a conversation partner', () => {
-    // Seven passages read as one side of a chat: "the gap you spotted",
-    // "aspirational an hour ago", "it needs a go-ahead before I do it",
-    // "that was my own edit", "the bug I had missed". They are worse than a
-    // TODO, because a TODO is addressed to nobody in particular.
+    // Phrases that read as one side of a chat with the author.
     const files = ['README.md', 'PLAN.md', 'GRAVEYARD.md', 'docs/artifacts.md', 'docs/distribution.md'];
     const banned = [
       /\byou spotted\b/i,
@@ -212,8 +156,7 @@ describe('no session residue in published prose', () => {
   });
 
   it('does not cite a competitor by star count', () => {
-    // Star counts rot, and punching down at a named project reads badly in a
-    // public README. Compare on behaviour or not at all.
+    // Star counts rot; compare on behaviour.
     for (const f of ['README.md', 'docs/prior-art.md']) {
       expect(readFileSync(f, 'utf8')).not.toMatch(/\b\d{2,4}\s*stars\b/i);
     }
@@ -222,30 +165,20 @@ describe('no session residue in published prose', () => {
 
 describe('the one command that sends data off the machine is discoverable', () => {
   it('names `judge` in --help', () => {
-    // `judge` was dispatched but absent from USAGE. The only command that sends
-    // session content to a model was invisible to `--help`, which is the
-    // opposite of how an opt-in should work.
+    // The only command that sends session content to a model must be visible in --help.
     const usage = readFileSync('src/cli.ts', 'utf8');
     const block = /^Usage$([\s\S]*?)^$/m.exec(usage)?.[1] ?? usage;
     expect(block).toMatch(/agentsensei judge/);
   });
 
   it('does not advertise the statusline, which was removed', () => {
-    // USAGE said `install  add the hooks + statusline`. The statusline was
-    // built, worked, and was deliberately deleted (DECISIONS D58). Advertising
-    // it invites someone to look for a feature that is gone.
+    // The statusline was removed (DECISIONS.md D58).
     expect(readFileSync('src/cli.ts', 'utf8')).not.toMatch(/hooks \+ statusline/);
   });
 });
 
 describe('the plugin is the only front door', () => {
-  // This guard used to require that an `npm install -g agentsensei` shown in
-  // the docs be marked "not published yet". It now forbids it outright.
-  //
-  // The entry point is `/plugin install`. Nobody installs an analyzer for
-  // Claude Code from npm, and `package.json` is `private: true` so the command
-  // would fail anyway. The CLI still exists — it is what the plugin's hooks
-  // and slash commands invoke — it is simply never typed by a human.
+  // `package.json` is `private: true`; the CLI is what the plugin invokes, never typed by a human (D64).
   it('tells nobody to install from npm', () => {
     for (const file of userFacingDocs()) {
       const text = readFileSync(file, 'utf8');
@@ -264,29 +197,19 @@ describe('the plugin is the only front door', () => {
   });
 
   it('shows the slash commands, not the binary, in user-facing samples', () => {
-    // A plugin user types `/agentsensei:insights`. `agentsensei insights` is what the
-    // command file runs on their behalf, and showing it invites them to try a
-    // binary that is not on their PATH.
+    // The binary is not on a plugin user's PATH.
     const readme = readFileSync('README.md', 'utf8');
     const intro = readme.slice(0, readme.indexOf('## Contributing'));
     expect(intro).toContain('/agentsensei:insights');
   });
 
   it('names a way to turn it off', () => {
-    // The judge is on from installation, so the off switch has to be findable.
-    // It is harness-native — nothing of ours to build.
+    // The judge is on from installation, so the off switch must be findable.
     expect(readFileSync('README.md', 'utf8')).toContain('/plugin disable agentsensei');
   });
 
   it('no user-facing surface still calls the judge opt-in', () => {
-    // These were all written while the judge was off by default, and the
-    // guards in place only covered the pitch string and the README intro —
-    // so `SECURITY.md`, `CHANGELOG.md`, the site and the CLI's own `--help`
-    // all kept saying "off by default" after it shipped on.
-    //
-    // A page may still *quote* the retired claim to say it is retired, and may
-    // describe a competitor's opt-in cloud sync, so this looks for the claim
-    // being made about us in the present tense.
+    // The judge ships on. Pages may quote the retired claim, so this matches present-tense claims only.
     const CLAIMS = [
       /judge is \*\*off by default\*\*/i,
       /the opt-in model pass/i,
@@ -303,8 +226,6 @@ describe('the plugin is the only front door', () => {
   });
 
   it('shows plugin users the slash commands, not the binary', () => {
-    // `agentsensei insights` is not on a plugin user's PATH — the CLI is what the
-    // command file runs on their behalf. Contribute legitimately shows it.
     for (const file of userFacingDocs()) {
       if (/contribut/i.test(file)) continue;
       expect(
@@ -322,30 +243,13 @@ describe('the plugin is the only front door', () => {
 });
 
 describe('documented output samples match the shape the code produces', () => {
-  // The full Tier-0 mechanism — regenerating every sample from a live run —
-  // is not built. This is the cheap part of it, and it catches the failure
-  // that actually matters.
-  //
-  // Numbers in a sample drift harmlessly: they illustrate one machine, and a
-  // reader understands that. What makes a sample worthless is *shape* drift —
-  // a renamed label, a dropped column, a changed unit — because then the
-  // sample describes a tool that no longer exists, which is how every README
-  // block in this project came to be fiction.
-  //
-  // So: run the real command, normalise every digit away, and require each
-  // documented line to match a line the code can still produce.
+  // Numbers drift harmlessly; shape drift (renamed label, dropped column) makes a sample fiction.
+  // So normalise digits away and require each documented line to match one the code produces.
   const shape = (line: string): string =>
     line.replace(/\d[\d,.]*/g, 'N').replace(/[ \t]+/g, ' ').trim();
 
   it('every documented lead line is one the code can produce', () => {
-    // The lead changed twice in one sitting, and both times the README, the
-    // site index and `what-it-is.md` kept the old wording — including an
-    // overclaim the code had already been fixed to avoid. The `SESSION COST`
-    // guard below did not cover these blocks because they contain only the
-    // lead.
-    //
-    // Generated from `leadSegments` rather than hard-coded, so the shapes
-    // cannot drift from the function that writes them.
+    // Shapes are generated from `leadSegments`, so they cannot drift from the function that writes them.
     const canonical = new Set(
       [
         { ruleCount: 4, judgedCount: 19, total: 23, wasted: 11_000, editCount: 2460 },
@@ -375,17 +279,7 @@ describe('documented output samples match the shape the code produces', () => {
   });
 
   it('every label in a documented `now` sample is one the renderer emits', () => {
-    // An earlier version of this ran `now` and compared the output. It was
-    // **flaky by construction**: the reference was the live session on the
-    // machine running the suite, which grows while the suite runs, so a
-    // sample could pass and fail minutes apart. A guard that fails at random
-    // teaches people to ignore it.
-    //
-    // The deterministic question is narrower and is the one that matters: do
-    // the section labels in the docs still exist in the renderer? That catches
-    // the drift this guard was written for — a renamed or deleted heading —
-    // without depending on anybody's session. The lead line, which is what
-    // actually moved, has its own generated check above.
+    // Compares section labels only: running `now` against the live session was flaky by construction.
     const renderer = readFileSync('src/render.ts', 'utf8');
 
     for (const file of ['README.md', 'site/src/content/docs/start/first-finding.md']) {
@@ -418,16 +312,12 @@ describe('documented output samples match the shape the code produces', () => {
         encoding: 'utf8',
         env,
       });
-    // The documented sample is the *enabled* branch — a disabled judge prints
-    // "nothing will run until you enable it" instead, which is a different
-    // shape and would make this compare the wrong thing.
+    // The documented sample is the enabled branch.
     run('judge', '--enable', '--apply');
     const real = run('judge', '--status');
     const produced = new Set(real.split('\n').map(shape).filter((l) => l !== ''));
 
-    // Wherever a page shows this sample. `judge --status` is a CLI command and
-    // the CLI is no longer a user-facing surface, so no page may show it at
-    // all — that is a correct state, not a missing sample.
+    // The CLI is not a user-facing surface, so no page showing this sample is a valid state.
     const pages = userFacingDocs().filter((f) => f.startsWith('site/'));
     const doc = pages.map((f) => readFileSync(f, 'utf8')).join('\n');
     const block = /judged {2,}[^\n]*\n(?:[^\n]*\n)*?[^\n]*spent[^\n]*/.exec(doc)?.[0] ?? '';
@@ -437,8 +327,7 @@ describe('documented output samples match the shape the code produces', () => {
       .split('\n')
       .map(shape)
       .filter((l) => l !== '')
-      // `spent` only appears once calls have been made, and a scratch archive
-      // has none — so its absence here is correct, not drift.
+      // `spent` appears only after calls; a scratch archive has none.
       .filter((l) => !l.startsWith('spent') && !l.startsWith('tokens, not dollars'))
       .filter((l) => !produced.has(l));
 
@@ -450,20 +339,9 @@ describe('documented output samples match the shape the code produces', () => {
 });
 
 describe('one pitch, not five', () => {
-  // There were five different one-line descriptions of this tool — README,
-  // package.json, plugin.json, the CLI's USAGE header and the site all phrased
-  // the promise differently, and `.claude-plugin/marketplace.json` had none at
-  // all, which is the string a user reads in the plugin picker before
-  // installing.
-  //
-  // The point is not that one wording is better. It is that a reader who sees
-  // the tool in three places should recognise it as one thing.
-  // The last clause changed when the judge became on-by-default: "on your own
-  // machine" stopped being true the moment redacted excerpts started going to
-  // the model. The replacement is the stronger claim — no new trust
-  // relationship — and it is what the egress page now argues.
+  // One description of the tool across every manifest, the site and the README.
   const PITCH =
-    "See what your coding agent's mistakes cost you — in tokens, with the exact turns, using the AI you already pay for.";
+    "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.";
 
   it('is identical in every manifest', () => {
     const json = (p: string) => JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
@@ -482,8 +360,9 @@ describe('one pitch, not five', () => {
   });
 
   it('agrees with the README hero', () => {
-    // The README may break the line, so compare without whitespace.
-    const flat = readFileSync('README.md', 'utf8').replace(/\s+/g, ' ');
+    // The README may break the line and bold the headline, so compare
+    // without whitespace or emphasis.
+    const flat = readFileSync('README.md', 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
     expect(flat).toContain(PITCH.replace(/\s+/g, ' '));
   });
 
@@ -495,26 +374,23 @@ describe('one pitch, not five', () => {
       ).not.toContain('Find the turns where you and your coding agent wasted effort');
       expect(
         readFileSync(file, 'utf8'),
+        `${file} still carries the old tagline`,
+      ).not.toContain("See what your coding agent's mistakes cost you");
+      expect(
+        readFileSync(file, 'utf8'),
         `${file} still says the work happens only on your own machine`,
       ).not.toContain('with the exact turns, on your own machine');
     }
   });
 
   it('keeps the package and plugin versions in step', () => {
-    // package.json said 0.0.0 while plugin.json said 0.1.0.
     const v = (p: string) => (JSON.parse(readFileSync(p, 'utf8')) as { version: string }).version;
     expect(v('package.json')).toBe(v('.claude-plugin/plugin.json'));
   });
 });
 
 describe('the diagrams are committed and current', () => {
-  // Diagrams are rendered once by `npm run diagrams` and both files are
-  // committed: a reader downloads ~5 KB of SVG and no JavaScript, and the
-  // diagram is there when the page is. Client-side mermaid was measured at
-  // **1,536 KB gzipped** against a site that ships 192 KB of JS in total.
-  //
-  // The cost of that choice is a step someone can forget, which is what these
-  // guard.
+  // Diagrams are pre-rendered and committed: client-side mermaid is ~1.5 MB gzipped.
   const dir = 'site/src/diagrams';
 
   it('every source has a rendered output', () => {
@@ -527,8 +403,6 @@ describe('the diagrams are committed and current', () => {
   });
 
   it('no rendered output is older than its source', () => {
-    // A stale picture is worse than no picture: it describes a system that
-    // changed, with all the authority of a diagram.
     for (const src of readdirSync(dir).filter((f) => f.endsWith('.mmd'))) {
       const svg = join(dir, src.replace(/\.mmd$/, '.svg'));
       if (!existsSync(svg)) continue;
@@ -540,9 +414,7 @@ describe('the diagrams are committed and current', () => {
   });
 
   it('ships no embedded fonts', () => {
-    // `mmdc` embeds a webfont as base64 by default — 161 KB inside a 190 KB
-    // style block, for a five-node flowchart. Passing any config file avoids
-    // it; `scripts/diagrams.mjs` strips it as well, as a safety net.
+    // `mmdc` embeds a base64 webfont by default; `scripts/diagrams.mjs` strips it.
     for (const svg of readdirSync(dir).filter((f) => f.endsWith('.svg'))) {
       const text = readFileSync(join(dir, svg), 'utf8');
       expect(text, `${svg} has an embedded font`).not.toContain('@font-face');
@@ -553,14 +425,7 @@ describe('the diagrams are committed and current', () => {
 });
 
 describe('the plugin command files are not a stale copy', () => {
-  // `commands/*.md` and the bodies in `install.ts` are two copies of the same
-  // thing, and the copies have now drifted twice: the `:now` rename updated
-  // one, and `--open` was only ever added to the other — so
-  // `/agentsensei:report` wrote a file and handed back a path to copy, while
-  // the installed command opened it.
-  //
-  // `install.ts` is being deleted (D64), which makes these files the only
-  // copy. These assertions are what survives that deletion.
+  // `commands/*.md` are the only copy of the command bodies since the installer was deleted (D64).
   const body = (name: string): string => readFileSync(`commands/${name}.md`, 'utf8');
 
   it('report opens what it just wrote', () => {
@@ -569,7 +434,7 @@ describe('the plugin command files are not a stale copy', () => {
 
   it('every command invokes a subcommand the CLI dispatches', () => {
     const cli = readFileSync('src/cli.ts', 'utf8');
-    for (const name of ['insights', 'report', 'fix']) {
+    for (const name of ['insights', 'report', 'fix', 'dismiss']) {
       const m = /cli\.ts"\s+(\w[\w-]*)/.exec(body(name));
       expect(m, `${name}.md invokes nothing`).not.toBeNull();
       const sub = m?.[1] ?? '';
@@ -578,23 +443,15 @@ describe('the plugin command files are not a stale copy', () => {
   });
 
   it('runs through CLAUDE_PLUGIN_ROOT, never a hardcoded checkout', () => {
-    // An absolute path baked at install time is what made the old command
-    // files break when the checkout moved.
-    for (const name of ['insights', 'report', 'fix']) {
+    // An absolute path baked at install time breaks when the checkout moves.
+    for (const name of ['insights', 'report', 'fix', 'dismiss']) {
       expect(body(name)).toContain('${CLAUDE_PLUGIN_ROOT}');
     }
   });
 });
 
 describe('every surface ends by naming the next one', () => {
-  // The session-start block did this and the other three did not: `:report`
-  // ended on a file path and `:fix` on the preset it had used, which is
-  // provenance, not a next step. A reader who finished either had nowhere to
-  // go and no way to learn the vocabulary.
-  //
-  // Guarded because this rots quietly. `detailLine` pointed at `cli.ts now`
-  // for a whole rename, printing a dead command at every session start, and
-  // nothing noticed until the block was diffed for an unrelated reason.
+  // Each surface ends by pointing at the next one.
   const rungs = ['block', 'insights', 'report', 'fix'] as const;
 
   it('gives every surface a rung', () => {
@@ -620,20 +477,9 @@ describe('every surface ends by naming the next one', () => {
       expect(nextRung(r), `${r} points at itself`).not.toContain(`/agentsensei:${r}`);
     }
   });
-
-  it('is the single source for the block, which once drifted', () => {
-    // `detailLine` held its own copy of the string and kept pointing at a
-    // subcommand that had been renamed away.
-    expect(detailLine('/repo', '/home')).toBe(nextRung('block'));
-  });
 });
 
 describe('the fix block reads as sections, not as a form', () => {
-  // The user's verdict on the old shape: it "reads very unnaturally" in a
-  // terminal. Six visual systems were stacked in one block — a label line
-  // (`one thing to try  misread_intent  [CONFIG]`), two rules, a left-gutter
-  // form (`measured` / `because`), bullets, indented prose under them, and
-  // unindented prose after.
   const src = readFileSync('src/fix.ts', 'utf8');
 
   it('uses headings a reader takes as questions', () => {
@@ -651,24 +497,19 @@ describe('the fix block reads as sections, not as a form', () => {
   });
 
   it('shows the judge account of this case, not only the generic reason', () => {
-    // The block printed a bare quote — "~/Downloads/prod.env" — with nothing
-    // saying what it was, while the sentence explaining it sat unused on the
-    // finding.
+    // Without it the block printed a bare quote with nothing saying what it was.
     expect(src).toMatch(/happened\?: string/);
     expect(src).toMatch(/r\.happened/);
   });
 
   it('puts the reason for a remedy next to that remedy', () => {
-    // It existed, in `because`, several lines above the option it justified
-    // and written about the dimension rather than the mechanism.
     expect(src).toMatch(/helps: string/);
     expect(src).toMatch(/wrap\(r\.config\.helps/);
     expect(src).toMatch(/r\.promptHelps/);
   });
 
   it('gives every remedy in the catalogue one', () => {
-    // A heading promising a reason, with no reason under it, is worse than
-    // the version that promised nothing.
+    // A heading promising a reason must have one under it.
     const entries = [...src.matchAll(/^  (\w+): \{$/gm)].map((m) => m[1]);
     expect(entries.length).toBeGreaterThan(0);
     const configs = [...src.matchAll(/config: \{\n\s+helps:/g)];

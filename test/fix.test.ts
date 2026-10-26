@@ -1,11 +1,4 @@
-/**
- * `fix` — the second output.
- *
- * CLAUDE.md allows exactly two: evidence, and something applicable. These tests
- * are mostly about the discipline that keeps the second one honest — one
- * recommendation, always with its evidence, and silence where no artifact
- * exists rather than a manufactured tip.
- */
+// `fix`, the second output: one recommendation, always with its evidence, and silence where no artifact exists.
 
 import { describe, expect, it } from 'vitest';
 import type { Event } from '../src/types.ts';
@@ -35,9 +28,7 @@ const base = (over: Partial<Standing> = {}): Standing => ({
     },
   ],
   wastedTokens: {},
-  // `string-not-found` dominates on purpose: `not-read-first` now returns a
-  // REPORT, because the harness already refuses an unread edit and a rule
-  // asking for it is ceremonial. These cases test the PROMPT path.
+  // `string-not-found` dominates on purpose: `not-read-first` returns a REPORT, so these test the PROMPT path.
   reasons: { 'string-not-found': 3, 'not-read-first': 1 },
   unreadable: 0,
   ...over,
@@ -45,8 +36,7 @@ const base = (over: Partial<Standing> = {}): Standing => ({
 
 describe('fix — exactly one thing', () => {
   it('returns one recommendation, never a list', () => {
-    // Behaviour-change research, and the reason `fix` exists rather than a
-    // report: a tool that returns six things to fix has returned nothing to do.
+    // Six things to fix is nothing to do.
     const r = recommend(base());
     expect(r).toBeDefined();
     expect(Array.isArray(r)).toBe(false);
@@ -72,8 +62,7 @@ describe('fix — exactly one thing', () => {
 
 describe('fix — choosing what to recommend', () => {
   it('prefers a fixable dimension over a frequent report-only one', () => {
-    // `redundant_call` has no artifact; recommending it would mean inventing
-    // one. Frequency must not override that.
+    // `redundant_call` has no artifact; frequency must not make one up.
     const r = recommend(
       base({
         dimensions: [
@@ -96,24 +85,20 @@ describe('fix — choosing what to recommend', () => {
   });
 
   it('reports rather than guesses when the reason is unrecognised', () => {
-    // A reworded harness message must not silently map to the nearest
-    // familiar fix.
+    // A reworded harness message must not map to the nearest familiar fix.
     const r = recommend(base({ reasons: { 'something-new': 5 } }));
     expect(r?.kind).toBe('REPORT');
     expect(r?.prompt).toBeUndefined();
   });
 
   it('breaks a tie stably, so the recommendation does not flip between runs', () => {
-    // 2-2 here. Which one wins is arbitrary; being *stably* arbitrary is what
-    // matters, because advice that changes on re-run cannot be followed.
+    // A tie is broken arbitrarily but stably, so advice does not change on re-run.
     const a = recommend(base())?.prompt;
     const b = recommend(base())?.prompt;
     expect(a).toBe(b);
   });
 
   it('picks the artifact from the reason, not the dimension', () => {
-    // Two `edit_retry` reasons that need different answers — and one of them
-    // needs no answer at all.
     const notFound = recommend(base({ reasons: { 'string-not-found': 9 } }));
     const stale = recommend(base({ reasons: { 'stale-read': 9 } }));
     expect(notFound?.prompt).not.toBe(stale?.prompt);
@@ -121,12 +106,7 @@ describe('fix — choosing what to recommend', () => {
   });
 
   it('reports `not-read-first` instead of advising it, because the harness enforces it', () => {
-    // This was the DEFAULT recommendation: "read a file before editing it".
-    // The harness already refuses an edit to a path it has not read — which is
-    // *why* these were refused — so the rule describes behaviour that already
-    // complied. `docs/artifacts.md` measures that category at 66.7% of all
-    // rules and calls it ceremonial. Telling the user the harness has it
-    // covered is the useful answer.
+    // The harness already refuses an unread edit, so a rule for it is ceremonial (docs/artifacts.md).
     const r = recommend(base({ reasons: { 'not-read-first': 9 } }));
     expect(r?.kind).toBe('REPORT');
     expect(r?.prompt).toBeUndefined();
@@ -144,15 +124,12 @@ describe('fix — a judge finding outranks a rule finding when it has a mechanis
   }] as never;
 
   it('offers a deterministic mechanism for a constraint violation, not an edit_retry rule', () => {
-    // The failure this fixes: on a machine whose judge had found two
-    // constraint_violations, `fix` reached past them to offer an 11,000-token
-    // edit_retry prose rule for something the harness already enforces.
+    // Judged findings outrank a rule for something the harness already enforces.
     const r = recommend(base(), judged('constraint_violation'));
     expect(r?.dimension).toBe('constraint_violation');
     expect(r?.kind).toBe('VERIFY');
     expect(r?.config?.snippet).toMatch(/"Stop"/);
     expect(r?.config?.costs).toMatch(/stop a turn from finishing/);
-    // The weaker option is still offered, underneath.
     expect(r?.prompt).toBeDefined();
   });
 
@@ -166,7 +143,6 @@ describe('fix — a judge finding outranks a rule finding when it has a mechanis
     const r = recommend(base(), judged('misread_intent'));
     expect(r?.kind).toBe('CONFIG');
     expect(r?.config?.what).toMatch(/plan mode/);
-    // Honest about the cost, in words a user can act on rather than a citation.
     expect(r?.config?.costs).toMatch(/slower/i);
     expect(r?.config?.costs).toMatch(/in the way for anything obvious/);
   });
@@ -196,15 +172,12 @@ describe('fix — what it renders', () => {
   });
 
   it('warns that adopting it perturbs the measurement', () => {
-    // docs/surfaces.md: a dimension under an active brief reads as suppressed,
-    // not improved. Handing one over without saying so would make the next
-    // report a lie.
+    // A dimension under an active brief reads as suppressed, not improved (docs/surfaces.md).
     expect(renderFix(recommend(base()), 'core')).toMatch(/suppressed rather than improved/);
   });
 
   it('names the preset it chose from', () => {
-    // One live detector would otherwise read as "there is only one thing you
-    // could improve".
+    // One live detector must not read as the only thing to improve.
     expect(renderFix(recommend(base()), 'core')).toContain('preset "core"');
     expect(renderFix(recommend(base()), 'standard', ['edit_retry'])).toContain('muted: edit_retry');
   });
@@ -219,7 +192,6 @@ describe('fix — what it renders', () => {
   });
 
   it('uses no severity word', () => {
-    // It is a suggestion built from the user's own data, not a verdict on them.
     const out = renderFix(recommend(base()), 'core').toLowerCase();
     for (const nag of ['warning', 'error', 'bad', 'wrong', 'failure', 'you should']) {
       expect(out, `must not contain "${nag}"`).not.toContain(nag);
@@ -235,18 +207,14 @@ describe('fix — the CLAUDE.md budget, which was not checked at all', () => {
   });
 
   it('refuses a rule once the file is past the measured ceiling', () => {
-    // `docs/artifacts.md`: well-performing files average 300-350 words, past
-    // 500 shows diminishing returns, and past 1,000 the correlation with
-    // performance goes NEGATIVE. `fix` used to append on every single run,
-    // which the same doc calls the mechanism of catastrophic remembering.
+    // Long CLAUDE.md files perform worse (docs/artifacts.md), so `fix` does not append on every run.
     const dir = mkdtempSync(join(tmpdir(), 'as-fix-budget-'));
     writeFileSync(join(dir, 'CLAUDE.md'), Array.from({ length: MEMORY_WORD_BUDGET + 50 }, () => 'word').join(' '));
     expect(memoryAllowed(dir)).toBe(false);
   });
 
   it('treats a missing CLAUDE.md as room, not as a refusal', () => {
-    // The common case is a project with no CLAUDE.md at all. Refusing there
-    // would be exactly backwards.
+    // A project with no CLAUDE.md is the common case and must not be refused.
     expect(memoryAllowed(mkdtempSync(join(tmpdir(), 'as-fix-none-')))).toBe(true);
   });
 });
@@ -258,10 +226,7 @@ describe('fix — two non-actions, and which one is worth printing', () => {
   ] as never;
 
   it('shows the `other` descriptors rather than a ceremonial edit_retry report', () => {
-    // The first version only reached the judged report when `Standing` was
-    // absent, which in practice never happens — so the descriptors were
-    // collected and never shown, which defeats the only reason the escape
-    // hatch exists.
+    // Regression: descriptors were collected but never shown when `Standing` was present.
     const r = recommend(base({ reasons: { 'not-read-first': 9 } }), other);
     expect(r?.dimension).toBe('other');
     expect(r?.because).toMatch(/returned wrong command format/);
@@ -288,11 +253,7 @@ describe('fix — two non-actions, and which one is worth printing', () => {
 
 describe('fix — the output explains itself without citing papers at the user', () => {
   it('keeps research figures out of every user-facing string', () => {
-    // The evidence belongs in `docs/artifacts.md` and in the code comments,
-    // where it justifies the design to whoever maintains it. A user reading a
-    // finding about their own session does not need a literature review, and
-    // "+0.066 pts across 753 rules" is a sentence that informs nobody who did
-    // not already know what it meant.
+    // The research stays in docs/artifacts.md; the user-facing text carries no literature figures.
     const judged = [{ sessionId: 's1', dimension: 'constraint_violation', turns: [9], why: 'x', at: 'now' }] as never;
     const everything = [
       renderFix(recommend(base(), judged), 'core'),
@@ -305,7 +266,6 @@ describe('fix — the output explains itself without citing papers at the user',
     for (const jargon of ['+0.066', '88.3%', '67.0%', '69.4%', '70.8%', '31.8%', '10.5%', '753 rules', '66.7%']) {
       expect(everything).not.toContain(jargon);
     }
-    // And no bare percentage anywhere, which is the general form of the problem.
     expect(everything).not.toMatch(/\d+\.\d+%/);
   });
 
@@ -320,12 +280,7 @@ describe('fix — a constraint that was compacted away was not ignored', () => {
   const cv = [{ sessionId: 's1', dimension: 'constraint_violation', turns: [2711], why: 'x', at: 'now' }] as never;
 
   it('changes the recommendation when a compaction preceded the violation', () => {
-    // "Enforcement survives, context does not" — the harness docs' own line.
-    // Permissions and hooks are configuration, so a compact cannot remove
-    // them; an instruction typed into the conversation is simply gone. Measured
-    // across 1,323 episodes: 0% violation when the constraint survived the
-    // summary, 38% when it was dropped. So this is a different problem with a
-    // different fix, not a worse-worded rule.
+    // Permissions and hooks survive a compact; an instruction typed into the conversation does not.
     const r = recommend(base(), cv, new Map([['s1', { before: 2, dropped: 904_334 }]]));
     expect(r?.kind).toBe('CONFIG');
     expect(r?.because).toMatch(/may not have been ignored/);
@@ -341,8 +296,7 @@ describe('fix — a constraint that was compacted away was not ignored', () => {
   });
 
   it('ignores a compaction that happened AFTER the cited turn', () => {
-    // `compactionsFor` only counts compactions strictly before the finding, so
-    // a later one cannot explain an earlier violation.
+    // Only compactions before the finding can explain it.
     seq = 0;
     const events = [
       ev({ turnType: 'user_prompt' }),

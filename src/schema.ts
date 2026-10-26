@@ -1,13 +1,6 @@
 /**
- * Schema versions for everything we persist.
- *
- * The rule: **anything written to disk carries the version of the shape it was
- * written with.** Not because the first shape is likely right, but because it is
- * likely wrong — and a stored record whose shape silently changed is worse than
- * one that fails loudly.
- *
- * Bump a version when the shape changes OR when its meaning changes. A renamed
- * field is a bump; a new optional field is not.
+ * Schema versions for everything we persist; every record on disk carries one.
+ * Bump when shape or meaning changes: a renamed field is a bump, a new optional field is not.
  */
 
 export const SCHEMA = {
@@ -19,24 +12,14 @@ export const SCHEMA = {
   finding: 1,
   /** The catalog's `index.json`. Bump forces a full re-read of all sources. */
   catalog: 1,
-  /**
-   * The SQLite store. Bump on every forward migration.
-   *
-   * Written to `meta.schema_version` when the store is created. There is no
-   * migration from the flat files it replaced, deliberately: nothing was
-   * published, and everything in it is re-derived from transcripts we do not
-   * own, so the cost of discarding a v0 archive is one re-scan.
-   */
+  /** The SQLite store (`meta.schema_version`). Bump on every forward migration. */
   store: 1,
 } as const;
 
-export type SchemaName = keyof typeof SCHEMA;
-export type SchemaVersion<K extends SchemaName> = (typeof SCHEMA)[K];
+type SchemaName = keyof typeof SCHEMA;
+type SchemaVersion<K extends SchemaName> = (typeof SCHEMA)[K];
 
-/**
- * Stamped onto every persisted envelope. `agentsensei` is included so a file
- * found on its own is self-describing.
- */
+/** Stamped onto every persisted envelope, so a file found on its own is self-describing. */
 export type Versioned<K extends SchemaName> = {
   readonly tool: 'agentsensei';
   readonly schema: K;
@@ -47,19 +30,14 @@ export function stamp<K extends SchemaName>(schema: K): Versioned<K> {
   return { tool: 'agentsensei', schema, v: SCHEMA[schema] };
 }
 
-export type VersionCheck =
+type VersionCheck =
   | { ok: true }
   | { ok: false; reason: 'newer'; found: number; expected: number }
   | { ok: false; reason: 'older'; found: number; expected: number }
   | { ok: false; reason: 'unversioned' };
 
 /**
- * Checked on read, never assumed.
- *
- * `newer` matters as much as `older`: a file written by a future version may use
- * fields this build will silently ignore, which is exactly how a tool reports
- * confidently wrong numbers. Callers decide what to do — the archive rebuilds,
- * the verdict cache misses, the store migrates — but nobody gets to guess.
+ * Checked on read, never assumed. `newer` matters too: a future file may carry fields this build ignores.
  */
 export function checkVersion<K extends SchemaName>(schema: K, found: unknown): VersionCheck {
   const expected: number = SCHEMA[schema];

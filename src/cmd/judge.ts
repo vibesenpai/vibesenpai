@@ -1,0 +1,180 @@
+/** `judge`: status, backlog, and the on/off switch for the model pass. */
+
+import { readFileSync } from 'node:fs';
+import { bold, dim } from '../style.ts';
+import { basename, join } from 'node:path';
+import { discoverTranscripts, sessionSizes } from '../read.ts';
+import { readJudgeState, writeSettings } from '../judge/state.ts';
+import { pendingWork } from '../judge/schedule.ts';
+import { takeJudgeLock, JUDGE_LOCK_OWNER_ENV } from '../judge/lock.ts';
+import { renderExtract } from '../judge/prompt.ts';
+import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS } from '../judge/packet.ts';
+import { parseTranscript, withFullText } from '../parsers/claude-code.ts';
+import { runDetached } from '../spawn.ts';
+import { duration, plural } from '../format.ts';
+import { type Argv, configFromFlags } from './common.ts';
+
+/** Start the judge for one session, or the whole backlog, and do not wait. */
+export function spawnJudge(sessionId?: string): void {
+  // The caller took the lock in this process; the pass releases it as this pid.
+  runDetached('judge.ts', sessionId === undefined ? [] : [sessionId], {
+    ...process.env,
+    [JUDGE_LOCK_OWNER_ENV]: String(process.pid),
+  });
+}
+
+export function cmdJudge(a: Argv): number {
+  const { config } = configFromFlags(a);
+  const state = readJudgeState(config.archive);
+  const f = a.flags;
+
+  // `--status`: the judge is the only slow, detached step, so the only one with a progress view.
+  if (f['status'] === true) {
+    const { judged, pending, unread, behind } = pendingWork(state, sessionSizes(config.sources));
+
+    console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
+    console.log('');
+
+    // An unreadable store has no count; printing `judged 0` would be a false report.
+    if (state.storeUnreadable === true) {
+      console.log(`  judged     ${bold('unknown')} — the store could not be read`);
+      console.log(`  ${dim(`it is at ${join(config.archive, 'store.db')}`)}`);
+      console.log(`  ${dim('delete it to start a fresh one; findings are re-derived from transcripts')}`);
+    } else {
+      // "read" includes sessions with new turns since; `judged` alone counts only fully caught-up ones.
+      console.log(
+        `  read       ${judged + behind} session(s) · ${state.findings.length} finding(s)`,
+      );
+    }
+    if (pending === 0) {
+      console.log('  pending    nothing — every session is up to date');
+      console.log('');
+      console.log(`  ${dim('`no findings` from `now` or `report` means a clean bill of health,')}`);
+      console.log(`  ${dim('not an unfinished pass.')}`);
+    } else {
+      // Counts, not a time estimate: completion is paced by turns ending, not by model time.
+      const parts: string[] = [];
+      if (unread > 0) parts.push(`${unread} never read`);
+      if (behind > 0) parts.push(`${behind} with new turns since`);
+      console.log(`  pending    ${parts.join(' · ')}`);
+      console.log('');
+      // The `Stop` hook triggers the pass.
+      console.log(
+        `  ${dim(
+          state.settings.enabled
+            ? 'read in the background, all of it, from when a turn ends.'
+            : 'disabled — nothing will be read or sent.',
+        )}`,
+      );
+    }
+    if (state.usage.calls > 0) {
+      console.log('');
+      console.log(
+        `  spent      ${state.usage.calls} call(s) · ${state.usage.inputTokens.toLocaleString()} in · ` +
+          `${state.usage.outputTokens.toLocaleString()} out`,
+      );
+      console.log(`  ${dim('tokens, not dollars — a price depends on your plan and tier.')}`);
+    }
+    return 0;
+  }
+
+  // `--backlog`: a large spend, so it prints an estimate and waits for `--apply`.
+  if (f['backlog'] === true) {
+    const { pending, seconds } = pendingWork(state, sessionSizes(config.sources));
+    if (pending === 0) {
+      console.log('nothing pending — every session is up to date');
+      return 0;
+    }
+    if (!state.settings.enabled) {
+      console.log('the judge is disabled; nothing would run');
+      return 1;
+    }
+    if (f['apply'] !== true) {
+      console.log(`this would read ${plural(pending, 'session')} with the model on your account`);
+      console.log(
+        `  about ${duration(seconds)} · roughly ${(pending * 58).toLocaleString()}k input tokens`,
+      );
+      console.log('');
+      console.log('  nothing has been sent. re-run with --apply to start it.');
+      return 0;
+    }
+    // Take the lock atomically, as the hook does, so two passes never overlap.
+    if (!takeJudgeLock(config.archive)) {
+      console.log('a pass is already running — nothing started.');
+      return 0;
+    }
+    spawnJudge();
+    console.log(`reading ${plural(pending, 'session')} — about ${duration(seconds)}.`);
+    console.log(dim('  it runs in the background; findings appear as they land.'));
+    return 0;
+  }
+
+  if (f['disable'] === true) {
+    if (f['apply'] !== true) {
+      console.log('would disable the judge. re-run with --apply.');
+      return 0;
+    }
+    writeSettings(config.archive, { ...state.settings, enabled: false });
+    console.log('judge disabled. nothing further will be sent.');
+    return 0;
+  }
+
+  // Priced from a real packet, not an average.
+  const sessions = [];
+  for (const source of discoverTranscripts(config.sources).slice(0, 5)) {
+    const id = basename(source, '.jsonl');
+    try {
+      const r = withFullText(() => parseTranscript(readFileSync(source, 'utf8').split('\n'), id));
+      const ev = [...r.result.events].sort((x, y) => x.seq - y.seq);
+      if (ev.length === 0) continue;
+      const p = buildSession(id, ev, r.fullText);
+      if (p.packet.turns.length > 0) sessions.push(p);
+    } catch {
+      // Unreadable here is not an error; the runner counts those.
+    }
+  }
+
+  const packetTokens = sessions.length === 0 ? 0 : estimateTokens(renderExtract(sessions));
+
+  console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
+  console.log('');
+  console.log('  what one pass would send');
+  console.log(`    stage 1  ${sessions.length} session(s) · ~${packetTokens.toLocaleString()} tokens of transcript`);
+  // Stage 2 reads stage 1's records, so its packet is small, but it pays the overhead again.
+  console.log('    stage 2  the episodes stage 1 found · a few hundred tokens each');
+  // The overhead is Claude Code's own system prompt and tools; not ours to shrink.
+  console.log(`    ${JUDGE_OVERHEAD_TOKENS.toLocaleString()} tokens of invocation overhead per stage, whatever we send`);
+  console.log('    output is roughly 98% thinking — measured, not estimated');
+  console.log('');
+  console.log(`  cadence  every ~${state.settings.cadence} turns of new transcript`);
+  console.log(`  ceiling  ${state.settings.maxBatchTokens.toLocaleString()} tokens per batch`);
+  if (state.usage.calls > 0) {
+    console.log('');
+    console.log(
+      `  spent so far  ${state.usage.calls} call(s) · ` +
+        `${state.usage.inputTokens.toLocaleString()} in · ` +
+        `${state.usage.outputTokens.toLocaleString()} out`,
+    );
+  }
+  console.log('');
+  console.log('  Tokens, not money: what a token costs depends on your plan, your');
+  console.log('  tier and the model, and on a subscription it is notional.');
+
+  if (f['dry-run'] === true) {
+    console.log('\n  --dry-run: nothing was sent.');
+    return 0;
+  }
+  if (f['enable'] !== true) {
+    console.log('\n  --enable to turn it on, --dry-run to see a packet, --disable to stop.');
+    return 0;
+  }
+  if (f['apply'] !== true) {
+    console.log('\n  nothing written. re-run with --enable --apply to turn it on.');
+    return 0;
+  }
+
+  writeSettings(config.archive, { ...state.settings, enabled: true });
+  console.log('\n  judge enabled. it runs detached, after your turn ends.');
+  console.log('  `agentsensei judge --disable --apply` stops it.');
+  return 0;
+}

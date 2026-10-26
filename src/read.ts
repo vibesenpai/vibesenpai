@@ -1,38 +1,19 @@
 /**
- * Reading transcripts. One incremental reader, two modes.
- *
- * ── Why two modes and not two readers ────────────────────────────────────────
- *
- * `catalogued` reads up to the byte offset the catalog recorded, and nothing
- * past it. `live` reads whatever is on disk right now, including bytes written
- * since the last scan — that is what makes `agentsensei insights` able to say
- * anything about the session you are sitting in.
- *
- * They are the same code with a different end offset, deliberately. Two readers
- * would drift, and the one that drifted would be `live` — the harder path, used
- * by the surface that runs most often.
- *
- * ── What this module will not do ─────────────────────────────────────────────
- *
- * It does not import the catalog. The offset arrives as a parameter instead, so
- * this stays a pure function of (path, end offset) — testable without a store,
- * and free of a cycle, since the catalog needs the byte reader that lives here.
- *
- * It never opens a source for writing. CLAUDE.md, Principle Zero: never open the
- * harness's own files for writing.
+ * Reading transcripts: one reader, two modes (`catalogued` stops at the catalog's offset, `live`
+ * reads what is on disk). Takes the offset as a parameter rather than importing the catalog.
+ * Never opens a harness file for writing.
  */
 
-import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import { closeSync, openSync, readSync, statSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { readdirSync } from 'node:fs';
 
-export type ReadMode =
+type ReadMode =
   /** Up to the catalog's recorded offset. Deterministic across re-runs. */
   | 'catalogued'
   /** Everything on disk now, including what no scan has accounted for yet. */
   | 'live';
 
-export type SessionRead = {
+type SessionRead = {
   sessionId: string;
   source: string;
   mode: ReadMode;
@@ -41,10 +22,7 @@ export type SessionRead = {
   bytesRead: number;
   /** The offset supplied by the caller, when there was one. */
   catalogOffset: number | undefined;
-  /**
-   * Bytes read beyond `catalogOffset`. Non-zero only in `live` mode, and worth
-   * surfacing: it is exactly the work the catalogued view cannot see yet.
-   */
+  /** Bytes read beyond `catalogOffset`; non-zero only in `live` mode. */
   ahead: number;
   /** A partial trailing line was left unread, because the harness is mid-write. */
   partialTail: boolean;
@@ -69,15 +47,11 @@ export function readRange(path: string, from: number, to: number): Buffer {
   }
 }
 
-export type ReadSessionOptions = {
+type ReadSessionOptions = {
   source: string;
   sessionId?: string;
   mode: ReadMode;
-  /**
-   * Bytes the catalog has accounted for. Required for `catalogued` — reading a
-   * session the catalog has never seen would silently return nothing, and a
-   * silent empty result is indistinguishable from a session with no content.
-   */
+  /** Bytes the catalog has accounted for. Required for `catalogued`, so it never silently returns nothing. */
   catalogOffset?: number;
 };
 
@@ -97,10 +71,7 @@ export function readSession(opts: ReadSessionOptions): SessionRead {
 
   const chunk = readRange(source, 0, end);
 
-  // Stop at the last complete line. In `live` mode the harness may be writing
-  // this file right now; handing a half-written record to the parser would have
-  // it counted as malformed, and unlike the catalog we get no second chance to
-  // re-read it later in this process.
+  // Stop at the last complete line: in `live` mode the harness may be mid-write.
   const lastNl = chunk.lastIndexOf(0x0a);
   const consumed = lastNl === -1 ? 0 : lastNl + 1;
 
@@ -137,13 +108,7 @@ function walk(sources: string[]): string[] {
   return out;
 }
 
-/**
- * Locate a session's transcript by id, searching the sources directly.
- *
- * Deliberately independent of the catalog: `--live` has to work on a session
- * that no scan has reached yet, which is the normal state of the session you are
- * currently in.
- */
+/** Locate a session's transcript by id, without the catalog (`--live` must work before any scan). */
 export function findSessionSource(sources: string[], sessionId: string): string | undefined {
   const r = lookupSession(sources, sessionId);
   return r.ok ? r.source : undefined;
@@ -159,24 +124,8 @@ export type SessionLookup =
   | { ok: false; reason: 'ambiguous'; candidates: string[] };
 
 /**
- * Resolve a session id, accepting the short form every surface prints.
- *
- * ── The id you can see must be the id you can use ──────────────────────────
- *
- * Reports print eight characters — `session e3a3f0d4 · 5803 events` — and this
- * matched on exact equality, so the only id a reader ever saw was the one
- * `--session` rejected:
- *
- * ```
- *   now --session e3a3f0d4  ->  no transcript found under: …
- * ```
- *
- * Exact first, so a full id can never be read as an ambiguous prefix. Then a
- * unique prefix.
- *
- * **An ambiguous prefix is an error, never a guess.** Picking one would analyse
- * somebody else's session under a header that looks authoritative — the same
- * failure `resolveCurrentSession` avoids by printing that it guessed.
+ * Resolve a session id, accepting the 8-char short form surfaces print. Exact match first, then a
+ * unique prefix. An ambiguous prefix is an error, never a guess.
  */
 export function lookupSession(sources: string[], id: string): SessionLookup {
   const files = walk(sources);
@@ -199,74 +148,39 @@ export function lookupSession(sources: string[], id: string): SessionLookup {
   return { ok: true, sessionId: basename(only, '.jsonl'), source: only, via: 'prefix' };
 }
 
-/**
- * Every transcript under the configured sources.
- *
- * The one enumeration the multi-session surfaces share, so a page cannot
- * disagree with itself about which sessions exist. `report` used to drive off
- * the catalog and saw 4 of 8 — printing "no transcripts cover this period" for
- * a window a listed session spanned.
- *
- * Built on `walk`, which is plain `readdirSync`. The detached standing pass had
- * its own copy shelling out to `find`; this removes that subprocess.
- */
+/** The harness's project directory name, e.g. `-Users-me-Workspace-app`. Findings are keyed on it. */
+export function projectOf(source: string): string {
+  const parts = source.split(/[\\/]/).filter((p) => p !== '');
+  return parts.at(-2) ?? 'unknown';
+}
+
+/** The readable tail of a project key, e.g. `app`. Display only, never a key. */
+export function projectLabel(project: string): string {
+  return project.split('-').filter(Boolean).pop() ?? project;
+}
+
+/** Every transcript under the sources, minus our own judge's; the one enumeration all surfaces share. */
 export function discoverTranscripts(sources: string[]): string[] {
   return walk(sources).filter((p) => !isOurOwnJudgeSession(p));
 }
 
-/**
- * The directory the judge runs its headless child in.
- *
- * Encoded into the harness's project-directory name, so a transcript written by
- * our own judge lands somewhere recognisable.
- */
+/** The judge child's working directory name, so its transcripts are recognisable. */
 export const JUDGE_CWD_MARKER = 'agentsensei-judge';
 
-/**
- * Directory-name fragments that mean "a transcript our own model call wrote".
- *
- * `JUDGE_CWD_MARKER` is what we create *now*, but earlier probes ran in
- * `/private/tmp/as-judge-probe` and `/private/tmp/as-judge-step0`, which the
- * marker does not match. Measured on a real machine: of 1,009 transcripts in
- * `~/.claude/projects`, **995 were our own** — 494MB of headless children from
- * one day of measurement runs — and 5 of those leaked past the filter because
- * they predate the marker. They were being analysed as the user's work.
- *
- * Matching a list rather than one string, because the cost of a false negative
- * is analysing our own output and reporting it as theirs, while the cost of a
- * false positive is skipping a session whose path contains `as-judge`, which no
- * real project is called.
- */
+/** Path fragments of our own judge transcripts; `as-judge-` covers probes that predate the marker. */
 const OUR_CWD_FRAGMENTS = [JUDGE_CWD_MARKER, 'as-judge-'];
 
 /**
- * Is this transcript one our own judge produced?
- *
- * **Measured, not theorised.** A headless `claude -p` child writes its own
- * transcript into `~/.claude/projects`, and without this the judge analyses —
- * and judges — its own output. Three probe calls took this machine from 9
- * discovered sessions to 12 before anyone noticed, and a judge run took it 14
- * to 15.
- *
- * `--bare` would have prevented the child entirely, but it demands
- * `ANTHROPIC_API_KEY`: on a subscription it returns `is_error: true` and
- * *"Not logged in"* without calling anything. So the child is a real session
- * and the only reliable fix is to recognise where it ran.
+ * Is this transcript one our own judge produced? The `claude -p` child writes a real session
+ * (`--bare` needs an API key), so without this the judge would judge itself.
  */
-export function isOurOwnJudgeSession(path: string): boolean {
+function isOurOwnJudgeSession(path: string): boolean {
   return OUR_CWD_FRAGMENTS.some((f) => path.includes(f));
 }
 
-export type LatestSession = { source: string; sessionId: string; mtimeMs: number };
+type LatestSession = { source: string; sessionId: string; mtimeMs: number };
 
-/**
- * The most recently written transcript.
- *
- * This is how `now` finds "the session you are running from" when the harness
- * has not told us which one that is. It is a heuristic and is reported as one —
- * the session id is printed, so a wrong guess is visible rather than silently
- * analysing someone else's work.
- */
+/** The most recently written transcript: `now`'s fallback guess, reported as a guess. */
 export function findLatestSession(sources: string[]): LatestSession | undefined {
   let best: LatestSession | undefined;
   for (const source of walk(sources)) {
@@ -285,14 +199,7 @@ export function findLatestSession(sources: string[]): LatestSession | undefined 
   return best;
 }
 
-/**
- * Which session `now` should look at.
- *
- * Precedence mirrors the config rule — explicit beats ambient, ambient beats
- * guessing — and the chosen `via` is returned so the caller can print it.
- * Guessing silently would be the failure mode: analysing a different session
- * than the one you are in, with output that looks authoritative.
- */
+/** Which session `now` should look at: flag, then env, then latest. `via` says which, so a guess is visible. */
 export function resolveCurrentSession(
   sources: string[],
   opts: { sessionId?: string; env?: NodeJS.ProcessEnv } = {},
@@ -300,14 +207,12 @@ export function resolveCurrentSession(
   const env = opts.env ?? process.env;
 
   if (opts.sessionId !== undefined) {
-    const source = findSessionSource(sources, opts.sessionId);
-    return source === undefined
-      ? undefined
-      : { sessionId: opts.sessionId, source, via: 'flag' };
+    // A prefix resolves to the full id, so later lookups keyed on it match.
+    const r = lookupSession(sources, opts.sessionId);
+    return r.ok ? { sessionId: r.sessionId, source: r.source, via: 'flag' } : undefined;
   }
 
-  // Whatever the harness exposes. Checked rather than assumed: if neither
-  // variable is set we fall through instead of inventing an id.
+  // Fall through if neither variable is set; never invent an id.
   const fromEnv = env['AGENTSENSEI_SESSION_ID'] ?? env['CLAUDE_SESSION_ID'];
   if (fromEnv !== undefined && fromEnv !== '') {
     const source = findSessionSource(sources, fromEnv);
@@ -318,4 +223,18 @@ export function resolveCurrentSession(
   return latest === undefined
     ? undefined
     : { sessionId: latest.sessionId, source: latest.source, via: 'latest' };
+}
+
+/** Every discoverable session with its size and mtime. A file that vanishes mid-scan is skipped. */
+export function sessionSizes(sources: string[]): { id: string; sizeBytes: number; mtimeMs: number }[] {
+  const out: { id: string; sizeBytes: number; mtimeMs: number }[] = [];
+  for (const source of discoverTranscripts(sources)) {
+    try {
+      const st = statSync(source);
+      out.push({ id: basename(source, '.jsonl'), sizeBytes: st.size, mtimeMs: st.mtimeMs });
+    } catch {
+      // gone between listing and stat
+    }
+  }
+  return out;
 }

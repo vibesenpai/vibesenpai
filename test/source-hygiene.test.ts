@@ -3,13 +3,8 @@ import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 /**
- * A literal NUL ended up in `src/verify.ts` — in a separator constant and in a
- * doc comment — because it was authored invisibly. The cost was not the constant
- * (NUL is the right separator there) but the comment: a later edit targeting
- * that comment matched nothing and silently did not apply, leaving the type and
- * the implementation disagreeing while every test passed.
- *
- * Control characters in source are therefore a build failure, not a style note.
+ * Control characters in source fail the build: an invisible NUL in a doc comment once made a
+ * later edit silently not apply.
  */
 describe('source hygiene', () => {
   const files = execSync('find src test -name "*.ts"', { encoding: 'utf8' })

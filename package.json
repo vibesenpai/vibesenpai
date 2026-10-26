@@ -1,28 +1,13 @@
 {
   "name": "agentsensei",
   "version": "0.1.0",
-  "description": "See what your coding agent's mistakes cost you \u2014 in tokens, with the exact turns, using the AI you already pay for.",
+  "description": "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.13"
   },
-  "bin": {
-    "agentsensei": "./dist/src/cli.js"
-  },
-  "files": [
-    "dist",
-    "scripts",
-    "commands",
-    "hooks",
-    ".claude-plugin",
-    "README.md",
-    "LICENSE",
-    "NOTICE"
-  ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

@@ -40,14 +40,23 @@ to be.
 This matters because the alternative — padding the output so it always looks
 busy — is how a tool teaches you to ignore it.
 
-## Reading the cost block
+## Reading a cache flag
 
-**`ratio 3.7`** is re-ingested tokens over output tokens. Every turn re-sends
-the conversation, so a long session re-reads its own history many times over.
-The corpus median is 17.9, so 3.7 is unusually efficient; a high ratio means a
-lot of the spend went on re-reading rather than producing.
+Cache numbers appear only when something abnormal happened. The one that does:
 
-**`heaviest at turns …`** names where it concentrated, so you can go look.
+```
+  ! cache rebuilt at turn 266, 2.8 hours after the previous request
+    121,416 cache write  the cache held 147k before it
+```
+
+The prompt cache expires a few minutes after the last request. Come back
+later and the whole conversation is written to cache again from scratch,
+which in long sessions is most of what they write to cache at all. The line
+says where, after how long, and how much; what to do about it is yours.
+
+There is no hit rate and no running total. Every request re-reads the whole
+conversation, so a hit rate sits near 99% for almost any session and tells
+two sessions apart not at all.
 
 **`compacted 4×`** is worth knowing on its own: a compaction discards context,
 and an instruction given before one may simply not be there afterwards. If you
@@ -62,7 +71,7 @@ later see a `constraint_violation`, [this is why](/agentsensei/findings/fixes/).
 ```
 
 Every finding is anchored to real turns. `/agentsensei:fix` or `agentsensei fix`
-gives you the one change worth making — and the turn numbers let you open the
+gives you a recommendation — and the turn numbers let you open the
 transcript and judge for yourself, which is the point. A finding is evidence,
 not a verdict.
 

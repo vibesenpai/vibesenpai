@@ -1,89 +1,27 @@
 /**
- * The standing — what your history says, so day one is not blank.
- *
- * ── The problem this solves ────────────────────────────────────────────────
- *
- * The ambient surface only knows about the session it is in, so a fresh install
- * shows nothing until new findings happen. Measured on a real machine:
- * `edit_retry` fires in a third of sessions and `redundant_call` in one in 250,
- * so "nothing yet" could last days — while the answer was already sitting in
- * transcripts on disk.
- *
- * Worse, that history is **perishable**. The harness's own `cleanupPeriodDays`
- * defaults to 30 and we keep no copies by design, so whatever is on disk now is
- * the most there will ever be. Waiting is not neutral; it loses data.
- *
- * ── Fire and forget, then check later ─────────────────────────────────────
- *
- * ```
- * SessionStart → spawn detached, print NOTHING, exit
- *                      ↓ (parses every transcript, ~500ms for 4)
- *                writes standing.json
- * next SessionStart → reads it, renders the block
- * ```
- *
- * The reader is the session-start block, one session later. That lag is the
- * design, not a shortfall: the thing being described is your history, which
- * does not change while you read it.
- *
- * Nothing is computed in a hook and nothing is printed from one. That last part
- * is a deliberate improvement on the original design, which had `SessionStart`
- * emit the aggregate for the model to relay: this version never puts anything
- * into the agent's context, so the tool cannot perturb the session it measures
- * — not even by ~100 tokens.
- *
- * ── Why a stored file rather than computing on demand ────────────────────
- *
- * Parsing is 95% of the cost and scales with history, so no synchronous
- * surface could do it. The file is the handoff between a slow producer and an
- * instant reader — the pattern the whole pipeline now follows.
- *
- * ── Why this one stayed a flat file when findings moved to SQLite ────────
- *
- * It is a **full recompute**: every pass reads all of history and writes the
- * whole answer, so two passes converge and last-writer-wins is *correct* here
- * rather than a lost update. It is also under a kilobyte, and four of its
- * fields — `edits`, `tokens`, `wastedTokens`, `unreadable` — are session
- * aggregates with no row in the occurrence table to derive them from.
- *
- * The atomic findings moved to the store because **that** is where losing a
- * subject was silent and permanent. This file lost nothing.
+ * The standing: a rollup of findings across all history, so day one is not blank.
+ * Computed by a detached process into `standing.json`; the next session start reads it.
+ * A full recompute each time, so last-writer-wins is correct.
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countDenominators, runDetectors, type Detector } from './detect/index.ts';
 import { occurrencesOf } from './finding.ts';
+import { emptyDismissed, withoutDismissed, type Dismissed } from './dismiss.ts';
 import type { OccurrenceRow } from './store.ts';
 import { reasonOf } from './detect/labels.ts';
 import { costFor } from './cost.ts';
+import { sessionStats } from './stats.ts';
 import type { Event, Finding } from './types.ts';
+import { writeJson } from './files.ts';
 
 const FILE = 'standing.json';
-const MARKER = 'standing.running';
-// 2: added `wastedTokens`. Bumped rather than made optional so a v1 file on
-// disk is discarded and recomputed — `readStanding` casts rather than
-// validates, so an absent field would otherwise read as `undefined` behind a
-// type that promises it is there. Consumers still use `?.` for that reason.
+// Bumped (not made optional) so old files are discarded: `readStanding` casts, it does not validate.
 const VERSION = 2;
 
-/**
- * How long a run marker is believed.
- *
- * A pass that died leaves its marker behind, and a status bar saying "reading
- * your past sessions" forever would be worse than saying nothing. Past this,
- * the marker is treated as absent — the failure mode is going quiet.
- */
-export const MARKER_STALE_MS = 2 * 60 * 1000;
-
-/**
- * Do not recompute more often than this.
- *
- * Opening four windows in a minute should not parse the whole history four
- * times. Generous because the input barely moves: a transcript that grew since
- * the last pass is covered by the live session's own analysis anyway.
- */
-export const MIN_RECOMPUTE_MS = 10 * 60 * 1000;
+// Do not recompute more often than this; history barely moves between passes.
+const MIN_RECOMPUTE_MS = 10 * 60 * 1000;
 
 export type Standing = {
   v: number;
@@ -92,14 +30,9 @@ export type Standing = {
   sessions: number;
   edits: number;
   tokens: { output: number; cacheCreation: number };
-  /**
-   * Occurrences and spread, per dimension, biggest first.
-   *
-   * `top` and `files` exist so the report can answer "4 *what* edits?" — the
-   * first version named a count with no subject, and the first person to read
-   * it asked exactly that. Only the worst subject is kept: storing every one
-   * would grow `standing.json` without bound, and the report has room for one.
-   */
+  /** Cache rebuilds across these sessions. Optional so older files still read. */
+  rebuilds?: { count: number; tokens: number };
+  /** Occurrences and spread per dimension, biggest first. Only the worst subject is kept. */
   dimensions: {
     dimension: string;
     occurrences: number;
@@ -112,26 +45,14 @@ export type Standing = {
   /** The harness's own reasons, summed across every finding. */
   reasons: Record<string, number>;
   /**
-   * Tokens wasted, **keyed by reason** rather than by dimension.
-   *
-   * Per reason because that is the grain `fix` recommends at: "read before
-   * editing" addresses `not-read-first` and leaves `string-not-found`
-   * untouched, so quoting the dimension's whole total beside it would overstate
-   * the saving — on this machine by about 2x.
-   *
-   * `written` and `received` only. `carried` is deliberately absent: it depends
-   * on how long each session ran after the waste, so summing it across sessions
-   * produces a number that grows with session length rather than with waste.
+   * Tokens wasted, keyed by reason, because `fix` recommends per reason.
+   * No `carried`: summed across sessions it grows with session length, not with waste.
    */
   wastedTokens: Record<string, { written: number; received: number }>;
-  /**
-   * Sessions found but unreadable.
-   *
-   * Reported rather than dropped: a standing that quietly covered fewer
-   * sessions than it claims is the implied-coverage problem the report's depth
-   * labelling exists to prevent.
-   */
+  /** Sessions found but unreadable, stated rather than silently dropped. */
   unreadable: number;
+  /** Rule findings a dismissal kept out of the totals, stated so shrinkage is not misread. */
+  dismissed?: number;
 };
 
 function pathFor(archive: string): string {
@@ -152,10 +73,7 @@ export function readStanding(archive: string): Standing | undefined {
 /** Write it, temp-then-rename. Returns success rather than throwing. */
 export function writeStanding(archive: string, s: Standing): boolean {
   try {
-    mkdirSync(archive, { recursive: true, mode: 0o700 });
-    const tmp = `${pathFor(archive)}.${process.pid}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(s, null, 2)}\n`, { mode: 0o600 });
-    renameSync(tmp, pathFor(archive));
+    writeJson(pathFor(archive), s);
     return true;
   } catch {
     return false;
@@ -171,29 +89,14 @@ export function isFresh(s: Standing | undefined, now = Date.now()): boolean {
 
 export type SessionInput = { sessionId: string; project: string; events: Event[] };
 
-/**
- * Aggregate findings across history.
- *
- * Takes already-parsed sessions so this stays pure and testable — the caller
- * owns reading and parsing, which is also what keeps the expensive part on the
- * detached side of the boundary.
- */
-/**
- * The running totals, so a caller that already has a session's findings can
- * fold them in without the events being re-read.
- *
- * **Split out so the math has one home.** `src/gather.ts` runs the detectors
- * itself to build the report, and before this it handed every session's events
- * back for `computeStanding` to run them *again* — holding the whole history in
- * memory for a second pass that produced the same findings. Copying the
- * accumulation into `gather.ts` instead would leave two versions of the
- * standing arithmetic to drift apart.
- */
-export type StandingAccumulator = {
+/** Running totals, so `gather.ts` can fold in findings it already has. One home for the math. */
+type StandingAccumulator = {
   sessions: number;
   edits: number;
   output: number;
   cacheCreation: number;
+  rebuildCount: number;
+  rebuildTokens: number;
   perDimension: Map<
     string,
     { occurrences: number; sessions: Set<string>; subjects: Map<string, number> }
@@ -208,6 +111,8 @@ export function newStandingAccumulator(): StandingAccumulator {
     edits: 0,
     output: 0,
     cacheCreation: 0,
+    rebuildCount: 0,
+    rebuildTokens: 0,
     perDimension: new Map(),
     reasons: {},
     wastedTokens: {},
@@ -224,6 +129,9 @@ export function accumulateSession(
   acc.edits += d.editCount;
   acc.output += d.tokens.output;
   acc.cacheCreation += d.tokens.cacheCreation;
+  const rebuilds = sessionStats(s.events).rebuilds;
+  acc.rebuildCount += rebuilds.count;
+  acc.rebuildTokens += rebuilds.tokens;
 
   const pairs = new Set<string>();
 
@@ -242,15 +150,11 @@ export function accumulateSession(
 
     for (const [reason, n] of Object.entries<number>(f.reasons ?? {})) {
       acc.reasons[reason] = (acc.reasons[reason] ?? 0) + n;
-      // Which (dimension, reason) pairs to price for this session. Collected
-      // rather than priced here: `costFor` scans the whole session, so calling
-      // it per finding would multiply the cost by the number of findings that
-      // share a reason.
+      // Priced once per pair below: `costFor` scans the whole session.
       pairs.add(`${f.dimension}\u0001${reason}`);
     }
   }
 
-  // Once per (dimension, reason), after the findings are known.
   for (const pair of pairs) {
     const [dimension, reason] = pair.split('\u0001') as [string, string];
     const c = costFor(s.events, { dimension, reason }, reasonOf);
@@ -265,7 +169,7 @@ export function accumulateSession(
 /** Close the accumulator into the stored shape. */
 export function finishStanding(
   acc: StandingAccumulator,
-  opts: { unreadable?: number; now?: string } = {},
+  opts: { unreadable?: number; now?: string; dismissed?: number } = {},
 ): Standing {
   return {
     v: VERSION,
@@ -273,6 +177,7 @@ export function finishStanding(
     sessions: acc.sessions,
     edits: acc.edits,
     tokens: { output: acc.output, cacheCreation: acc.cacheCreation },
+    rebuilds: { count: acc.rebuildCount, tokens: acc.rebuildTokens },
     dimensions: [...acc.perDimension]
       .map(([dimension, v]) => {
         const ranked = [...v.subjects].sort((a, b) => b[1] - a[1]);
@@ -289,120 +194,38 @@ export function finishStanding(
     reasons: acc.reasons,
     wastedTokens: acc.wastedTokens,
     unreadable: opts.unreadable ?? 0,
+    ...(opts.dismissed ? { dismissed: opts.dismissed } : {}),
   };
 }
 
+/** Aggregate findings across parsed sessions. Pure: the caller reads, parses and persists. */
 export async function computeStanding(
   sessions: SessionInput[],
   detectors: Detector[],
-  opts: { unreadable?: number; now?: string } = {},
+  opts: { unreadable?: number; now?: string; dismissed?: Dismissed } = {},
 ): Promise<{ standing: Standing; occurrences: OccurrenceRow[] }> {
   const acc = newStandingAccumulator();
   const occurrences: OccurrenceRow[] = [];
+  let dismissed = 0;
   for (const s of sessions) {
     const res = await runDetectors({
       events: s.events,
       session: { sessionId: s.sessionId, project: s.project, live: false },
       detectors,
     });
-    accumulateSession(acc, { sessionId: s.sessionId, events: s.events, findings: res.findings });
-    // ── Hand the atomic rows back, rather than only the rollup ─────────────
-    //
-    // This used to return a `Standing` and nothing else, so every rule finding
-    // it computed was discarded the moment the rollup was written. The rollup
-    // keeps one subject per dimension, which is how a dimension touching three
-    // files came to report one. The caller persists these; this function still
-    // does no I/O.
+    // Dismissed findings leave the rollup but stay in the rows, so an undo can restore them.
+    const shown = withoutDismissed(res.findings, opts.dismissed ?? emptyDismissed());
+    dismissed += shown.dismissed;
+    accumulateSession(acc, { sessionId: s.sessionId, events: s.events, findings: shown.findings });
+    // Rows include every subject (the rollup keeps one). The caller persists them.
     occurrences.push(...occurrencesOf(res.findings));
   }
-  return { standing: finishStanding(acc, opts), occurrences };
+  return {
+    standing: finishStanding(acc, {
+      ...(opts.unreadable === undefined ? {} : { unreadable: opts.unreadable }),
+      ...(opts.now === undefined ? {} : { now: opts.now }),
+      dismissed,
+    }),
+    occurrences,
+  };
 }
-
-/**
- * One line for the statusline, when the current session has nothing to say.
- *
- * **Past tense, and a count with its denominator.** This is not a nudge about
- * the session you are in — it is the baseline you arrived with, which is why it
- * can sit there without becoming a nag: it makes no claim about now, and it
- * gives the next finding something to be compared against.
- *
- * Empty when there is nothing, including when history is clean. "No findings
- * across 173 edits" is a real result, but it is not worth a permanent line.
- */
-export function standingLine(s: Standing | undefined): string {
-  if (s === undefined || s.dimensions.length === 0) return '';
-  const top = s.dimensions[0] as Standing['dimensions'][number];
-  const what =
-    top.dimension === 'edit_retry'
-      ? `${top.occurrences} edit${top.occurrences === 1 ? '' : 's'} refused then retried`
-      : top.dimension === 'redundant_call'
-        ? `${top.occurrences} identical call${top.occurrences === 1 ? '' : 's'} repeated`
-        : `${top.dimension} ×${top.occurrences}`;
-  return `⌁ ${what} in ${s.sessions} past session${s.sessions === 1 ? '' : 's'}`;
-}
-
-/**
- * `computedAt` as a local timestamp, for a human reading it.
- *
- * The stored value is UTC because that is what sorts and compares correctly.
- * Printing it raw showed "01:46" to someone whose clock said 18:46 — a number
- * that reads as wrong rather than as a different zone.
- */
-export function computedAtLocal(s: Standing): string {
-  const t = new Date(s.computedAt);
-  if (Number.isNaN(t.getTime())) return s.computedAt;
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return (
-    `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ` +
-    `${pad(t.getHours())}:${pad(t.getMinutes())}`
-  );
-}
-
-/**
- * Say that a pass has started, so the statusline can tell someone to sit tight.
- *
- * Written by the hook rather than by the pass itself: the hook knows it spawned
- * something, and the pass may not get to run its first line for a moment. The
- * point is that the very first boundary after an install has something friendly
- * to show instead of a blank bar.
- *
- * Never throws — a marker that cannot be written costs a reassuring line.
- */
-export function markStarted(archive: string): void {
-  try {
-    mkdirSync(archive, { recursive: true, mode: 0o700 });
-    writeFileSync(join(archive, MARKER), `${new Date().toISOString()}\n`, { mode: 0o600 });
-  } catch {
-    /* a missing marker is not worth a failure */
-  }
-}
-
-export function clearStarted(archive: string): void {
-  try {
-    rmSync(join(archive, MARKER), { force: true });
-  } catch {
-    /* staleness covers this */
-  }
-}
-
-/**
- * Is a pass believed to be running right now?
- *
- * Compared on **absolute** distance, which is not fussiness. An earlier version
- * required `now - mtime >= 0` to reject a bogus future timestamp, and that
- * rejected the normal case: a file written and checked in the same millisecond
- * can report an mtime a fraction ahead of `Date.now()`, so the marker read as
- * absent and the friendly line never appeared at all.
- *
- * Absolute distance keeps the guard that matters — a marker from a badly wrong
- * clock still ages out instead of pinning the status bar forever — without
- * failing on sub-millisecond skew.
- */
-export function isProcessing(archive: string, now = Date.now()): boolean {
-  try {
-    return Math.abs(now - statSync(join(archive, MARKER)).mtimeMs) < MARKER_STALE_MS;
-  } catch {
-    return false;
-  }
-}
-

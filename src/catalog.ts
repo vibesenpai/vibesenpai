@@ -1,49 +1,18 @@
 /**
- * The catalog: incremental bookkeeping over transcripts we do **not** copy.
- *
- * ── Why there is no copy ─────────────────────────────────────────────────────
- *
- * An earlier design archived every transcript into our own store, justified by
- * the harness deleting them after `cleanupPeriodDays`. Two things killed it.
- *
- * First, honouring that retention policy — which we must, since outliving it
- * silently overrides the user's privacy decision — means a copy never survives
- * anything the original would not. It bought nothing.
- *
- * Second, and more important: **a transcript can contain a leaked token, an API
- * key pasted into a prompt, a `.env` echoed by a tool result.** That exposure
- * already exists in the harness's file. Copying it creates a *second* one, in a
- * directory we chose, with a lifetime we chose, that the user never asked for.
- * If that copy is read by the wrong process, synced, or swept into a backup,
- * the breach is ours — from data that was not ours to duplicate.
- *
- * So: read in place, remember only where we got to, and let what we persist be
- * derived and redacted. The smallest attack surface is the one that does not
- * exist.
- *
- * What is kept here is bytes-consumed bookkeeping — enough that a re-scan reads
- * only new data, and enough to notice when a source changes or disappears.
+ * The catalog: incremental bookkeeping (offsets, hashes, spans) over transcripts read in place.
+ * Never copies transcripts: CLAUDE.md "Local and secure".
  */
 
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-  chmodSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, chmodSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { checkVersion, stamp, type Versioned } from './schema.ts';
-// The byte reader lives in read.ts, which owns reading and imports nothing from
-// here — one implementation, and no cycle.
 import { discoverTranscripts, readRange } from './read.ts';
 import { isPlausibleTimestamp } from './normalise.ts';
-import { detectVersion } from './parsers/registry.ts';
+import { detectVersion } from './parsers/index.ts';
+import { writeAtomic } from './files.ts';
 
-export type CatalogEntry = {
+type CatalogEntry = {
   /** Absolute path to the live JSONL. The only copy that exists. */
   source: string;
   sessionId: string;
@@ -58,26 +27,19 @@ export type CatalogEntry = {
   sha256: string;
   firstSeenAt: string;
   lastSeenAt: string;
-  /**
-   * Earliest and latest record timestamp inside the transcript.
-   *
-   * Distinct from `firstSeenAt`, which is when *we* first read the file. The
-   * report's depth boundary needs the period the data covers: a scan run today
-   * over a transcript from last Tuesday gives full depth for last Tuesday, and
-   * using `firstSeenAt` would claim coverage of only today.
-   */
+  /** Earliest and latest record timestamp: the period the data covers, unlike `firstSeenAt`. */
   firstTs?: string;
   lastTs?: string;
   /** When the source was first observed missing — the harness deleted it. */
   gone?: string;
 };
 
-export type Catalog = Versioned<'catalog'> & {
+type Catalog = Versioned<'catalog'> & {
   createdAt: string;
   entries: Record<string, CatalogEntry>;
 };
 
-export type ScanStats = {
+type ScanStats = {
   scanned: number;
   added: number;
   /** Sources that grew since the last scan. */
@@ -93,10 +55,9 @@ export type ScanStats = {
 
 const INDEX_FILE = 'index.json';
 
-export function initCatalog(dir: string): Catalog {
+function initCatalog(dir: string): Catalog {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  // mkdir's mode is subject to umask. The catalog holds no transcript content,
-  // but it does hold absolute paths, so owner-only remains the right default.
+  // mkdir's mode is subject to umask; the catalog holds absolute paths.
   chmodSync(dir, 0o700);
 
   const p = join(dir, INDEX_FILE);
@@ -104,8 +65,7 @@ export function initCatalog(dir: string): Catalog {
     try {
       const c = JSON.parse(readFileSync(p, 'utf8')) as Catalog;
       if (checkVersion('catalog', c.v).ok && c.entries) return c;
-      // A version mismatch re-derives rather than guessing. Cheap now that the
-      // only cost is re-reading sources we do not own.
+      // Version mismatch: re-derive rather than guess.
     } catch {
       // A corrupt catalog costs a re-read; refusing to run costs the user data.
     }
@@ -120,40 +80,7 @@ export function initCatalog(dir: string): Catalog {
 }
 
 function writeCatalog(dir: string, c: Catalog): void {
-  // Temp path then rename, so a kill cannot leave a half-written catalog.
-  //
-  // ── The pid is not decoration ────────────────────────────────────────────
-  //
-  // This used a fixed `index.json.tmp`, alone among the writers in this
-  // project. Two concurrent `scan` runs therefore wrote the same temp path,
-  // and the loser's `renameSync` threw ENOENT out of `runScan`, which has no
-  // handler — the only write in the archive that could crash a command.
-  //
-  // Low stakes, because the catalog is re-derivable. Still the kind of thing
-  // that is one line to fix and an afternoon to diagnose.
-  const target = join(dir, INDEX_FILE);
-  const tmp = `${target}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(c, null, 2), { mode: 0o600 });
-  renameSync(tmp, target);
-}
-
-/**
- * Transcripts worth cataloguing.
- *
- * ── Why this delegates instead of walking ─────────────────────────────────
- *
- * This was its own recursive walk, and the difference between the two mattered:
- * `discoverTranscripts` filters out transcripts **our own model calls wrote**
- * and this did not. Measured on a real machine: `scan` reported 1,009
- * transcripts and 528MB read, while every analysis path saw 15 — because 995 of
- * them were headless judge children from one day of measurement runs, 494MB of
- * our own output indexed as if it were the user's work.
- *
- * A headline count that includes our own exhaust is worse than no count: it
- * says the tool has a thousand sessions of evidence when it has fourteen.
- */
-export function findTranscripts(sources: string[]): string[] {
-  return discoverTranscripts(sources);
+  writeAtomic(join(dir, INDEX_FILE), JSON.stringify(c, null, 2));
 }
 
 function harnessFor(sourcePath: string): string {
@@ -162,7 +89,7 @@ function harnessFor(sourcePath: string): string {
   return 'unknown';
 }
 
-export type ScanOptions = {
+type ScanOptions = {
   sources: string[];
   catalog: string;
   now?: () => string;
@@ -189,7 +116,7 @@ export function runScan(opts: ScanOptions): ScanStats {
 
   const seen = new Set<string>();
 
-  for (const source of findTranscripts(opts.sources)) {
+  for (const source of discoverTranscripts(opts.sources)) {
     stats.scanned++;
     seen.add(source);
 
@@ -209,15 +136,8 @@ export function runScan(opts: ScanOptions): ScanStats {
       continue;
     }
 
-    // Re-read from zero when the source shrank, OR when its mtime moved without
-    // the size changing.
-    //
-    // That second case is a same-length rewrite, and it cannot be verified: we
-    // deliberately keep no copy of the old bytes to compare against. Treating it
-    // as "just a touch" silently misses the new content, so the conservative
-    // read wins. It costs nothing in practice — appending to a JSONL always
-    // changes its size, so mtime-moved-size-same means something really was
-    // rewritten.
+    // Re-read from zero if the source shrank or its mtime moved at the same size
+    // (a rewrite we cannot verify, since we keep no copy).
     const rewritten =
       existing !== undefined && (st.size < existing.offset || st.size === existing.offset);
     const from = rewritten || !existing ? 0 : existing.offset;
@@ -234,12 +154,8 @@ export function runScan(opts: ScanOptions): ScanStats {
       continue;
     }
 
-    // Advance only to the last complete line.
-    //
-    // The harness may be mid-write, leaving a partial trailing record. Consuming
-    // it would skip that record permanently: the parser discards it as malformed
-    // and we would never re-read the completed version. So the offset stops at
-    // the final newline and the fragment is picked up on the next scan.
+    // Advance only to the last complete line; a partial record from a mid-write
+    // would otherwise be skipped for good.
     const lastNl = chunk.lastIndexOf(0x0a);
     if (lastNl === -1) {
       // No complete line in this chunk yet — leave the offset alone entirely.
@@ -253,8 +169,7 @@ export function runScan(opts: ScanOptions): ScanStats {
     const ts = now();
     const prior = rewritten ? undefined : existing;
 
-    // Hash is cumulative over consumed bytes, so a source rewritten underneath
-    // us produces a different digest even at the same length.
+    // Cumulative over consumed bytes, so a rewrite changes the digest.
     const sha256 = createHash('sha256')
       .update(prior?.sha256 ?? '')
       .update(complete)
@@ -262,9 +177,7 @@ export function runScan(opts: ScanOptions): ScanStats {
 
     const version = detectVersion(text.split('\n')) ?? prior?.version;
 
-    // Timestamp span, by scan rather than by parse. `runScan` deliberately does
-    // not build events — it is the cheap pass — and a regex over the consumed
-    // bytes is enough to bound the period this transcript covers.
+    // Span without building events: this is the cheap pass.
     const span = timestampSpan(text);
     const firstTs = minIso(prior?.firstTs, span.first);
     const lastTs = maxIso(prior?.lastTs, span.last);
@@ -290,9 +203,7 @@ export function runScan(opts: ScanOptions): ScanStats {
     else stats.added++;
   }
 
-  // Sources we knew about that are no longer on disk. The entry is kept —
-  // findings reference it, and `explain` needs to be able to say *when* the
-  // transcript went away rather than implying we lost it.
+  // Vanished sources keep their entry, marked `gone`, so we can say when they went.
   for (const [key, e] of Object.entries(catalog.entries)) {
     if (seen.has(key) || e.gone !== undefined) continue;
     catalog.entries[key] = { ...e, gone: now() };
@@ -304,19 +215,8 @@ export function runScan(opts: ScanOptions): ScanStats {
 }
 
 /**
- * Earliest and latest record timestamp in a chunk of JSONL.
- *
- * Reads the **top-level** `timestamp` of each record, by parsing the line.
- *
- * A regex over the raw text was tried first and is unsafe: `"timestamp"` occurs
- * inside tool results that echoed a CI payload, a lockfile, or a server log, and
- * one pasted line carrying `"timestamp": "2019-03-04..."` would set `firstTs` to
- * 2019 — making `report` claim full depth across years holding nothing. Measured
- * on the public corpus, 9 of 219 files already had a regex span wider than their
- * real one; none catastrophically, which is exactly why it would have shipped.
- *
- * A malformed line is skipped rather than fatal: this is bookkeeping, and
- * Principle Zero puts not-crashing above completeness.
+ * Earliest and latest top-level `timestamp` in a chunk of JSONL. Parsed per line, not regexed:
+ * tool output can contain `"timestamp"`. Malformed lines are skipped.
  */
 function timestampSpan(text: string): { first?: string; last?: string } {
   let first: string | undefined;
@@ -330,8 +230,7 @@ function timestampSpan(text: string): { first?: string; last?: string } {
       continue;
     }
     if (!isPlausibleTimestamp(ts)) continue;
-    // Lexicographic comparison is correct for ISO-8601 in UTC, which is what the
-    // harness writes.
+    // Lexicographic order is correct for UTC ISO-8601.
     if (first === undefined || ts < first) first = ts;
     if (last === undefined || ts > last) last = ts;
   }

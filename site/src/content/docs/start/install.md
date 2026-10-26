@@ -25,7 +25,7 @@ Three commands:
 | | |
 |---|---|
 | `/agentsensei:insights` | what happened in the session you are in |
-| `/agentsensei:fix` | the one change worth making, with the evidence |
+| `/agentsensei:fix` | a recommendation, with the evidence |
 | `/agentsensei:report` | a self-contained HTML report of your history |
 
 And two hooks, which keep your history indexed in the background. Both are

@@ -1,73 +1,23 @@
 /**
- * The detector registry and the runner.
- *
- * ── Detectors get a text-free view ──────────────────────────────────────────
- *
- * `DetectorContext.events` is `StructuralEvent[]`, so a detector cannot read
- * `command`, `pattern` or `textSummary` — it is a build failure, not a review
- * comment. The runner still sees whole `Event`s, because it is the runner that
- * attaches a harness-owned label (`./labels.ts`) to an already-valid finding.
- * Detection therefore never depends on text; a harness change loses a label.
- *
- * ── Denominators are computed here, not by detectors ────────────────────────
- *
- * Every rate the running score displays needs a denominator. Those are
- * **per-session totals**, while detectors run per-window. If each detector
- * incremented a counter, a run that stopped halfway would bank partial findings
- * against partial denominators, and every rate would be quietly wrong in a way
- * no output would reveal.
- *
- * ── Aggregates are metadata, not findings ───────────────────────────────────
- *
- * A session-wide number has no turn to point at, and CLAUDE.md is explicit that
- * nothing is reported as a number without evidence behind it. So the token
- * totals live here, beside the other denominators, and are shown as the context
- * a reader needs — never as a finding, and never as a score.
- *
- * ── Failure isolation ───────────────────────────────────────────────────────
- *
- * Principle Zero: a broken analyzer must never break a session. One detector
- * throwing must not lose the other detectors' findings for that window, nor the
- * remaining windows. Failures are counted and reported rather than swallowed —
- * a silent zero would read as "nothing found".
+ * The detector registry and the runner. Detectors see `StructuralEvent`s only; the runner attaches
+ * harness labels afterwards (.claude/rules/detectors.md). Denominators are per-session,
+ * computed here once. One detector throwing never loses the others' findings (Principle Zero).
  */
 
 import { collect, type Candidate } from '../finding.ts';
 import { buildWindows, threadsOf, type SkeletonOptions } from '../skeleton.ts';
 import type { Event, Finding, Preset } from '../types.ts';
 import type { Detector, DetectorContext, SessionFacts } from './types.ts';
-import { editEvidenceOf } from '../edits.ts';
+import { editEvidenceOf } from './tools.ts';
 import { oncePerResponse } from '../normalise.ts';
 import { editRetry } from './edit-retry.ts';
 import { redundantCall } from './redundant-call.ts';
 import { reasonOf } from './labels.ts';
 
 export type { Detector } from './types.ts';
-// Only what callers actually take from here. `DetectorContext`, `SessionFacts`,
-// `READ_TOOLS` and `EditEvidence` were re-exported "so callers keep one import
-// site" and nothing ever used that site — the consumers import them from
-// `./types.ts` and `../edits.ts` directly.
-export { EDIT_TOOLS, editEvidenceOf } from '../edits.ts';
+export { EDIT_TOOLS, editEvidenceOf } from './tools.ts';
 
-/**
- * All detectors.
- *
- * **Empty by design, as of the 2026-10-19 reset.** The three that used to be
- * here read command verbs, result vocabulary and assistant prose to decide, and
- * over 1,139 real sessions produced 5 true positives against ~25 false
- * positives. They are gone; `GRAVEYARD.md` holds the evidence.
- *
- * Two live here. The other two things that were planned as detectors are not
- * detectors at all: measured, **file churn correlates with friction at 15%
- * against a 9% base rate**, and a context-re-ingestion ratio is session-wide
- * with no turn to anchor to. Both are reported as session metadata by
- * `src/stats.ts` instead — facts a reader uses, never findings. See
- * `docs/dimensions.md`.
- *
- * A detector that disagrees with the measurement that justified it is wrong,
- * which is why each one is measured by itself in
- * `scripts/measure-dimensions.ts` rather than by a probe that resembles it.
- */
+/** All detectors. Why only these two: GRAVEYARD.md and docs/dimensions.md. */
 export function allDetectors(): Detector[] {
   return [editRetry(), redundantCall()];
 }
@@ -75,34 +25,21 @@ export function allDetectors(): Detector[] {
 const PRESET_RANK: Record<Preset, number> = { core: 0, standard: 1, all: 2 };
 
 /**
- * Which detectors a preset runs.
- *
- * `core` is the trust-building set. A dimension joins it only when it is
- * `certain` or `high` and needs no model — the first finding a stranger sees
- * decides whether they keep the tool. Measured frequency is **not** a reason to
- * promote: `redundant_call` fires on 0.4% of sessions and earns its place on
- * never being wrong, while the three detectors that led `core` on assumed
- * frequency were the ones removed.
+ * Which detectors a preset runs. `core` admits only `certain`/`high` rule dimensions;
+ * frequency is not a reason to promote.
  */
 export function detectorsFor(preset: Preset, only?: string[], mute?: string[]): Detector[] {
   const wanted = only === undefined ? undefined : new Set(only);
   const silenced = new Set(mute ?? []);
   return allDetectors().filter((d) => {
-    // Muting wins over everything, including an explicit `only`. It is the
-    // user's decision, and a flag that re-enables what they silenced would make
-    // the silence unreliable — which is worse than not offering it.
+    // Muting wins over everything, including an explicit `only`.
     if (silenced.has(d.dimension)) return false;
     if (wanted !== undefined) return wanted.has(d.dimension);
     return PRESET_RANK[d.preset] <= PRESET_RANK[preset];
   });
 }
 
-/**
- * Mute entries that name no dimension.
- *
- * Reported rather than ignored: a typo that silently mutes nothing is worse
- * than an error, because you would believe it had worked.
- */
+/** Mute entries that name no dimension, reported so a typo does not silently mute nothing. */
 export function unknownDimensions(names: string[]): string[] {
   const known = new Set(allDetectors().map((d) => d.dimension));
   return names.filter((n) => !known.has(n));
@@ -110,18 +47,9 @@ export function unknownDimensions(names: string[]): string[] {
 
 /**
  * What a session cost, exactly as the harness billed it.
- *
- * Populated on 100% of assistant messages across the corpus, and identical in
- * meaning for every language and every tool — it describes the API call, not
- * the work. This is the one place a number needs no interpretation.
- *
- * `cacheRead` is recorded but deliberately **not** turned into a ratio: it
- * re-counts the whole prefix on every call, so it grows with the square of the
- * turn count and `read/(read+creation)` is pinned near 1 by construction
- * (measured p10 0.901 to p90 0.985). `cacheCreation` is what re-ingesting an
- * invalidated prefix actually cost, and it spreads 7.5x p90/p50.
+ * `cacheRead` is never made a ratio: it re-counts the whole prefix per call (DECISIONS.md D49).
  */
-export type TokenTotals = {
+type TokenTotals = {
   input: number;
   output: number;
   cacheRead: number;
@@ -135,12 +63,7 @@ export type Denominators = {
   toolCallCount: number;
   /** Tool results the harness itself marked failed. Structural, never inferred. */
   failedCallCount: number;
-  /**
-   * File-touching calls we could **not** classify as an edit or a read.
-   *
-   * Reported rather than folded into `editCount`, so the coverage gap is
-   * visible instead of silently undercounting. `doctor` surfaces it.
-   */
+  /** File-touching calls classified as neither edit nor read; kept visible, surfaced by `doctor`. */
   unclassifiedTouchCount: number;
   tokens: TokenTotals;
 };
@@ -156,26 +79,12 @@ export function countDenominators(events: Event[]): Denominators {
     tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
   };
 
-  // Tokens are summed once per API response, never once per record — see
-  // `oncePerResponse`. Deduped among the events that actually carry `usage`:
-  // picking the first record of a response outright would drop the figures
-  // whenever that record happens to carry none, which is a silent undercount
-  // rather than the overcount this replaced.
-  // Holds the **events themselves**, not their uuids. A uuid is not unique
-  // either: 16 corpus sessions carry token-bearing events that share one, so a
-  // uuid-keyed set matched both siblings and double-counted exactly what this
-  // exists to prevent. Same trap as the non-unique tool-call ids in
-  // `src/detect/edit-retry.ts`.
+  // Tokens count once per API response (`oncePerResponse`), over events that carry usage.
+  // Keyed by event, not uuid: uuids are not unique either.
   const countOnce = new Set(oncePerResponse(sorted.filter((e) => e.tokens !== undefined)));
 
-  // Files an edit tool already claimed, so a snapshot confirming the same edit
-  // does not count it twice.
-  //
-  // Matched by **path suffix**, not equality: the harness records paths relative
-  // to the repo root (`e2e/agents/cursor_cli.go`) while a tool call carries the
-  // absolute path (`/Users/[USER]/Projects/devenv/cli/e2e/agents/cursor_cli.go`).
-  // Comparing them directly never matches, which silently doubled every edit in
-  // a harness-2.1 session — 6 tool edits plus 3 snapshots read as 9.
+  // Files an edit tool already claimed, so its snapshot is not counted twice. Matched by path
+  // suffix: snapshots carry repo-relative paths, tool calls absolute ones.
   const creditedByTool: string[] = [];
   const alreadyCredited = (harnessPath: string): boolean =>
     creditedByTool.some((t) => t === harnessPath || t.endsWith(`/${harnessPath}`));
@@ -192,8 +101,7 @@ export function countDenominators(events: Event[]): Denominators {
 
     const evidence = editEvidenceOf(e);
     if (evidence === 'harness') {
-      // Tool-agnostic confirmation. Only counts files no edit tool already
-      // claimed — otherwise one Edit plus its snapshot would read as two.
+      // Only files no edit tool already claimed.
       for (const path of e.changedFiles ?? []) {
         if (alreadyCredited(path)) continue;
         d.editCount++;
@@ -217,20 +125,13 @@ export function countDenominators(events: Event[]): Denominators {
   return d;
 }
 
-/**
- * Did the harness say this call failed?
- *
- * Purely structural, and it stays that way. A careful text pattern was tried
- * here and was actively wrong: it read `0 errors, 0 warnings` as a failure, and
- * in 26 of 38 cases where the harness reported a non-zero exit it saw nothing
- * wrong at all. The harness's own verdict is the only one worth having.
- */
+/** Did the harness say this call failed? Structural only; text patterns were tried and were wrong. */
 export function callFailed(e: Event): boolean {
   if (e.isError === true) return true;
   return e.exitCode !== undefined && e.exitCode !== 0;
 }
 
-export type RunInput = {
+type RunInput = {
   events: Event[];
   session: SessionFacts;
   detectors?: Detector[];
@@ -238,7 +139,7 @@ export type RunInput = {
   now?: string;
 };
 
-export type RunResult = {
+type RunResult = {
   findings: Finding[];
   denominators: Denominators;
   windows: number;
@@ -256,13 +157,7 @@ export async function runDetectors(input: RunInput): Promise<RunResult> {
   const candidates: Candidate[] = [];
   const failures: Record<string, number> = {};
 
-  /**
-   * Run one detector over one span, isolating its failures.
-   *
-   * Principle Zero: one detector's bug must not cost the other detectors'
-   * findings, nor the remaining spans. Failures are counted and reported — a
-   * silent zero would read as "nothing found".
-   */
+  /** Run one detector over one span; a throw is counted, never swallowed or propagated. */
   const evaluate = async (d: Detector, ctx: DetectorContext): Promise<void> => {
     try {
       candidates.push(...(await d.detect(ctx)));
@@ -274,8 +169,7 @@ export async function runDetectors(input: RunInput): Promise<RunResult> {
   for (const d of detectors) {
     switch (d.scope) {
       case 'window':
-        // Only a window-scoped detector gets a skeleton: the others span many
-        // windows and must not invent one.
+        // Only a window-scoped detector gets a skeleton.
         for (const w of windows) {
           await evaluate(d, { events: w.events, skeleton: w.skeleton, session: input.session });
         }
@@ -292,10 +186,7 @@ export async function runDetectors(input: RunInput): Promise<RunResult> {
         break;
 
       case 'project':
-        // Declared in the contract so a detector can name its real scope, but
-        // unimplemented until the store exists. Refused loudly: evaluating a
-        // project-scoped rule over one session would answer a different
-        // question than the one it asks.
+        // Refused until stored history exists (M3): one session cannot answer a project question.
         throw new Error(
           `${d.dimension} declares project scope, which needs stored history (M3). ` +
             `Remove it from the preset or give it a narrower scope.`,
@@ -318,18 +209,8 @@ export async function runDetectors(input: RunInput): Promise<RunResult> {
 }
 
 /**
- * Attach the harness's own reasons to a finding that already exists.
- *
- * ── Why the runner does this and not the detector ──────────────────────────
- *
- * A detector cannot read text — `StructuralEvent` omits the fields. Doing it
- * here keeps the dependency one-way: the finding was already valid on structure
- * alone, and the label only decides how specific the advice can be. If the
- * harness rewords a message, `reasonOf` returns undefined, the tally comes back
- * empty, and the finding is unchanged.
- *
- * Keyed on **anchors**, one per instance, so the tally sums to `occurrences`
- * rather than to the number of turns cited as evidence.
+ * Attach the harness's own reasons to a finding that already exists; losing a label never loses
+ * the finding. Tallied per anchor, so it sums to `occurrences`.
  */
 function label(f: Finding, events: Event[]): Finding {
   const byUuid = new Map(events.map((e) => [e.uuid, e]));

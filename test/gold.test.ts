@@ -1,16 +1,10 @@
 /**
- * The scorer, whose failure mode is flattering itself.
- *
- * Every number `score` reports is turn-anchored: a finding must sit within
- * `TURN_TOLERANCE` of located evidence. The three denominators differ only in
- * the unit and in whether the label must match. The temptation this file exists
- * to block is the fourth, easier reading — "did the judge say anything about
- * this session" — which scores 76% where the honest one scores 60%, because it
- * credits sessions where the judge spoke and hit nothing real.
+ * The scorer. Every figure is turn-anchored within `TURN_TOLERANCE`; never credit a session just
+ * because the judge said something about it.
  */
 
 import { describe, expect, it } from 'vitest';
-import { score, TURN_TOLERANCE, type GoldEpisode, type JudgeOutput } from '../src/gold.ts';
+import { score, TURN_TOLERANCE, type GoldEpisode, type JudgeOutput } from '../scripts/gold.ts';
 
 const episode = (over: Partial<GoldEpisode> = {}): GoldEpisode => ({
   sessionSha: 's1',
@@ -37,16 +31,14 @@ describe('session-level recall — the headline', () => {
   });
 
   it('does NOT count a session where the judge spoke but anchored nothing real', () => {
-    // A finding 500 turns from the only evidence. The judge said something
-    // about this session; it was not this episode.
+    // A finding 500 turns from the only evidence: the session is not caught.
     const s = score([episode()], new Map([['s1:m1', [100]]]), [finding({ turns: [600] })], ['s1']);
     expect(s.sessionLevel.caught).toBe(0);
     expect(s.sessionLevel.recall).toBe(0);
   });
 
   it('counts a session once even when it holds several episodes', () => {
-    // The product surfaces ONE thing to try, so finding one real problem in a
-    // three-problem session is a served user, not two misses.
+    // One real problem found in a three-problem session counts as caught.
     const eps = [
       episode({ misalignmentId: 'm1' }),
       episode({ misalignmentId: 'm2' }),

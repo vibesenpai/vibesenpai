@@ -1,39 +1,12 @@
 /**
- * Redaction. Runs before anything is stored or displayed.
- *
- * This module carries more weight than it looks. Because we keep no transcript
- * copies, **what we persist is the only version that will exist** — there is no
- * raw fallback to re-derive from if redaction turns out to be wrong. Secrets
- * must not get through, and evidence must not be destroyed on the way.
- *
- * ── The tension that shapes every rule below ─────────────────────────────────
- *
- * Over-redaction is not the safe side. A findings tool whose evidence reads
- * `[REDACTED] [REDACTED] at [REDACTED]` is useless, and uselessness is the
- * failure we are actually trying to avoid. So the rules are built around a
- * split:
- *
- *   KEEP   — commands, relative paths, error text, tool names, git SHAs,
- *            tool_use ids. These are the evidence.
- *   REMOVE — things that are secret *by construction*: provider-prefixed
- *            tokens, PEM blocks, assignments to secret-named variables,
- *            bearer values, JWTs, emails, and the username inside absolute
- *            paths.
- *
- * Deliberately NOT redacted: bare high-entropy strings. A 40-character hex
- * string is far more often a git SHA than a secret, and a UUID is almost always
- * a `tool_use_id`. Redacting on entropy alone would strip the identifiers that
- * findings point at. High-entropy values are removed only in a *secret context*
- * — after `=` on a secret-named key, after `Bearer`, inside a known prefix.
- *
- * Reference bar: SWE-chat redacted its public corpus with Microsoft Presidio
- * plus TruffleHog. We are narrower on purpose (no ML, no network), so the rules
- * below are explicit and testable rather than probabilistic.
+ * Redaction, run before anything is stored, displayed or sent to a model. What we persist is the only copy.
+ * Removes what is secret by construction (prefixed tokens, PEM, secret-named assignments, bearer, JWT,
+ * email, usernames in paths). Keeps evidence: commands, paths, SHAs, ids. Never redacts on entropy alone.
  */
 
 import { homedir } from 'node:os';
 
-export type RedactionKind =
+type RedactionKind =
   | 'private-key'
   | 'api-key'
   | 'jwt'
@@ -44,7 +17,7 @@ export type RedactionKind =
   | 'home-path'
   | 'user-path';
 
-export type RedactResult = {
+type RedactResult = {
   text: string;
   /** What was removed, by kind. Empty when nothing matched. */
   redactions: Partial<Record<RedactionKind, number>>;
@@ -61,18 +34,11 @@ type Rule = {
 
 const TOKEN = (k: RedactionKind): string => `[REDACTED:${k}]`;
 
-/**
- * Variable names whose value is secret regardless of what it looks like. This
- * is what lets us remove a low-entropy password like `hunter2` — entropy rules
- * never would.
- */
+/** Variable names whose value is secret whatever it looks like (catches `hunter2`). */
 const SECRET_KEY =
   /\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|PRIVATE_KEY|ACCESS_KEY|API_KEY|APIKEY|AUTH)[A-Z0-9_]*)\b/i;
 
-/**
- * Order matters. Multi-line structures first, then contextual rules, then
- * standalone shapes, then paths last so earlier rules still see full paths.
- */
+/** Order matters: multi-line first, then contextual, then standalone shapes; paths last. */
 const RULES: Rule[] = [
   // PEM blocks — multi-line, so they must be removed before anything splits lines.
   {
@@ -82,8 +48,7 @@ const RULES: Rule[] = [
     replace: TOKEN('private-key'),
   },
 
-  // Provider-prefixed tokens. Secret by construction: the prefix IS the tell,
-  // so no entropy heuristic is needed and no false positives on SHAs.
+  // Provider-prefixed tokens: the prefix is the tell, so no entropy heuristic.
   {
     kind: 'api-key',
     pattern: new RegExp(
@@ -100,9 +65,6 @@ const RULES: Rule[] = [
         'npm_[A-Za-z0-9]{30,}', // npm
         'dop_v1_[a-f0-9]{60,}', // DigitalOcean
         'shpat_[a-f0-9]{30,}', // Shopify
-        // Added after a bare `hf_…` token survived into an Event during this
-        // project's own work — it was caught only when assigned to a *TOKEN*
-        // variable, so one pasted into a prompt would have persisted.
         'hf_[A-Za-z0-9]{20,}', // HuggingFace
         '(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}', // Stripe secret/restricted
         'SG\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}', // SendGrid
@@ -114,8 +76,7 @@ const RULES: Rule[] = [
     replace: TOKEN('api-key'),
   },
 
-  // JWTs — three base64url segments. `eyJ` is the b64 of `{"`, so this is shape
-  // based rather than entropy based.
+  // JWTs: three base64url segments starting `eyJ`.
   {
     kind: 'jwt',
     pattern: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
@@ -136,14 +97,10 @@ const RULES: Rule[] = [
     replace: (_m, scheme: string) => `${scheme} ${TOKEN('bearer')}`,
   },
 
-  // Assignment to a secret-named variable. Keeps the KEY — which is evidence,
-  // e.g. "the agent echoed ANTHROPIC_API_KEY" — and removes only the value.
+  // Assignment to a secret-named variable: keeps the key (evidence), removes the value.
   {
     kind: 'secret-assignment',
-    // The negative lookahead keeps this rule off auth *schemes*. `Authorization`
-    // matches SECRET_KEY via "AUTH", and without it the rule would consume
-    // `Bearer` as the value — destroying evidence the bearer rule just preserved,
-    // and double-redacting a line that was already safe.
+    // The lookahead skips auth schemes, so `Authorization: Bearer` is left to the bearer rule.
     pattern: new RegExp(
       `${SECRET_KEY.source}(\\s*[:=]\\s*)(?!(?:Bearer|Basic|Token)\\b)` +
         `(?:"([^"]*)"|'([^']*)'|([^\\s,;}]+))`,
@@ -159,12 +116,7 @@ const RULES: Rule[] = [
   },
 ];
 
-/**
- * Paths are handled separately from the rule table because the home directory is
- * only known at call time, and because the transform is a *rewrite* rather than
- * a removal: the path structure is evidence (which file was edited) while the
- * username is not.
- */
+/** Paths are rewritten, not removed: home becomes `~`, other usernames `[USER]`. Home is known only at call time. */
 function redactPaths(
   text: string,
   home: string,
@@ -173,7 +125,6 @@ function redactPaths(
   let out = text;
 
   if (home !== '') {
-    // The caller's own home → `~`. Keeps `~/Workspace/app/src/auth.ts` readable.
     const escaped = home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     out = out.replace(new RegExp(escaped, 'g'), () => {
       tally('home-path');
@@ -193,7 +144,7 @@ function redactPaths(
   return out;
 }
 
-export type RedactOptions = {
+type RedactOptions = {
   /** Defaults to the real home directory. Injected in tests. */
   home?: string;
 };
@@ -209,9 +160,7 @@ export function redact(text: string, opts: RedactOptions = {}): RedactResult {
   for (const rule of RULES) {
     out = out.replace(rule.pattern, (...args: unknown[]) => {
       const whole = args[0] as string;
-      // A match that already contains a replacement token was handled by an
-      // earlier, more specific rule. Leaving it alone is what makes redaction
-      // idempotent by construction rather than by luck.
+      // Skip matches already holding a token, so redaction is idempotent by construction.
       if (whole.includes('[REDACTED:')) return whole;
       tally(rule.kind);
       return typeof rule.replace === 'string'
@@ -225,13 +174,7 @@ export function redact(text: string, opts: RedactOptions = {}): RedactResult {
   return { text: out, redactions, redacted: Object.keys(redactions).length > 0 };
 }
 
-/**
- * Idempotence check, used in tests and assertable in CI.
- *
- * Redacting twice must equal redacting once. If it does not, a replacement
- * token is itself matching a rule — which would corrupt text on a second pass
- * and, worse, make the output depend on how many times it had been handled.
- */
+/** Redacting twice must equal redacting once. Tests only: the send gate uses strict equality instead. */
 export function isIdempotent(text: string, opts?: RedactOptions): boolean {
   const once = redact(text, opts).text;
   return redact(once, opts).text === once;

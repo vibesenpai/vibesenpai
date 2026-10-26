@@ -1,10 +1,6 @@
 /**
- * `src/cost.ts` — the arithmetic behind every token figure the tool prints.
- *
- * The tests that matter here are the ones guarding against counting the wrong
- * side of a pair: pricing the retry instead of the failed attempt, or the first
- * call instead of the repeats, roughly doubles every number and nothing else in
- * the system would complain.
+ * `src/cost.ts`: the arithmetic behind every token figure. Guards against pricing the wrong side
+ * of a pair (the retry, or the first call), which would silently double every number.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -132,8 +128,7 @@ describe('costFor · redundant_call', () => {
 
   it('is mostly received, which is why written and received are separate', () => {
     const c = costFor(repeatedCalls(), { dimension: 'redundant_call' });
-    // A repeated read of a large file is nearly all bytes the agent did NOT
-    // write. Calling this total "written and discarded" would be false.
+    // A repeated read is mostly bytes the agent did not write.
     expect(c.received).toBeGreaterThan(c.written * 50);
   });
 });
@@ -196,18 +191,14 @@ describe('carriedTurnsAfter', () => {
       ev({ turnType: 'assistant_msg' }),
       ev({ turnType: 'assistant_msg' }),
     ];
-    // Without response ids the request count is genuinely unknown. Falling back
-    // to counting records would reintroduce the overcount this exists to avoid,
-    // and 0 makes `render.ts` omit the carried line entirely — which is the
-    // honest outcome rather than a fabricated number.
+    // Without response ids the request count is unknown; 0 makes `render.ts` omit the line.
     expect(carriedTurnsAfter(events, events[0] as Event)).toBe(0);
   });
 });
 
 describe('approx', () => {
   it('rounds DOWN and marks the figure as a floor', () => {
-    // Measured: `ceil(len/4)` runs at ~0.37x of real output tokens, so these
-    // are lower bounds. Rounding up would overstate twice over.
+    // `ceil(len/4)` undercounts real tokens, so figures are lower bounds.
     expect(approx(12_345)).toBe('12,000+');
     expect(approx(5678)).toBe('5,600+');
     expect(approx(42)).toBe('42+');
@@ -220,13 +211,7 @@ describe('approx', () => {
 
 describe('costFor honours `reason` on EVERY dimension, not just edit_retry', () => {
   it('prices only the repeats whose result carries the asked-for reason', () => {
-    // `standing.ts` prices once per (dimension, reason) pair. The `edit_retry`
-    // branch filtered on reason; the `redundant_call` branch ignored it, so a
-    // redundant_call finding carrying a reason was priced at the whole
-    // dimension — several times larger than the finding printed beside it.
-    //
-    // `label()` attaches a reason to any finding whose anchors carry a harness
-    // message, so this was never reserved to edit_retry by construction.
+    // Regression: `redundant_call` ignored `reason` and priced the whole dimension.
     const events = repeatedCalls();
     expect(costFor(events, { dimension: 'redundant_call' }).received).toBe(2000);
     // A reason nothing carries must price at zero, not at the total.

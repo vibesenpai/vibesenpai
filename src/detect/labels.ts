@@ -1,37 +1,11 @@
 /**
- * Harness reason strings, for **naming** a finding that already exists.
- *
- * ── The one place text is allowed, and the limits on it ─────────────────────
- *
- * A detector cannot read text at all — `StructuralEvent` omits the fields and
- * the compiler enforces it. This module is the deliberate exception, and it is
- * the *runner* that calls it, after a detector has produced a valid candidate
- * from structure alone.
- *
- * So the dependency runs one way only: a finding never needs a label to exist.
- * If Anthropic rewords a message tomorrow, `reasonOf` returns `undefined`, the
- * finding still fires, and the report says the reason is unknown. Losing a
- * label is a cosmetic regression; losing a detection would be a silent one.
- *
- * ── Why a closed list is legitimate here ───────────────────────────────────
- *
- * The space is closed and Anthropic owns it. Measured over 1,135 failed edit
- * calls across 1,139 real sessions, **ten** distinct reasons appear inside the
- * `<tool_use_error>` envelope and the top four cover 965 of 1,031 (94%). That
- * is the opposite of the open space a framework list would be — and unlike the
- * lists this project removed, nothing here *decides* anything.
+ * Harness reason strings, for naming a finding that already exists. The runner applies them after a
+ * detector fires, so a reworded message loses only the label: CLAUDE.md "A detector reads structure".
  */
 
 import type { Event } from '../types.ts';
 
-/**
- * What the harness said went wrong, as a stable key.
- *
- * Named for the *developer's* situation rather than the harness's wording,
- * because the key is what advice hangs off: `stale-read` and `not-read-first`
- * both mean "the agent's view of the file was wrong", but only one of them is
- * the agent's own omission.
- */
+/** What the harness said went wrong, as a stable key named for the developer's situation. */
 export type Reason =
   /** The agent wrote before reading. Its own missed step — 560 of 1,031. */
   | 'not-read-first'
@@ -48,14 +22,7 @@ export type Reason =
   /** The call's arguments were malformed — 10. */
   | 'bad-arguments';
 
-/**
- * The closed set, matched against the text **inside** the harness's envelope.
- *
- * Anchored at the start of the message, because these are the harness's own
- * opening words and a match anywhere would also fire on a file's contents being
- * quoted back — which is how a detector once read a line-numbered `Read` of a
- * doc file as a permission denial.
- */
+/** Matched inside the envelope, anchored at the start so quoted file contents never match. */
 const REASONS: { re: RegExp; reason: Reason }[] = [
   { re: /^File has not been read yet/, reason: 'not-read-first' },
   { re: /^String to replace not found in file/, reason: 'string-not-found' },
@@ -75,13 +42,7 @@ function unwrap(text: string): string {
     .trimStart();
 }
 
-/**
- * The reason a failed call failed, or `undefined` when we do not recognise it.
- *
- * `undefined` is a first-class answer, not a gap to paper over: CLAUDE.md is
- * explicit that `unknown` beats guessing, and a new harness message must read as
- * "reason unknown" rather than get folded into the nearest familiar one.
- */
+/** The reason a failed call failed, or `undefined` (reason unknown) when unrecognised; never the nearest guess. */
 export function reasonOf(e: Event): Reason | undefined {
   if (e.failureKind !== 'tool') return undefined;
   if (e.textSummary === undefined) return undefined;
@@ -90,7 +51,7 @@ export function reasonOf(e: Event): Reason | undefined {
   return undefined;
 }
 
-/** One line of advice per reason. The second of the two outputs CLAUDE.md allows. */
+/** One line of advice per reason. */
 const ADVICE: Record<Reason, string> = {
   'not-read-first': 'read the file before editing it',
   'string-not-found': 'the quoted text did not match — re-read before editing',
@@ -103,4 +64,20 @@ const ADVICE: Record<Reason, string> = {
 
 export function adviceFor(reason: Reason): string {
   return ADVICE[reason];
+}
+
+/** Reason keys as plain English for the report. */
+const REASON_LABELS: Record<string, string> = {
+  'not-read-first': "the file wasn't read first",
+  'string-not-found': "the text didn't match",
+  'stale-read': 'the file changed after it was read',
+  'ambiguous-target': 'the text matched several places',
+  'no-op': 'the edit changed nothing',
+  'missing-file': "the file doesn't exist",
+  'bad-arguments': 'the call was malformed',
+};
+
+/** A reason key in plain words, for a reader. */
+export function reasonLabel(key: string): string {
+  return REASON_LABELS[key] ?? key.replace(/-/g, ' ');
 }

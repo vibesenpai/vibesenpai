@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="agentsensei">
+  <rect width="64" height="64" rx="14" fill="#0d1117"/>
+  <path d="M21 30Q32 32 43 30L42 39Q32 43 22 39Z" fill="#c9d4df"/>
+  <path d="M24.5 34.5q2.5 2 5 0M34.5 34.5q2.5 2 5 0" fill="none" stroke="#1f2a44" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M19 37Q24 46 32 60Q40 46 45 37Q39 41 32 40Q25 41 19 37Z" fill="#e6edf3"/>
+  <path d="M32 40Q27.5 38.5 24.5 44M32 40Q36.5 38.5 39.5 44" fill="none" stroke="#8fa3b8" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M32 5 61 29Q32 34 3 29Z" fill="#7fb3d5"/>
+  <path d="M26 21l3 2-3 2M30.5 25.5h4" fill="none" stroke="#0d1117" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,37 +1,22 @@
-import { SCHEMA, type Versioned } from './schema.ts';
+import type { Versioned } from './schema.ts';
 
 /**
- * The pinned contracts. See docs/contracts.md for the reasoning.
- *
- * These three shapes are specified ahead of implementation because each one is
- * persisted — if its shape changes, previously stored data becomes wrong in place.
- * Everything else in this codebase is free to be designed while being built.
+ * The pinned contracts: Event, Finding, Skeleton. Each is persisted, so a shape change corrupts
+ * stored data in place. Reasoning: docs/contracts.md.
  */
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Events — the normalised stream, aligned to SWE-chat's `conversations` schema
-// so our parser output is directly comparable to their 18k real sessions.
-// ─────────────────────────────────────────────────────────────────────────────
+// Events: the normalised stream, aligned to SWE-chat's `conversations` schema.
 
 export type Harness = 'claude-code' | 'codex' | (string & {});
 
-/**
- * SWE-chat's `turn_type` vocabulary. Note that `tool_use` and `tool_result` are
- * *content blocks* inside assistant/user messages in the raw transcript, not
- * top-level record types — the parser flattens them into events.
- */
+/** SWE-chat's `turn_type` vocabulary. `tool_use`/`tool_result` are content blocks flattened into events. */
 export type TurnType =
   | 'user_prompt'
   | 'assistant_msg'
   | 'tool_use'
   | 'tool_result'
   | 'queue_operation'
-  /**
-   * A slash-command echo (`<local-command-stdout>`, `<command-name>`, …).
-   * Written as a `user` record with string content, but it is not a human
-   * speaking — 13 of 69 "prompts" across 3 real sessions were these. Counting
-   * them as prompts inflates every per-prompt rate denominator.
-   */
+  /** A slash-command echo written as a `user` record. Not a human prompt; excluded from per-prompt rates. */
   | 'local_command'
   | 'system';
 
@@ -41,36 +26,16 @@ export type Event = {
 
   /** The transcript record's own uuid. The only stable identifier. */
   uuid: string;
-  /**
-   * Parent in the transcript tree. Kept for grouping and for detecting genuinely
-   * abandoned subtrees — NOT for sequencing. Measured over real sessions: the
-   * longest parentUuid path covers only 78.2% of records, because parallel tool
-   * calls legitimately branch. File order is topological and complete, so that
-   * is what `seq` follows. See docs/log-formats.md.
-   */
+  /** Parent in the transcript tree. For grouping, not sequencing: see docs/log-formats.md. */
   parentUuid: string | null;
   /** Index in file order. Derived on read; never persisted as identity. */
   seq: number;
 
-  /**
-   * Subagent events are interleaved into the same file. A parallel fan-out reads
-   * the same files legitimately, so sidechain events must be attributed to their
-   * subagent or `reading_spiral` fires on every healthy fan-out.
-   */
+  /** Subagent events share the file; attribute them to their subagent. */
   isSidechain: boolean;
   sidechainId?: string;
 
-  /**
-   * The record's own timestamp, when it has a usable one.
-   *
-   * **Optional, because 107 records in one real session had none** — every
-   * `file-history-snapshot` carries no `timestamp` at all. The parser used to
-   * coerce that to `''`, which is a type claiming a timestamp exists: the empty
-   * string then sorted below every real one, became a session's start, and made
-   * its duration unreadable. Validated through
-   * `isPlausibleTimestamp` at the parser boundary, so anything present here is
-   * usable without re-checking.
-   */
+  /** Optional: some records (e.g. `file-history-snapshot`) have none. Validated at the parser boundary. */
   ts?: string;
   turnType: TurnType;
 
@@ -81,61 +46,24 @@ export type Event = {
   pattern?: string;
 
   /**
-   * Digest of the tool call's full arguments — the only way to tell two calls
-   * to the same tool apart.
-   *
-   * `filePath`, `command` and `pattern` cover Bash, Read, Edit and Grep and
-   * nothing else, so without this every `TaskUpdate`, `Agent` or `TaskCreate`
-   * call collapses into one indistinguishable signature. Measured: of 19
-   * repeated-call runs across 227 sessions, **16 were different calls that
-   * merely looked identical** — six separate tasks, seven separate subagents —
-   * and `tool_loop` would have reported them at `certain` confidence.
-   *
-   * A digest rather than the arguments themselves: it answers "same call?",
-   * which is all any detector needs, while storing no content. Computed over the
-   * redacted form, so it cannot serve as an oracle for a secret that appeared in
-   * an argument.
+   * Digest of the call's full redacted arguments: tells two calls to the same tool apart
+   * without storing content.
    */
   argHash?: string;
 
-  /**
-   * Byte length of the call's arguments, as the harness serialised them.
-   *
-   * The cost input. Measured across 1,139 sessions: when an edit is refused,
-   * the discarded `old_string`/`new_string` averages 330 tokens against 75 for
-   * the error text — so what the agent *wrote and threw away* dominates, and
-   * `argHash` alone could not see it.
-   *
-   * A JSON length, so it runs slightly high on multi-line edits: every newline
-   * is stored as the two characters `\n`.
-   */
+  /** Byte length of the serialised arguments; the cost input. Runs slightly high (newlines are `\n`). */
   argBytes?: number;
 
   /**
-   * The API response this event came from.
-   *
-   * A single response is written to the transcript as **several records** — one
-   * per content block — each repeating the same id and the same `usage`. So
-   * this is what makes two things possible: summing tokens once per response
-   * rather than once per block, and counting *requests* rather than records
-   * when asking how many times context was re-sent.
-   *
-   * Measured: 934 of 1,531 responses in one session span more than one record,
-   * up to seven. Summing per record overcounts tokens by 2.49x.
+   * The API response this event came from. One response spans several records repeating the
+   * same `usage`, so sum tokens once per response, not per record.
    */
   responseId?: string;
 
   exitCode?: number;
   isError?: boolean;
 
-  /**
-   * Digest of the tool result's **full** output, volatility-normalised.
-   *
-   * `textSummary` is capped at 200 characters and, measured over 3,748 real
-   * results, **59.9% hit that cap** — so comparing summaries compared prefixes,
-   * and two different failures sharing an opening line looked identical. This is
-   * what `tool_loop` compares instead.
-   */
+  /** Digest of the full, volatility-normalised output (`textSummary` is capped at 200 chars). */
   outHash?: string;
   /** Bytes of output before truncation. A growing log is new information. */
   outBytes?: number;
@@ -143,90 +71,27 @@ export type Event = {
   /** Interrupts: SWE-chat's `queue_op_subtype` (user_prompt_discarded, …). */
   queueOpSubtype?: string;
 
-  /**
-   * Which kind of `system` record this was.
-   *
-   * `turnType: 'system'` is a catch-all over genuinely different things —
-   * compaction residue, cost totals, PR links, file-history bookkeeping. The
-   * skeletonizer needs to tell compaction from the rest to emit a
-   * `meta: 'compaction'` line, and sniffing `textSummary` prefixes to do it
-   * would couple a persisted format to a display string.
-   */
+  /** Which kind of `system` record, so nothing has to sniff `textSummary`. */
   systemKind?: 'compaction' | 'cost-state' | 'pr-link' | 'file-history' | 'other';
 
-  /**
-   * The harness's own accounting for a compaction, when it recorded one.
-   *
-   * Exact rather than estimated — `compactMetadata` reports what the context
-   * held before and after. Present only on `systemKind: 'compaction'` events
-   * from `compact_boundary` records; the older `summary` shape carries none.
-   */
+  /** The harness's exact before/after context size, from `compact_boundary` records only. */
   compaction?: { preTokens: number; postTokens: number };
 
-  /**
-   * Files the harness recorded as **changed** at this point, from
-   * `file-history-snapshot`. Tool-agnostic ground truth: it catches an MCP
-   * server's write, a custom agent's write, and anything that does not exist
-   * yet, because the harness tracks the file rather than the tool.
-   *
-   * Corroborating rather than primary — it is version-gated. Measured: 0 of 56
-   * sessions on harness 1.0 emit snapshots, 1 of 87 on 2.0, but 22 of the 34
-   * *editing* sessions on 2.1.
-   */
+  /** Files the harness recorded as changed (`file-history-snapshot`). Version-gated, so corroborating only. */
   changedFiles?: string[];
 
-  /**
-   * On a branch the user abandoned — by rewinding, or by submitting a prompt and
-   * resubmitting it before any reply. **Observed**, not inferred: a `/rewind`
-   * leaves the old records in the file with no marker of any kind, so this is
-   * derived structurally (see parsers/claude-code.ts).
-   *
-   * Flagged rather than dropped: detectors ignore these by default, but silently
-   * discarding records would hide that work happened at all.
-   */
+  /** On a branch the user abandoned (rewind or resubmit). Flagged, not dropped; see parsers/claude-code.ts. */
   abandoned?: boolean;
 
   /**
-   * **Who** rejected a failed call, from the harness's own envelope.
-   *
-   * Set only when the call failed. The harness frames its errors rather than
-   * just describing them, and the frame is the closest thing this format has to
-   * an error code — there are no codes anywhere in it, verified across all
-   * 5,354 failing results.
-   *
-   * Measured over 1,135 failed edit calls:
-   *
-   * ```
-   *   1031  <tool_use_error>…</tool_use_error>   the tool itself rejected it
-   *     49  The user doesn't want to proceed…    the person said no
-   *     41  PreToolUse:Edit hook error: …        the person's OWN hook blocked it
-   *      4  Claude requested permissions to …    still waiting on a decision
-   *     10  unenveloped
-   * ```
-   *
-   * `cascade` is split out of the first group: `Sibling tool call errored`
-   * means the call never ran, so re-issuing it is correct rather than wasteful.
-   * It was 32 of the 991 findings the first version produced.
-   *
-   * Why it is a field and not a detector's business: those last three are not
-   * the agent fighting a tool. Counting a `hook` rejection as waste blames the
-   * developer's own guardrail for working. A detector reads this enum; only the
-   * harness-specific parser reads the envelope, which is exactly its job.
+   * Who rejected a failed call, from the harness's error envelope (the format has no error codes).
+   * Only `tool` is agent waste; `cascade` means the call never ran. See CLAUDE.md "A detector reads structure".
    */
   failureKind?: 'tool' | 'denied' | 'hook' | 'permission' | 'cascade' | 'other';
 
   /**
-   * The command discards part of its own output before we ever see it.
-   *
-   * Set when a shell pipeline ends in `head` or `tail`, so `outHash` digests a
-   * **prefix** rather than the output. Two runs can then look identical while
-   * the part that changed was thrown away upstream of us — which is why
-   * `redundant_call` downgrades from `certain` to `high` rather than suppressing.
-   *
-   * **Partial coverage, stated rather than implied.** `head` and `tail` are the
-   * overwhelmingly common forms, but `sed -n`, `awk NR<`, `cut` and a bare
-   * `| less` are not detected, and findings on those stay `certain`. This is a
-   * narrower claim than `failureKind`, whose envelope set is genuinely closed.
+   * The pipeline ends in `head`/`tail`, so `outHash` covers a prefix. Other truncating forms
+   * (`sed -n`, `cut`, …) are not detected.
    */
   truncatesOwnOutput?: boolean;
 
@@ -234,19 +99,8 @@ export type Event = {
   textSummary?: string;
 
   /**
-   * The harness's own billing record, copied verbatim off `message.usage`.
-   *
-   * The only signal in the format that is exact, universal, and free of text:
-   * it is identical for Python, Rust, an MCP server or a custom agent, because
-   * it describes the API call rather than the work. Populated on **100% of
-   * assistant messages** across the 1,139-session corpus.
-   *
-   * `cacheCreation` is the load-bearing one. `cacheRead` re-counts the entire
-   * prefix on every call, so it grows quadratically with turn count and any
-   * ratio built on it is pinned near 1 by construction — measured
-   * `read/(read+creation)` runs p10 0.901 to p90 0.985, i.e. an "outlier" is
-   * just a short session. `cacheCreation` is what re-ingesting an invalidated
-   * prefix actually cost, and it spreads 7.5x p90/p50. See `GRAVEYARD.md`.
+   * `message.usage`, verbatim. `cacheRead` re-counts the whole prefix per call, so ratios on it
+   * are meaningless; `cacheCreation` is the real cost. See GRAVEYARD.md.
    */
   tokens?: {
     input?: number;
@@ -257,68 +111,32 @@ export type Event = {
 };
 
 /**
- * The only fields a detector may read.
- *
- * ── Why this is a type and not a convention ─────────────────────────────────
- *
- * `command`, `pattern` and `textSummary` are text, and a rule over text is a
- * rule over an open space: thousands of toolchains, infinite phrasings, and no
- * way to know what was missed. Three detectors were built on them and produced
- * **5 true positives against ~25 false positives** over 1,139 real sessions.
- *
- * Omitting the fields makes `e.command` in a detector a build failure rather
- * than a review comment — the same move as `test/source-hygiene.test.ts`
- * making an invisible character fail the build.
- *
- * A harness string can still *name* a sub-reason, but the **runner** attaches
- * it to an already-valid finding (`src/detect/labels.ts`). Detection never
- * depends on it, so a harness change loses a label and never a finding.
+ * The only fields a detector may read: reading command text in a detector is a compile error.
+ * Why: CLAUDE.md "A detector reads structure".
  */
 export type StructuralEvent = Omit<Event, 'command' | 'pattern' | 'textSummary'>;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TurnRef — evidence pointers. By uuid, never by position.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * `seq` is a derived position, and re-parsing can renumber it — a compaction or
- * rewind changes which records are present, so a finding stored as "turns 31,
- * 44" would silently point somewhere else. `uuid` comes from the transcript and
- * never moves, so it is the identity; `seq` is recomputed for display only.
- */
+/** Evidence pointer. `uuid` is the identity; `seq` can renumber on re-parse and is display only. */
 export type TurnRef = {
   uuid: string;
   sessionId: string;
   seq?: number;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Findings
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type Confidence = 'certain' | 'high' | 'medium' | 'low';
 
-/** How a finding was produced. Never blurred in output: "flagged by rule" and
- *  "flagged by a model at 0.7" are different claims. */
+/** How a finding was produced. Never blurred in output. */
 export type Method = 'RULE' | 'RULE+T' | 'LEX' | 'EMB' | 'CLS' | 'NLI' | 'JUDGE' | 'STAT';
 
-/**
- * Four states, and the fourth is the entire safety mechanism. Treating "could
- * not determine" as "did not converge" would fire on every project without
- * tests, every uncommitted branch, and everyone who runs tests in another
- * terminal. Those are invisibility, not rework.
- */
+/** `unknown` is the safety valve: "could not determine" must never read as "did not converge". */
 export type Outcome = 'converged' | 'reverted' | 'abandoned' | 'unknown';
 
-/** Which direction is good. `neutral` dimensions carry no value judgment —
- *  more `user_correction` is not a failure; correcting the agent is healthy. */
+/** Which direction is good. `neutral` carries no value judgment. */
 export type Polarity = 'lower-is-better' | 'higher-is-better' | 'neutral';
 
-/**
- * What a rate divides by. Deltas are computed on rates, never raw counts: ten
- * sessions this period against ten last period are not comparable if the
- * sessions differ in length.
- */
+/** What a rate divides by. Deltas compare rates, never raw counts. */
 export type Denominator =
   | 'per-session'
   | 'per-turn'
@@ -326,21 +144,15 @@ export type Denominator =
   | 'per-success-claim'
   | 'per-tool-call';
 
-/**
- * Which dimensions run by default. `core` is the trust-building set — every
- * member is `certain` or `high` and needs no model.
- */
+/** Which dimensions run by default. `core` is all `certain`/`high` and needs no model. */
 export type Preset = 'core' | 'standard' | 'all';
 
 export type Finding = Versioned<'finding'> & {
   /** Per-session instance: hash(dimension + sessionId + subject). */
   id: string;
   /**
-   * Cross-session identity: hash(dimension + project + subject).
-   * The running score, dismissals and the CLAUDE.md audit all operate on this.
-   * Keyed on *subject*, never on evidence extent — otherwise a 7-violation
-   * finding becomes a different finding at the 8th, and someone who dismissed
-   * it gets re-nagged.
+   * Cross-session identity: hash(dimension + project + subject). Keyed on subject, never on
+   * evidence extent, so a dismissal survives the finding growing.
    */
   subjectId: string;
 
@@ -353,14 +165,7 @@ export type Finding = Versioned<'finding'> & {
 
   /** Grows over time. Never part of either identity. */
   evidence: TurnRef[];
-  /**
-   * One ref per instance — what `occurrences` counts.
-   *
-   * Distinct from `evidence`, which may cite supporting turns:
-   * `inaccurate_self_report` shows both the failing check and the claim, but
-   * that is **one** false claim. Tying the count to evidence reported every such
-   * finding at double its real size.
-   */
+  /** One ref per instance; what `occurrences` counts. `evidence` may also cite supporting turns. */
   anchors: TurnRef[];
   occurrences: number;
 
@@ -373,16 +178,7 @@ export type Finding = Versioned<'finding'> & {
   outcome?: Outcome;
   polarity: Polarity;
 
-  /** May be empty — report-only findings are a first-class answer. */
-
-  /**
-   * What the harness said went wrong, by reason, with a count each.
-   *
-   * Attached by the **runner** once the finding already exists, never by a
-   * detector — see `src/detect/labels.ts`. Absent when nothing was recognised,
-   * and a reason the harness has reworded simply stops appearing. The finding
-   * stands either way; this only decides how specific the advice can be.
-   */
+  /** Harness reasons with counts, attached by the runner after detection (`src/detect/labels.ts`). */
   reasons?: Record<string, number>;
 
   firstSeen: string;
@@ -395,31 +191,9 @@ export type Finding = Versioned<'finding'> & {
   dismissed?: { at: string; reason?: string };
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Skeleton — a versioned format with three consumers:
-//   1. model input (~2K tokens, so a window fits a 4K prompt with rubric)
-//   2. the evidence shown to the user (`explain` prints it)
-//   3. the future team product's wire format (redacted, transmissible)
-// ─────────────────────────────────────────────────────────────────────────────
+// Skeleton: versioned; read by the model, shown as evidence, and redacted for transmission.
 
-/**
- * Bump when the shape OR the text rendering changes. This is part of the verdict
- * cache key, so a bump invalidates cached verdicts rather than silently reusing
- * ones computed against a different shape.
- *
- * Sourced from SCHEMA so there is exactly one place to change it.
- */
-export const SKELETON_VERSION = SCHEMA.skeleton;
-
-/**
- * Carried by every line kind.
- *
- * `abandoned` is a property of the turn, not a kind of turn, so it rides along
- * rather than becoming a sixth variant. It must be representable: CLAUDE.md
- * requires abandoned work to be flagged rather than dropped, because silently
- * discarding it would hide that the work happened at all. 52 events in the
- * public corpus are on abandoned branches.
- */
+/** Carried by every line kind. Abandoned work is flagged, never dropped. */
 type LineCommon = { ref: TurnRef; abandoned?: true };
 
 export type SkeletonLine = LineCommon &
@@ -430,13 +204,7 @@ export type SkeletonLine = LineCommon &
     | { k: 'result'; ok: boolean; failures?: number; err?: string }
     | {
         k: 'meta';
-        /**
-         * `compaction` comes from the harness's own `summary` record;
-         * `interrupt` from a queue operation; `commit` and `revert` are derived
-         * from the git command that was run. All four are reachable — an
-         * unreachable variant in a persisted format is a trap for the next
-         * reader.
-         */
+        /** `compaction` from a summary record, `interrupt` from a queue op, `commit`/`revert` from git. */
         kind: 'compaction' | 'interrupt' | 'commit' | 'revert';
       }
   );
@@ -445,29 +213,12 @@ export type Skeleton = Versioned<'skeleton'> & {
   sessionId: string;
   window: { from: TurnRef; to: TurnRef };
   lines: SkeletonLine[];
-  /**
-   * Recorded, never hidden. A skeleton that silently dropped the decisive turn
-   * would produce a confident wrong verdict.
-   */
+  /** Recorded, never hidden. */
   elided?: { lines: number; reason: 'token-budget' };
 
-  /**
-   * Set when this window covers a subagent rather than the main thread.
-   * Sidechains are excluded from main-thread windows — a parallel fan-out reads
-   * the same files legitimately — but they get their own windows rather than no
-   * coverage: 712 events across 99 public transcripts is not a rounding error.
-   */
+  /** Set when this window covers a subagent; sidechains get their own windows. */
   sidechainId?: string;
 
-  /**
-   * Turn types with no line representation (`system` bookkeeping,
-   * `local_command` echoes). Counted rather than silently dropped, so a
-   * compression ratio cannot be flattered by quietly discarding input.
-   */
+  /** Turn types with no line representation, counted rather than silently dropped. */
   dropped?: Record<string, number>;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Backends — defined now with exactly one null implementation, so the semantic
-// tier plugs in later without touching detectors.
-// ─────────────────────────────────────────────────────────────────────────────

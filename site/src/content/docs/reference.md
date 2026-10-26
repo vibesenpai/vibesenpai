@@ -1,6 +1,6 @@
 ---
 title: Reference
-description: Three commands and every setting, in one place.
+description: Four commands and every setting, in one place.
 ---
 
 ## Commands
@@ -10,8 +10,9 @@ Typed in Claude Code, once the plugin is installed.
 | | |
 |---|---|
 | `/agentsensei:insights` | What happened in the session you are in. Renders instantly from what has already been analysed, then reads this session with the model. |
-| `/agentsensei:fix` | One change worth making, with the evidence for it — or a plain statement that no fix exists. |
+| `/agentsensei:fix` | A recommendation, with the evidence for it — or a plain statement that no fix exists. |
 | `/agentsensei:report` | Writes a self-contained HTML report of your history and prints the path. No JavaScript, no external resources, mode 0600. |
+| `/agentsensei:dismiss` | Sets findings aside. With no arguments it lists them and asks which, and whether each is wrong or just not worth showing. `all` clears everything shown so far, and new findings still appear. `undo <id>` or `undo all` restores them. Nothing is deleted. |
 
 `/plugin disable agentsensei` turns everything off.
 

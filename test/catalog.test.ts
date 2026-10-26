@@ -2,7 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { runScan, readCatalog, findTranscripts, describeCatalog } from '../src/catalog.ts';
+import { runScan, readCatalog, describeCatalog } from '../src/catalog.ts';
+import { discoverTranscripts as findTranscripts } from '../src/read.ts';
 import { SCHEMA } from '../src/schema.ts';
 
 let root: string;
@@ -30,8 +31,7 @@ function session(name: string, lines: string[]): string {
 
 describe('catalog — copies nothing', () => {
   it('stores only index.json, never a transcript', () => {
-    // The whole point of the design. A leaked token in a transcript is already
-    // exposed in the harness's file; duplicating it would make that our breach.
+    // No transcript copies: duplicating a leaked token would make the breach ours.
     session('aaa', ['{"a":1}', '{"a":2}']);
     runScan({ sources: [sources], catalog });
 
@@ -114,9 +114,7 @@ describe('catalog — incremental behaviour', () => {
 
 describe('catalog — line boundaries', () => {
   it('does NOT consume a partial trailing line', () => {
-    // The harness may be mid-write. Consuming a fragment would skip that record
-    // permanently: the parser discards it as malformed and the completed version
-    // is never re-read.
+    // The harness may be mid-write; consuming a fragment would lose that record for good.
     const p = session('aaa', ['{"a":1}']);
     appendFileSync(p, '{"a":2,"incomp'); // no newline
 
@@ -154,8 +152,7 @@ describe('catalog — line boundaries', () => {
 
 describe('catalog — the source is the only copy', () => {
   it('records when the harness deletes a source, and keeps the entry', () => {
-    // Findings outlive transcripts, so `explain` needs to say *when* the
-    // transcript went away rather than implying we lost it.
+    // Findings outlive transcripts, so record when the transcript went away.
     const p = session('aaa', ['{"a":1}']);
     runScan({ sources: [sources], catalog });
     rmSync(p);
@@ -256,8 +253,7 @@ describe('findTranscripts', () => {
 });
 
 describe('catalog — the period a transcript covers', () => {
-  // The report's depth labelling rests entirely on these fields, and none of the
-  // 22 tests above touched them.
+  // The report's depth labelling rests on these fields.
   const rec = (ts: string, extra = ''): string =>
     `{"type":"user","uuid":"u${ts}","timestamp":"${ts}"${extra}}`;
 
@@ -270,8 +266,7 @@ describe('catalog — the period a transcript covers', () => {
   });
 
   it('distinguishes the data span from when we first looked', () => {
-    // `firstSeenAt` is when we read the file; `firstTs` is what it covers. Using
-    // the former as a depth boundary claimed coverage of only the scan day.
+    // `firstSeenAt` is when we read the file; `firstTs` is what it covers.
     session('aaa', [rec('2026-08-23T03:48:00.000Z')]);
     runScan({ sources: [sources], catalog, now: () => '2026-10-19T00:00:00.000Z' });
     const e = Object.values(readCatalog(catalog)!.entries)[0]!;
@@ -280,9 +275,7 @@ describe('catalog — the period a transcript covers', () => {
   });
 
   it('IGNORES a timestamp echoed inside a tool result', () => {
-    // The regex this replaced matched any "timestamp" anywhere in the line, so
-    // one pasted CI log would set firstTs to 2019 and make `report` claim full
-    // depth across years holding nothing.
+    // A "timestamp" inside a pasted log must not set firstTs.
     const echoed =
       '{"type":"user","uuid":"b","timestamp":"2026-10-12T10:00:05.000Z",' +
       '"message":{"content":[{"type":"tool_result","tool_use_id":"t1",' +
@@ -303,9 +296,7 @@ describe('catalog — the period a transcript covers', () => {
   });
 
   it('widens the span incrementally, keeping the earliest across scans', () => {
-    // Only new bytes are read on a grown file, so the earliest timestamp has to
-    // come from the stored value — the case most likely to be wrong and least
-    // likely to be noticed, since a wrong firstTs still looks plausible.
+    // On a grown file only new bytes are read, so the earliest timestamp comes from the stored value.
     const p = session('aaa', [rec('2026-10-12T10:00:00.000Z')]);
     runScan({ sources: [sources], catalog });
     appendFileSync(p, `${rec('2026-10-15T09:00:00.000Z')}\n`);
@@ -342,11 +333,7 @@ describe('catalog — the period a transcript covers', () => {
 
 describe('scan counts what it would analyse, not our own exhaust', () => {
   it('skips transcripts our own model calls wrote', () => {
-    // Measured on a real machine: `scan` said 1,009 transcripts / 528MB while
-    // every analysis path saw 15, because 995 were headless judge children —
-    // 494MB of our own output indexed as the user's work. A headline count
-    // including our exhaust claims a thousand sessions of evidence when there
-    // are fourteen.
+    // Our own judge children must not count as the user's transcripts.
     const root = mkdtempSync(join(tmpdir(), 'as-cat-judge-'));
     const mine = join(root, 'projects', '-private-tmp-agentsensei-judge');
     const theirs = join(root, 'projects', '-Users-someone-Workspace');
