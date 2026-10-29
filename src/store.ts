@@ -46,7 +46,9 @@ CREATE TABLE IF NOT EXISTS run (
   -- the first three recorded runs took ~3s each and were reading packets of
   -- ~1,700 tokens, which says nothing about a 60,000-token one. A median over
   -- them produced an ETA calibrated on the smallest quartile of the queue.
-  packet_tokens INTEGER
+  packet_tokens INTEGER,
+  -- Findings the lookback gate dropped as suggestions or unverified sources.
+  gated INTEGER
 );
 `;
 
@@ -93,7 +95,17 @@ CREATE TABLE IF NOT EXISTS dismissal (
   key       TEXT PRIMARY KEY,
   scope     TEXT NOT NULL,   -- 'subject' | 'finding' | 'judged'
   dimension TEXT NOT NULL,
-  reason    TEXT NOT NULL,   -- 'wrong' | 'noise' | 'cleared'
+  reason    TEXT NOT NULL,   -- 'wrong' | 'suggestion' | 'noise' | 'cleared'
+  at        TEXT NOT NULL
+);
+`;
+
+/** The person's verdict on a finding: the gold set judge accuracy is measured against. Ids and enums only. */
+const LABEL_DDL = `
+CREATE TABLE IF NOT EXISTS label (
+  key       TEXT PRIMARY KEY,
+  dimension TEXT NOT NULL,
+  verdict   TEXT NOT NULL,   -- 'mistake' | 'suggestion' | 'wrong'
   at        TEXT NOT NULL
 );
 `;
@@ -138,7 +150,8 @@ CREATE TABLE IF NOT EXISTS occurrence (
   anchor_uuid TEXT,               -- uuid, never seq (D24)
   confidence  TEXT NOT NULL,
   reason      TEXT,
-  at          TEXT NOT NULL
+  at          TEXT NOT NULL,
+  secondary_dimensions TEXT       -- judge only: JSON array of other kinds it also is
 );
 CREATE INDEX IF NOT EXISTS occurrence_session ON occurrence(session_id);
 CREATE INDEX IF NOT EXISTS occurrence_dim     ON occurrence(dimension, subject);
@@ -179,6 +192,7 @@ ${RUN_DDL}
 ${SKIPPED_DDL}
 ${PART_DDL}
 ${DISMISSAL_DDL}
+${LABEL_DDL}
 `;
 
 /** Open the store, creating it if needed. WAL lets readers read during a write; busy_timeout waits rather than throws. */
@@ -226,10 +240,28 @@ export function openStore(archive: string): Db {
         db.exec(RUN_DDL);
       }
     }
+    // `gated` came later still: added in place, never a rebuild.
+    const rcols = (db.prepare('PRAGMA table_info(run)').all() as { name: string }[]).map((c) => c.name);
+    if (rcols.length > 0 && !rcols.includes('gated')) {
+      try {
+        db.exec('ALTER TABLE run ADD COLUMN gated INTEGER');
+      } catch {
+        // Already there.
+      }
+    }
+    const ocols = (db.prepare('PRAGMA table_info(occurrence)').all() as { name: string }[]).map((c) => c.name);
+    if (ocols.length > 0 && !ocols.includes('secondary_dimensions')) {
+      try {
+        db.exec('ALTER TABLE occurrence ADD COLUMN secondary_dimensions TEXT');
+      } catch {
+        // Already there.
+      }
+    }
     // Added after `run`, so an existing store has neither.
     db.exec(SKIPPED_DDL);
     db.exec(PART_DDL);
     db.exec(DISMISSAL_DDL);
+    db.exec(LABEL_DDL);
 
     // `session` gained `packet_tokens` the same way.
     const scols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map(
@@ -335,18 +367,21 @@ export type OccurrenceRow = {
   confidence: string;
   reason?: string;
   at: string;
+  /** Judge only: other kinds the finding also is. */
+  secondaryDimensions?: string[];
 };
 
 /** Record occurrences. Ids are content hashes, so upserting makes a retried pass idempotent. */
 export function putOccurrences(db: Db, rows: OccurrenceRow[]): void {
   const put = db.prepare(
     `INSERT INTO occurrence
-       (id, session_id, dimension, tier, subject, anchor_uuid, confidence, reason, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, session_id, dimension, tier, subject, anchor_uuid, confidence, reason, at, secondary_dimensions)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        confidence = excluded.confidence,
        reason     = excluded.reason,
-       at         = excluded.at`,
+       at         = excluded.at,
+       secondary_dimensions = excluded.secondary_dimensions`,
   );
   for (const r of rows) {
     put.run(
@@ -359,6 +394,7 @@ export function putOccurrences(db: Db, rows: OccurrenceRow[]): void {
       r.confidence,
       r.reason ?? null,
       r.at,
+      r.secondaryDimensions === undefined || r.secondaryDimensions.length === 0 ? null : JSON.stringify(r.secondaryDimensions),
     );
   }
 }
@@ -366,7 +402,7 @@ export function putOccurrences(db: Db, rows: OccurrenceRow[]): void {
 /** The turns a finding cites. One row per turn, keyed by the occurrence. */
 export function putEvidence(
   db: Db,
-  rows: { occurrenceId: string; anchor: string; kind: 'uuid' | 'turn'; quote?: string }[],
+  rows: { occurrenceId: string; anchor: string; kind: 'uuid' | 'turn' | 'established'; quote?: string }[],
 ): void {
   const put = db.prepare(
     `INSERT INTO evidence(occurrence_id, anchor, kind, quote) VALUES (?, ?, ?, ?)
@@ -391,10 +427,11 @@ export function endRun(
   status: string,
   durationMs?: number,
   packetTokens?: number,
+  gated?: number,
 ): void {
   db.prepare(
-    'UPDATE run SET ended_at = ?, status = ?, duration_ms = ?, packet_tokens = ? WHERE id = ?',
-  ).run(new Date().toISOString(), status, durationMs ?? null, packetTokens ?? null, id);
+    'UPDATE run SET ended_at = ?, status = ?, duration_ms = ?, packet_tokens = ?, gated = ? WHERE id = ?',
+  ).run(new Date().toISOString(), status, durationMs ?? null, packetTokens ?? null, gated ?? null, id);
 }
 
 /** The pass in flight, if any. Bounded by `staleMs`: a killed process leaves its row open. */
@@ -531,8 +568,23 @@ export function sessionCosts(db: Db): Map<string, number> {
 }
 
 export type DismissScope = 'subject' | 'finding' | 'judged';
-/** `wrong` leaves every count; `noise` and `cleared` are hidden but still counted. */
-export type DismissReason = 'wrong' | 'noise' | 'cleared';
+/** `wrong` leaves every count; `suggestion`, `noise` and `cleared` are hidden but still counted. */
+export type DismissReason = 'wrong' | 'suggestion' | 'noise' | 'cleared';
+
+export type Verdict = 'mistake' | 'suggestion' | 'wrong';
+export type LabelRow = { key: string; dimension: string; verdict: Verdict; at: string };
+
+/** Record a verdict; a later one replaces an earlier. */
+export function putLabel(db: Db, r: LabelRow): void {
+  db.prepare(
+    'INSERT INTO label(key, dimension, verdict, at) VALUES (?, ?, ?, ?) ' +
+      'ON CONFLICT(key) DO UPDATE SET verdict = excluded.verdict, at = excluded.at',
+  ).run(r.key, r.dimension, r.verdict, r.at);
+}
+
+export function readLabels(db: Db): LabelRow[] {
+  return (db.prepare('SELECT key, dimension, verdict, at FROM label ORDER BY at').all() as LabelRow[]).map((r) => ({ ...r }));
+}
 
 export type DismissalRow = {
   key: string;

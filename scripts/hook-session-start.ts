@@ -1,15 +1,17 @@
 /**
- * The `SessionStart` hook: prints the report as `systemMessage`, then spawns a refresh and exits.
+ * The `SessionStart` hook: prints the report as `systemMessage`, then heals and refreshes the free jobs.
  * `systemMessage` reaches the user, never the model; never emit `additionalContext` (CLAUDE.md Principle One).
  */
 
-import { runDetached } from '../src/spawn.ts';
-import { isTripped, readBreaker } from '../src/breaker.ts';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { writeAtomic } from '../src/files.ts';
+import { jobsHealth, superviseAll } from '../src/jobs.ts';
 import {
   hasDisclosed, markDisclosed, readJudgeState, tallyByDimension,
 } from '../src/judge/state.ts';
 import { resolveConfig } from '../src/config.ts';
-import { isFresh, readStanding } from '../src/standing.ts';
+import { readStanding } from '../src/standing.ts';
 import { nextRung, reportBlock } from '../src/session-block.ts';
 
 /** Said once per machine: what it does, how to check its cost, and the off switch last. */
@@ -33,11 +35,14 @@ function main(): void {
 
   // Report before the breaker check, so a tripped analyser still shows stale results.
   const state = readJudgeState(config.archive);
+  const fresh = newSinceLastSession(config.archive, state.findings.map((f) => f.at));
   const block = reportBlock(
     readStanding(config.archive),
     nextRung('block'),
     tallyByDimension(state),
     state.dismissed ?? 0,
+    jobsHealth(config.archive),
+    fresh,
   );
 
   // One-time disclosure, prepended so it is one message. Only this hook can say it:
@@ -48,12 +53,25 @@ function main(): void {
   const message = `${notice}${block}`;
   if (message !== '') process.stdout.write(JSON.stringify({ systemMessage: message }));
 
-  if (isTripped(readBreaker(config.archive))) return;
+  // Never the judge from here: only the Stop hook spends.
+  superviseAll(config, { judge: false });
+}
 
-  // Skip if the standing is recent, so several windows do not reparse history.
-  if (isFresh(readStanding(config.archive))) return;
-
-  runDetached('compute-standing.ts');
+/** How many of `ats` are newer than the previous session's start, recording this one. */
+function newSinceLastSession(archive: string, ats: string[]): number {
+  const path = join(archive, 'last-session-start');
+  let last: string | undefined;
+  try {
+    last = readFileSync(path, 'utf8').trim();
+  } catch {
+    // First session: nothing is "new" yet.
+  }
+  try {
+    writeAtomic(path, new Date().toISOString());
+  } catch {
+    // Not worth failing a session over.
+  }
+  return last === undefined ? 0 : ats.filter((at) => at > last).length;
 }
 
 try {

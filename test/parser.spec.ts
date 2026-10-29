@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTranscriptText } from '../src/parsers/claude-code.ts';
+import { parseTranscript, parseTranscriptText, withFullText } from '../src/parsers/claude-code.ts';
 
 const j = (o: unknown): string => JSON.stringify(o);
 
@@ -565,5 +565,49 @@ describe('compaction, argBytes, and the repeated usage', () => {
     expect(call?.argBytes).toBe(Buffer.byteLength(JSON.stringify(input)));
     // One response, so its `usage` is counted once.
     expect(new Set(r.events.map((e) => e.responseId))).toEqual(new Set(['msg_1']));
+  });
+});
+
+describe('project instructions, captured for the judge only', () => {
+  const base = { sessionId: 's1', version: '2.1.296', timestamp: '2026-10-20T10:00:00.000Z' };
+  const lines = [
+    { ...base, type: 'user', uuid: 'u1', message: { role: 'user', content: 'start' } },
+    {
+      ...base, type: 'attachment', uuid: 'a1', parentUuid: 'u1',
+      attachment: {
+        type: 'instructions',
+        files: [
+          { path: '/repo/CLAUDE.md', type: 'Project', content: 'Never push.\nAPI_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789' },
+          { path: '/home/me/.claude/projects/x/memory/MEMORY.md', type: 'AutoMem', content: '- keep comments short' },
+        ],
+      },
+    },
+    { ...base, type: 'user', uuid: 'u2', parentUuid: 'a1', message: { role: 'user', content: 'next' } },
+    {
+      ...base, type: 'attachment', uuid: 'a2', parentUuid: 'u2',
+      attachment: { type: 'nested_memory', path: '/repo/.claude/rules/hooks.md', content: { path: '/repo/.claude/rules/hooks.md', type: 'Project', content: 'Hooks exit 0.' } },
+    },
+    { ...base, type: 'user', uuid: 'u3', parentUuid: 'a2', message: { role: 'user', content: [{ type: 'text', text: '<system-reminder>be brief</system-reminder>' }] } },
+  ].map((l) => JSON.stringify(l));
+
+  it('keeps CLAUDE.md, rules and memory, redacted, with the seq they apply from', () => {
+    const { result, instructions } = withFullText(() => parseTranscript(lines, 's1'));
+    expect(instructions.map((i) => i.source)).toEqual(['CLAUDE.md', 'memory', 'rules/hooks.md']);
+    expect(instructions[0]?.text).toContain('Never push.');
+    expect(instructions[0]?.text).not.toContain('sk-ant-api03');
+    // The rule loaded after the second prompt applies from there, not from the start.
+    const second = result.events.find((e) => e.turnType === 'user_prompt' && e.uuid === 'u2');
+    expect(instructions[2]?.fromSeq).toBeGreaterThan(second?.seq ?? Infinity);
+  });
+
+  it('captures nothing outside judge mode, and emits no events for them', () => {
+    const plain = parseTranscript(lines, 's1');
+    expect(plain.events.filter((e) => e.turnType === 'user_prompt')).toHaveLength(2);
+  });
+
+  it('treats a reminder inside array content as the harness, not a prompt', () => {
+    const { events } = parseTranscript(lines, 's1');
+    const last = events.at(-1);
+    expect(last?.turnType).toBe('local_command');
   });
 });

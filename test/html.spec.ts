@@ -75,6 +75,7 @@ describe('renderHtml — safety', () => {
           session({
             findings: [
               {
+                id: 'subj',
                 dimension: 'edit_retry',
                 subject: nasty,
                 occurrences: 1,
@@ -154,6 +155,7 @@ describe('renderHtml — the rollup attributes cost to the right dimension', () 
   it('does not give every dimension the whole report total', () => {
     // `standing.wastedTokens` is keyed by reason, not dimension; summing it per row is the bug.
     const mk = (dimension: string, written: number) => ({
+      id: dimension,
       dimension,
       subject: `${dimension}.ts`,
       occurrences: 1,
@@ -224,6 +226,7 @@ describe('gatherReport — the standing it builds equals the one computeStanding
 describe('the report can see the model tier', () => {
   // Regression: the report once showed none of the judge's findings.
   const judged = (over: Partial<JudgedView> = {}): JudgedView => ({
+    at: '2026-10-20T00:00:00Z',
     dimension: 'constraint_violation',
     turns: [3630, 3633],
     why: 'The plan-mode tool result said not to edit files, and the agent edited them. A second sentence that must not appear.',
@@ -326,7 +329,7 @@ describe('the drill-down', () => {
                 evidence: [{ turn: '1', what: nasty, detail: nasty, failed: true, retry: false, asked: { seq: 1, text: nasty } }],
               }),
             ] as never,
-            judged: [{ dimension: nasty, turns: [3], why: nasty, quote: nasty, asked: { seq: 1, text: nasty } }],
+            judged: [{ at: '2026-10-20T00:00:00Z', dimension: nasty, turns: [3], why: nasty, quote: nasty, asked: { seq: 1, text: nasty } }],
             stats: {
               rewritten: [{ path: nasty, versions: 2, editCalls: 1 }],
               compactions: { count: 0, dropped: 0, measured: [] },

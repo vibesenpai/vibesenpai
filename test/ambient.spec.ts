@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { closed, isTripped, readBreaker, recordFailure, recordSuccess, TRIP_AFTER } from '../src/breaker.ts';
 import { readJudgeState } from '../src/judge/state.ts';
 import { JUDGE_SECONDS_PER_CALL, oldestUnread, pendingWork, progressLine } from '../src/judge/schedule.ts';
 import {
@@ -17,30 +16,6 @@ import { duration, localStamp } from '../src/format.ts';
 
 const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-ambient-'));
 
-
-describe('circuit breaker — degrade to silence, not to noise', () => {
-  it('trips after repeated failures and records why', () => {
-    const dir = scratch();
-    for (let i = 0; i < TRIP_AFTER; i++) recordFailure(dir, 'parse exploded');
-    const b = readBreaker(dir);
-    expect(isTripped(b)).toBe(true);
-    expect(b.reason).toBe('parse exploded');
-    expect(b.trippedAt).toBeDefined();
-  });
-
-  it('closes completely on one success, so a transient failure does not linger', () => {
-    const dir = scratch();
-    recordFailure(dir, 'once');
-    recordSuccess(dir);
-    expect(readBreaker(dir)).toEqual(closed());
-  });
-
-  it('treats an unreadable breaker as closed, never as permanently disabled', () => {
-    const dir = scratch();
-    writeFileSync(join(dir, 'breaker.json'), '}}}not json');
-    expect(isTripped(readBreaker(dir))).toBe(false);
-  });
-});
 
 describe('standing — history is processed so day one is not blank', () => {
   const session = (id: string, events: Event[]): SessionInput => ({
@@ -205,13 +180,10 @@ describe('the backlog drains, which it did not', () => {
   it('is a reason to start a pass, not a narrowing of what it reads', () => {
     // Regression: the live session was always due, so the backlog branch never ran.
     // A pass with no session id batches everything pending, live session included.
-    const hook = readFileSync('scripts/hook-stop.ts', 'utf8');
-    expect(hook, 'the backlog is still a reason to spawn').toMatch(/oldestUnread/);
-    expect(hook, 'and so is the live session').toMatch(/dueForJudging/);
-    expect(hook, 'but the pass is never narrowed to one session').toMatch(
-      /spawnDetached\('judge\.ts'\)/,
-    );
-    expect(hook).not.toMatch(/spawnDetached\('judge\.ts',/);
+    const jobs = readFileSync('src/jobs.ts', 'utf8');
+    expect(jobs, 'the backlog is still a reason to start').toMatch(/oldestUnread/);
+    expect(jobs, 'and so is the live session').toMatch(/dueForJudging/);
+    expect(jobs, 'but the pass is never narrowed to one session').toMatch(/runDetached\('judge\.ts', \[\],/);
   });
 });
 

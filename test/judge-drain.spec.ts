@@ -3,12 +3,12 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readBreaker } from '../src/breaker.ts';
+import { readLease, readRecord, takeLease } from '../src/supervise/record.ts';
+import { LEASE_ENV } from '../src/supervise/types.ts';
 import { readJudgeState } from '../src/judge/state.ts';
-import { JUDGE_LOCK_OWNER_ENV, clearJudgeRunning, judgeLockOwner, judgeRunning, takeJudgeLock, touchJudgeLock, JUDGE_RUNNING_STALE_MS } from '../src/judge/lock.ts';
 import { openStore } from '../src/store.ts';
 import { renderExtract } from '../src/judge/prompt.ts';
 import { buildSession, estimateTokens } from '../src/judge/packet.ts';
@@ -55,8 +55,10 @@ appendFileSync(${JSON.stringify(log)}, 'start ' + Date.now() + '\\n');
 ${grow}
 // The real CLI reads stdin when it is not a TTY. Wait for EOF as it would, so
 // a caller that leaves stdin open hangs here instead of passing.
-process.stdin.resume();
+let stdinBytes = 0;
+process.stdin.on('data', (d) => { stdinBytes += d.length; });
 process.stdin.on('end', () => setTimeout(() => {
+  appendFileSync(${JSON.stringify(log)}, 'io ' + stdinBytes + ' ' + process.argv.slice(2).join(' ').length + '\\n');
   appendFileSync(${JSON.stringify(log)}, 'end ' + Date.now() + '\\n');
   ${opts.fail === true ? 'process.exit(1);' : `process.stdout.write(JSON.stringify({ result: JSON.stringify({ sessions: [] }), usage: { input_tokens: 100, output_tokens: 10 }, duration_ms: ${opts.ms ?? 400} }));`}
 }, ${opts.ms ?? 400}));
@@ -88,7 +90,7 @@ function runPass(env: Record<string, string> = {}): void {
 
 /** Most calls in flight at once, from the stub's own log. */
 function peakConcurrency(): { calls: number; peak: number } {
-  const events = readFileSync(log, 'utf8').trim().split('\n').map((l) => {
+  const events = readFileSync(log, 'utf8').trim().split('\n').filter((l) => /^(start|end) /.test(l)).map((l) => {
     const [kind, t] = l.split(' ');
     return { kind, t: Number(t) };
   });
@@ -159,14 +161,31 @@ describe('a pass drains the backlog, three calls at a time', () => {
 
     const db = openStore(archive);
     try {
-      const rows = db.prepare('SELECT packet_tokens, ended_at FROM run').all();
+      const rows = db.prepare('SELECT packet_tokens, ended_at, session_id FROM run').all();
       expect(rows).toHaveLength(3);
       for (const r of rows) {
         expect(r['ended_at']).not.toBeNull();
         expect(Number(r['packet_tokens'])).toBeGreaterThan(0);
       }
+      // Each row names what it read.
+      expect(rows.map((r) => String(r['session_id'])).sort()).toEqual(['s0', 's1', 's2']);
     } finally {
       db.close();
+    }
+  });
+
+  it('sends the packet on stdin, never as an argument (Linux caps one argument at 128 KiB)', () => {
+    session('s0', 2000);
+    fakeClaude();
+
+    runPass();
+
+    const io = readFileSync(log, 'utf8').split('\n').filter((l) => l.startsWith('io '));
+    expect(io.length).toBeGreaterThan(0);
+    for (const l of io) {
+      const [, stdin, argv] = l.split(' ').map(Number);
+      expect(stdin, 'the packet arrived on stdin').toBeGreaterThan(5_000);
+      expect(argv, 'and not in argv').toBeLessThan(200);
     }
   });
 
@@ -178,37 +197,31 @@ describe('a pass drains the backlog, three calls at a time', () => {
     runPass();
 
     expect(peakConcurrency().calls, 'the second round never started').toBe(3);
-    expect(readBreaker(archive).consecutiveFailures, 'three calls, one rate limit, one fault').toBe(1);
+    const job = readRecord(archive, 'judge');
+    expect(job.failures, 'three calls, one rate limit, one fault').toBe(1);
+    expect(job.lastEnd?.kind, 'the calls failed before any reply was billed').toBe('free');
     expect(Object.keys(readJudgeState(archive).ledger), 'nothing advanced').toHaveLength(0);
   });
 
-  it('releases the lock its spawner took', () => {
+  it('runs under the lease its spawner handed over, and releases it', () => {
     session('s0', 50);
     fakeClaude();
-    expect(takeJudgeLock(archive)).toBe(true);
+    const lease = takeLease(archive, 'judge', 60_000);
+    expect(lease).toBeDefined();
 
-    runPass({ [JUDGE_LOCK_OWNER_ENV]: String(process.pid) });
+    runPass({ [LEASE_ENV]: lease?.token ?? '' });
 
-    expect(existsSync(join(archive, 'judge.running')), 'released, not left to age out').toBe(false);
-  });
-});
-
-describe('the lock outlives a long drain, and no longer', () => {
-  it('releases as the spawner, whose pid is stamped on it', () => {
-    expect(takeJudgeLock(archive)).toBe(true);
-    // The pass is another process: its own pid would leave the lock in place.
-    clearJudgeRunning(archive, process.pid + 1);
-    expect(judgeRunning(archive)).toBe(true);
-    clearJudgeRunning(archive, judgeLockOwner({ [JUDGE_LOCK_OWNER_ENV]: String(process.pid) }));
-    expect(judgeRunning(archive)).toBe(false);
+    expect(readLease(archive, 'judge'), 'released, not left to age out').toBeUndefined();
+    expect(readRecord(archive, 'judge').lastEnd?.status).toBe('ok');
   });
 
-  it('stays live while the heartbeat runs, and ages out without it', () => {
-    expect(takeJudgeLock(archive)).toBe(true);
-    const old = new Date(Date.now() - JUDGE_RUNNING_STALE_MS - 60_000);
-    utimesSync(join(archive, 'judge.running'), old, old);
-    expect(judgeRunning(archive), 'a crashed pass ages out').toBe(false);
-    touchJudgeLock(archive);
-    expect(judgeRunning(archive), 'a live one does not').toBe(true);
+  it('does nothing when its lease was reclaimed before it started', () => {
+    session('s0', 50);
+    fakeClaude();
+    takeLease(archive, 'judge', 60_000);
+
+    runPass({ [LEASE_ENV]: 'not-the-holder' });
+
+    expect(existsSync(log), 'no call was made').toBe(false);
   });
 });

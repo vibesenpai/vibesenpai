@@ -3,11 +3,8 @@
  * `judge --backlog --apply`) spend; every slash command is a reader and never does.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
 import { DEFAULT_SETTINGS } from '../src/judge/state.ts';
-import { clearJudgeRunning, JUDGE_RUNNING_STALE_MS, judgeRunning, takeJudgeLock } from '../src/judge/lock.ts';
 
 /** Source with comments stripped, so the guard reads code, not prose. */
 function code(path: string): string {
@@ -21,21 +18,20 @@ const cliCode = (): string =>
   ['src/cli.ts', ...readdirSync('src/cmd').map((f) => `src/cmd/${f}`)].map(code).join('\n');
 
 describe('the Stop hook is the producer', () => {
-  const hook = code('scripts/hook-stop.ts');
-
-  it('spawns a pass for the live session', () => {
-    expect(hook).toMatch(/spawnDetached\(\s*['"]judge\.ts['"]/);
+  it('runs the supervisor with the judge included; session start never does', () => {
+    expect(code('scripts/hook-stop.ts')).toMatch(/superviseAll\(.*\{ judge: true \}/);
+    expect(code('scripts/hook-session-start.ts')).toMatch(/superviseAll\(.*\{ judge: false \}/);
   });
 
-  it('gates every reason not to spend', () => {
-    expect(hook, 'the judge may be disabled').toMatch(/settings\.enabled/);
-    expect(hook, 'a pass may already be running').toMatch(/judgeRunning/);
-    expect(hook, 'the breaker may be tripped').toMatch(/isTripped/);
-    expect(hook, 'too little may have changed').toMatch(/dueForJudging/);
+  it('starts the judge only when every reason not to spend has been checked', () => {
+    const jobs = code('src/jobs.ts');
+    expect(jobs, 'the judge may be disabled').toMatch(/settings\.enabled/);
+    expect(jobs, 'too little may have changed').toMatch(/dueForJudging/);
+    expect(jobs, 'a pass from the previous version may still run').toMatch(/legacyJudgeRunning/);
   });
 
-  it('still refreshes the standing, which is local and free', () => {
-    expect(hook).toMatch(/spawnDetached\(\s*['"]compute-standing/);
+  it('`tick` leaves the judge out unless asked', () => {
+    expect(cliCode()).toMatch(/superviseAll\(config, \{ judge: a\.flags\['judge'\] === true \}\)/);
   });
 });
 
@@ -46,14 +42,14 @@ describe('no command spends', () => {
     // Instant by design: a reader must never wait on or spawn a model.
     const cmd = /async function cmdInsights[\s\S]*?\n}/.exec(cli)?.[0] ?? '';
     expect(cmd, 'cmdInsights not found').not.toBe('');
-    expect(cmd).not.toMatch(/spawnJudge|spawnDetached|markJudgeRunning/);
+    expect(cmd).not.toMatch(/startJudge|superviseAll|runDetached|supervise\(/);
   });
 
   it('neither does `fix` or `report`', () => {
     for (const name of ['cmdFix', 'cmdReport']) {
       const cmd = new RegExp(`(async )?function ${name}[\\s\\S]*?\\n}`).exec(cli)?.[0] ?? '';
       expect(cmd, `${name} not found`).not.toBe('');
-      expect(cmd, `${name} spends`).not.toMatch(/spawnJudge|spawnDetached|markJudgeRunning/);
+      expect(cmd, `${name} spends`).not.toMatch(/startJudge|superviseAll|runDetached|supervise\(/);
     }
   });
 
@@ -80,41 +76,16 @@ describe('the judge ships on', () => {
 });
 
 describe('a pass cannot overlap itself', () => {
-  // Two invocations once judged the same bytes twice: the ledger advances only after stage A.
-  const dir = () => mkdtempSync(join(tmpdir(), 'as-lock-'));
-
-  it('reports a fresh marker as running', () => {
-    const d = dir();
-    expect(judgeRunning(d)).toBe(false);
-    takeJudgeLock(d);
-    expect(judgeRunning(d)).toBe(true);
+  // Two invocations once judged the same bytes twice. The lease is taken atomically before every start.
+  it('is taken by the supervisor before any start, and the pass runs inside `runJob`', () => {
+    expect(code('src/supervise/supervise.ts')).toMatch(/takeLease\(/);
+    expect(code('scripts/judge.ts')).toMatch(/runJob\('judge'/);
+    expect(cliCode(), 'the backlog path goes through the supervisor too').toMatch(/supervise\(\[/);
   });
 
-  it('ages a stale marker out, so a crashed pass does not block for ever', () => {
-    const d = dir();
-    takeJudgeLock(d);
-    expect(judgeRunning(d, Date.now() + JUDGE_RUNNING_STALE_MS + 1)).toBe(false);
-  });
-
-  it('clears on release', () => {
-    const d = dir();
-    takeJudgeLock(d);
-    clearJudgeRunning(d);
-    expect(judgeRunning(d)).toBe(false);
-  });
-
-  it('is taken atomically before every spawn, and released however the pass exits', () => {
-    // Check-then-write let two hooks both take the lock and bill twice.
-    expect(code('scripts/hook-stop.ts')).toMatch(/takeJudgeLock/);
-    expect(cliCode(), 'the backlog path takes it too').toMatch(/takeJudgeLock/);
-    expect(cliCode(), 'and no longer writes the marker blind').not.toMatch(
-      /markJudgeRunning/,
-    );
-
-    // `finally`, not a success path: a crash must still release it.
-    const pass = code('scripts/judge.ts');
-    expect(pass).toMatch(/\.finally\(/);
-    expect(pass).toMatch(/clearJudgeRunning/);
+  it('checks it still holds the lease before every send and every write', () => {
+    const run = code('src/judge/run.ts');
+    expect((run.match(/if \(!holds\(\)\) return fenced\(\);/g) ?? []).length).toBeGreaterThanOrEqual(4);
   });
 });
 

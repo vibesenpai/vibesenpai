@@ -71,3 +71,8 @@ export function wrap(text: string, width: number): string[] {
   if (line !== '') out.push(line);
   return out;
 }
+
+/** The kind line's tail for a finding's secondary kinds, e.g. " · also overreach"; empty when none. */
+export function alsoText(secondary: readonly string[] | undefined): string {
+  return secondary === undefined || secondary.length === 0 ? '' : ` · also ${secondary.map((d) => d.replace(/_/g, ' ')).join(', ')}`;
+}

@@ -7,6 +7,7 @@
 import { redact } from '../redact.ts';
 import type { Event } from '../types.ts';
 import { renderExtract, type JudgeDimension } from './prompt.ts';
+import type { LookbackSource } from './lookback.ts';
 
 /** The developer's words are never cut. */
 const PROMPT_UNCAPPED = Number.POSITIVE_INFINITY;
@@ -82,9 +83,24 @@ export function isHarnessNoise(text: string): boolean {
   return /^<(?:task-notification|command-message|local-command)/.test(text);
 }
 
+/** How much of a developer command's instructions the packet carries: 2,000 held 62 of 91 gold quotes, 600 held 28. */
+export const COMMAND_BODY_MAX = 2000;
+
 /** One line of transcript as the model should see it. Tool calls and results are kept: S7 lives there. */
-function lineFor(e: Event, full: Map<number, string>): { role: 'USER' | 'AGENT'; text: string } | undefined {
+function lineFor(e: Event, full: Map<number, string>, shown: Set<string>): { role: 'USER' | 'AGENT'; text: string } | undefined {
   const text = full.get(e.seq) ?? e.textSummary ?? '';
+
+  // A developer's command and its instructions, as the parser marked them; its output stays out.
+  if (e.devCommand !== undefined) {
+    if (text.trim() === '') return undefined;
+    if (e.devCommand.part === 'invocation') return { role: 'USER', text };
+    const { name } = e.devCommand;
+    // Once per packet: a command run again carries the same instructions.
+    if (shown.has(name)) return { role: 'USER', text: `[instructions of ${name}, as above]` };
+    shown.add(name);
+    const body = text.length <= COMMAND_BODY_MAX ? text : cleanCut(text.slice(0, COMMAND_BODY_MAX));
+    return { role: 'USER', text: `[instructions of ${name}] ${body}` };
+  }
 
   switch (e.turnType) {
     case 'user_prompt':
@@ -107,8 +123,9 @@ function lineFor(e: Event, full: Map<number, string>): { role: 'USER' | 'AGENT';
 /** Merge consecutive same-role turns, then cap each merged turn once. Capping first would blow the budget. */
 export function buildTurns(events: Event[], full: Map<number, string>): PacketTurn[] {
   const merged: PacketTurn[] = [];
+  const shown = new Set<string>();
   for (const e of [...events].sort((a, b) => a.seq - b.seq)) {
-    const line = lineFor(e, full);
+    const line = lineFor(e, full, shown);
     if (line === undefined) continue;
     const last = merged[merged.length - 1];
     if (last !== undefined && last.role === line.role) {
@@ -207,6 +224,8 @@ export type JudgePacketSession = {
   turns: number[];
   /** What happened before these windows. Absent on the first batch. */
   carry?: JudgeCarry;
+  /** Earlier prompts and loaded instructions, for the label stage. Present when the `lookback` setting is on. */
+  lookback?: LookbackSource;
 };
 
 /**
@@ -251,8 +270,9 @@ export function buildSession(
   // Capped here only; the turns below carry every prompt whole.
   const prompts: { turn: number; text: string }[] = [];
   for (const e of events) {
-    if (e.turnType !== 'user_prompt') continue;
-    const t = (fullText.get(e.seq) ?? e.textSummary ?? '').trim();
+    // A developer's slash command is a request too: its name and arguments, not its instructions.
+    const isRequest = e.turnType === 'user_prompt' || e.devCommand?.part === 'invocation';
+    const t = isRequest ? (fullText.get(e.seq) ?? e.textSummary ?? '').trim() : '';
     if (t === '' || isHarnessNoise(t)) continue;
     // `cleanCut`, not a bare slice, so the cut cannot leave a fragment the gate reads as a secret.
     prompts.push({ turn: e.seq, text: t.length <= PREAMBLE_PROMPT_MAX ? t : cleanCut(t.slice(0, PREAMBLE_PROMPT_MAX)) });

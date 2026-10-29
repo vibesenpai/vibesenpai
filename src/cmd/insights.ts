@@ -7,7 +7,7 @@ import { parse } from '../parsers/index.ts';
 import { projectOf, readSession, resolveCurrentSession, sessionSizes } from '../read.ts';
 import { findingsFor, readJudgeState, tallyByDimension, type JudgeState } from '../judge/state.ts';
 import { analysisBlock, pendingWork } from '../judge/schedule.ts';
-import { JUDGE_RUNNING_STALE_MS, judgeRunning } from '../judge/lock.ts';
+import { JUDGE_STALE_MS, jobsHealth } from '../jobs.ts';
 import { runDetectors } from '../detect/index.ts';
 import { render as renderFindings } from '../render.ts';
 import { currentRun, measuredCallMs, measuredMsPerToken, openStore, sessionCosts } from '../store.ts';
@@ -97,14 +97,14 @@ export function printAnalysis(config: Config, state: JudgeState): void {
         read: judged + behind,
         unread,
         ...(() => {
-          const run = currentRun(db, JUDGE_RUNNING_STALE_MS);
+          const run = currentRun(db, JUDGE_STALE_MS);
           return run === undefined ? {} : { running: run };
         })(),
         ...(() => {
           const ms = measuredCallMs(db);
           return ms === undefined ? {} : { callMs: ms };
         })(),
-        ...(judgeRunning(config.archive) ? { spawned: true } : {}),
+        ...(jobsHealth(config.archive).some((j) => j.job === 'judge' && j.state === 'running') ? { spawned: true } : {}),
       });
     } finally {
       db.close();

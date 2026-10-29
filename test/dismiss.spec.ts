@@ -175,3 +175,23 @@ describe('short ids', () => {
     expect(r.unknown).toEqual(['abc', 'ffff']);
   });
 });
+
+describe('labels: the gold set for judge accuracy', () => {
+  it('records a verdict, and suggestion or wrong also hides the finding', async () => {
+    const { putLabel, readLabels } = await import('../src/store.ts');
+    const dir = archive();
+    const db = seed(dir);
+    const judge = candidates(db, emptyDismissed()).find((c) => c.tier === 'judge');
+    expect(judge).toBeDefined();
+    transact(db, () => {
+      putLabel(db, { key: judge!.key, dimension: judge!.dimension, verdict: 'suggestion', at: 'now' });
+      putDismissals(db, dismissalsFor(judge!, 'suggestion', 'now'));
+    });
+    expect(readLabels(db)).toEqual([{ key: judge!.key, dimension: 'misread_intent', verdict: 'suggestion', at: 'now' }]);
+    expect(candidates(db, dismissedFrom(readDismissals(db))).find((c) => c.tier === 'judge')).toBeUndefined();
+    // A later verdict replaces an earlier one.
+    transact(db, () => putLabel(db, { key: judge!.key, dimension: judge!.dimension, verdict: 'mistake', at: 'later' }));
+    expect(readLabels(db)[0]?.verdict).toBe('mistake');
+    db.close();
+  });
+});

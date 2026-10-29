@@ -21,9 +21,12 @@ import { adviceFor, type Reason } from './detect/labels.ts';
 import type { Event, Finding } from './types.ts';
 import type { JudgedFinding } from './judge/state.ts';
 import { emptyDismissed, withoutDismissed, type Dismissed } from './dismiss.ts';
+import { establishedLine, SHOW_ESTABLISHED } from './judge/lookback.ts';
 
 /** A finding, flattened to what a renderer needs and nothing more. */
 export type FindingView = {
+  /** The subject key a dismissal names (the same subject in every session). */
+  id: string;
   dimension: string;
   /** As `headlineFor` names it — a path, or a command for a digest subject. */
   subject: string;
@@ -39,7 +42,13 @@ export type FindingView = {
 
 /** A judge finding for display. Kept apart from rule findings: the tiers are not equally reliable. */
 export type JudgedView = {
+  /** The occurrence id a dismissal names. */
+  id?: string;
+  /** When it was judged. */
+  at: string;
   dimension: string;
+  /** Other kinds the finding also is; absent when none. */
+  secondaryDimensions?: string[];
   turns: number[];
   /** The model's reasoning. Renderers clamp it; it arrives whole. */
   why: string;
@@ -47,6 +56,8 @@ export type JudgedView = {
   quote?: string;
   /** What the person asked before the first cited turn. */
   asked?: Asked;
+  /** Where the expectation was set, as one line (lookback). */
+  established?: string;
 };
 
 /** The prompt a cited turn answered: redacted `textSummary`, cut so it still survives `redact`. */
@@ -213,6 +224,7 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
       return asked === undefined ? r : { ...r, asked };
     };
     const findings: FindingView[] = shown.map((f) => ({
+      id: f.subjectId,
       dimension: f.dimension,
       subject: headlineFor(f, byUuid),
       occurrences: f.occurrences,
@@ -231,11 +243,15 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
       const first = j.turns.length > 0 ? Math.min(...j.turns) : undefined;
       const asked = first === undefined ? undefined : askedBefore(prompts, first);
       return {
+        ...(j.id !== undefined ? { id: j.id } : {}),
+        at: j.at,
         dimension: j.dimension,
+        ...(j.secondaryDimensions !== undefined ? { secondaryDimensions: j.secondaryDimensions } : {}),
         turns: j.turns,
         why: j.why,
         ...(j.quote !== undefined ? { quote: j.quote } : {}),
         ...(asked !== undefined ? { asked } : {}),
+        ...(SHOW_ESTABLISHED && j.established !== undefined ? { established: establishedLine(j.established) } : {}),
       };
     });
 

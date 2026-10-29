@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
- * The detached judge pass: spawned by the Stop hook, never awaited. Always exits 0, trips the breaker
- * on repeated failure. Child isolation lives in `src/judge/model.ts`; rules in .claude/rules/judge.md.
+ * The detached judge pass: started by the supervisor, never awaited. Always exits 0; `runJob` records how
+ * it went, so the next hook can heal it. Child isolation lives in `src/judge/model.ts`; rules in .claude/rules/judge.md.
  */
 
 import { statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { recordFailure, recordSuccess, isTripped, readBreaker } from '../src/breaker.ts';
 import { resolveConfig } from '../src/config.ts';
 import { discoverTranscripts } from '../src/read.ts';
 
 import { readJudgeState, recordPass } from '../src/judge/state.ts';
-import { clearJudgeRunning, judgeLockOwner, touchJudgeLock } from '../src/judge/lock.ts';
-import { packBatches, planRound, runBatch } from '../src/judge/run.ts';
+import { clean, JUDGE_DEADLINE_MS } from '../src/jobs.ts';
+import { runJob, type Outcome } from '../src/supervise/index.ts';
+import { packBatches, planRound, runBatch, type BatchFailure } from '../src/judge/run.ts';
 
 
 /** Far beyond any real backlog; rounds are bounded by the snapshot, so only a bug could reach this. */
@@ -20,11 +20,9 @@ const MAX_ROUNDS = 500;
 
 /**
  * Drain everything pending: plan a round, send its batches at once, repeat.
- * Stops on the first failing round (one breaker fault) or a round that moves nothing.
+ * Stops on the first failing round (one failure for the supervisor) or a round that moves nothing.
  */
-async function main(): Promise<void> {
-  if (process.env['AGENTSENSEI_DISABLE'] === '1') return;
-
+async function drain(holds: () => boolean): Promise<Outcome> {
   const { config } = resolveConfig();
   const only = process.argv[2];
   let last = '';
@@ -40,15 +38,14 @@ async function main(): Promise<void> {
   }
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
-    touchJudgeLock(config.archive);
+    if (!holds()) return { status: 'ok' };
     // Dismissed findings included, so the model is not invited to report them again.
     const state = readJudgeState(config.archive, { dismissed: 'include' });
-    if (!state.settings.enabled) return;
-    if (isTripped(readBreaker(config.archive))) return;
+    if (!state.settings.enabled) return { status: 'ok' };
 
     // No change in ledger or part cursors since last round means another round would repeat it.
     const progress = JSON.stringify([state.ledger, state.parts ?? {}]);
-    if (progress === last) return;
+    if (progress === last) return { status: 'ok' };
     last = progress;
 
     const { batches, quiet } = packBatches(
@@ -58,43 +55,28 @@ async function main(): Promise<void> {
       Math.max(1, state.settings.concurrency),
     );
     // Nothing was sent for these, so only the watermark moves.
-    if (quiet.offsets.size > 0 || quiet.parts.size > 0) {
+    if ((quiet.offsets.size > 0 || quiet.parts.size > 0) && holds()) {
       recordPass(config.archive, [], quiet.offsets, quiet.parts);
     }
-    if (batches.length === 0) return;
+    if (batches.length === 0) return { status: 'ok' };
 
-    const failures = (await Promise.all(batches.map((b) => runBatch(config.archive, state, b)))).filter(
-      (f): f is string => f !== undefined,
+    const failures = (await Promise.all(batches.map((b) => runBatch(config.archive, state, b, holds)))).filter(
+      (f): f is BatchFailure => f !== undefined,
     );
     if (failures.length > 0) {
-      recordFailure(config.archive, [...new Set(failures)].join('; '));
-      return;
+      const reason = clean([...new Set(failures.map((f) => f.reason))].join('; '));
+      return { status: 'failed', kind: failures.some((f) => f.paid) ? 'paid' : 'free', reason };
     }
-    recordSuccess(config.archive);
   }
+  return { status: 'ok' };
 }
 
-// The spawner takes the in-flight marker; release it in `finally` as the spawner's pid (`judgeLockOwner`).
-// A heartbeat keeps it fresh while this process lives, since a drain outlives its staleness.
-const heartbeat = (() => {
+if (process.env['AGENTSENSEI_DISABLE'] !== '1') {
   try {
-    const archive = resolveConfig().config.archive;
-    return setInterval(() => touchJudgeLock(archive), 60_000);
+    const { archive } = resolveConfig().config;
+    await runJob('judge', archive, { deadlineMs: JUDGE_DEADLINE_MS, clean }, (ctx) => drain(ctx.holds));
   } catch {
-    return undefined;
-  }
-})();
-heartbeat?.unref();
-
-main()
-  .catch(() => {
     // Principle Zero: a broken analyzer must never break a session.
-  })
-  .finally(() => {
-    if (heartbeat !== undefined) clearInterval(heartbeat);
-    try {
-      clearJudgeRunning(resolveConfig().config.archive, judgeLockOwner());
-    } catch {
-      // Staleness covers it.
-    }
-  });
+  }
+}
+process.exit(0);

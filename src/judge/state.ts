@@ -5,7 +5,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { JudgeFinding } from './prompt.ts';
+import { JUDGE_DIMENSIONS, type JudgeFinding } from './prompt.ts';
+import type { Established } from './lookback.ts';
 import {
   addSpend,
   advanceLedger,
@@ -34,6 +35,8 @@ type JudgeSettings = {
   maxBatchTokens: number;
   /** Batches a pass sends at once. */
   concurrency: number;
+  /** Require misreads and violations to cite an earlier source (src/judge/lookback.ts). */
+  lookback: boolean;
 };
 
 export const DEFAULT_SETTINGS: JudgeSettings = {
@@ -45,6 +48,8 @@ export const DEFAULT_SETTINGS: JudgeSettings = {
   maxBatchTokens: 60_000,
   // Calls share the measured session's quota; a larger burst risks failing all at once on a rate limit.
   concurrency: 3,
+  // A misread or violation must cite an earlier source; a suggestion is not a mistake. See src/judge/lookback.ts.
+  lookback: true,
 };
 
 /** A stored judge finding: what the model returned, plus when, and its occurrence id once read back. */
@@ -167,7 +172,7 @@ function readProgress(
 function readJudgedFindings(db: Db): JudgedFinding[] {
   const rows = db
     .prepare(
-      `SELECT o.id, o.session_id, o.dimension, o.reason, o.at, e.anchor, e.quote
+      `SELECT o.id, o.session_id, o.dimension, o.secondary_dimensions, o.reason, o.at, e.anchor, e.kind, e.quote
        FROM occurrence o LEFT JOIN evidence e ON e.occurrence_id = o.id
        WHERE o.tier = 'judge' ORDER BY o.at DESC`,
     )
@@ -185,14 +190,34 @@ function readJudgedFindings(db: Db): JudgedFinding[] {
         turns: [],
         why: r['reason'] === null ? '' : String(r['reason']),
         at: String(r['at']),
-        ...(r['quote'] === null || r['quote'] === undefined ? {} : { quote: String(r['quote']) }),
+        ...secondaryOf(r['secondary_dimensions']),
       };
       by.set(id, f);
     }
+    if (r['kind'] === 'established') {
+      try {
+        f.established = JSON.parse(String(r['quote'])) as Established;
+      } catch {
+        // An unreadable source is no source; the finding itself stands.
+      }
+      continue;
+    }
+    if (f.quote === undefined && r['quote'] !== null && r['quote'] !== undefined) f.quote = String(r['quote']);
     const seq = Number(r['anchor']);
     if (Number.isFinite(seq)) f.turns.push(seq);
   }
   return [...by.values()];
+}
+
+function secondaryOf(v: unknown): { secondaryDimensions?: JudgedFinding['dimension'][] } {
+  if (typeof v !== 'string') return {};
+  try {
+    const a = JSON.parse(v) as unknown;
+    const dims = Array.isArray(a) ? a.filter((d): d is JudgedFinding['dimension'] => JUDGE_DIMENSIONS.includes(d)) : [];
+    return dims.length > 0 ? { secondaryDimensions: dims } : {};
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -222,19 +247,24 @@ export function recordPass(
             confidence: f.confidence ?? 'likely',
             reason: f.why,
             at: f.at,
+            ...(f.secondaryDimensions === undefined ? {} : { secondaryDimensions: f.secondaryDimensions }),
           })),
         );
         putEvidence(
           db as Db,
-          findings.flatMap((f) =>
-            f.turns.map((t) => ({
+          findings.flatMap((f) => [
+            ...f.turns.map((t) => ({
               occurrenceId: judgedFindingId(f),
               anchor: String(t),
               // The judge cites turn numbers, validated by its quote. Rule findings use uuid (D24).
               kind: 'turn' as const,
               ...(f.quote === undefined ? {} : { quote: f.quote }),
             })),
-          ),
+            // Where the expectation was set (lookback), as one more row; redacted like every quote.
+            ...(f.established === undefined
+              ? []
+              : [{ occurrenceId: judgedFindingId(f), anchor: 'established', kind: 'established' as const, quote: JSON.stringify(f.established) }]),
+          ]),
         );
       }
       for (const [id, off] of offsets) {

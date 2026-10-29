@@ -8,7 +8,7 @@
 import { approx } from './cost.ts';
 import { describeCoverage, segmentByDepth } from './range.ts';
 import { REBUILDS_SHOWN, firstSentence, largestRebuilds, leadSegments, rebuildFact } from './render.ts';
-import { human, isoDay, localStamp, plural, shortenPath } from './format.ts';
+import { alsoText, human, isoDay, localStamp, plural, shortenPath } from './format.ts';
 import type { Rebuild } from './stats.ts';
 import type { Asked, AskedRow, FindingView, JudgedView, ReportData, SessionView } from './gather.ts';
 import type { Recommendation } from './fix.ts';
@@ -226,14 +226,14 @@ function judgedInstance(j: JudgedView, s: SessionView): string {
   const turns =
     j.turns.length === 0
       ? ''
-      : `<p class="m"><span class="fig">turn${j.turns.length === 1 ? '' : 's'} ${esc(j.turns.join(', '))}</span></p>`;
+      : `<p class="m"><span class="fig">turn${j.turns.length === 1 ? '' : 's'} ${esc(j.turns.join(', '))}</span>${esc(alsoText(j.secondaryDimensions))}</p>`;
   // Skip the quote when it just repeats the prompt line.
   const q = j.quote === undefined ? '' : firstSentence(j.quote, 200);
   const head = j.asked?.text.replace(/…$/, '') ?? '';
   const repeats = head !== '' && (head.includes(q) || q.startsWith(head));
   const quote = q === '' || repeats ? '' : `<blockquote>“${esc(q)}”</blockquote>`;
   return raw(`<details><summary>${askedLine(j.asked, s)}</summary><div>
-${turns}${quote}<p class="why">${esc(firstSentence(j.why, 240))}</p>
+${turns}${quote}${j.established === undefined ? '' : `<p class="m"><b>Established:</b> ${esc(firstSentence(j.established, 240))}</p>`}<p class="why">${esc(firstSentence(j.why, 240))}</p>
 </div></details>`);
 }
 
@@ -415,7 +415,7 @@ function sessionFindings(s: SessionView): string {
     }),
     ...s.judged.map(
       (j) =>
-        `<li><span class="name">${esc(j.dimension)}</span> <span class="by m">by a model</span><br>${askedLine(
+        `<li><span class="name">${esc(j.dimension)}</span>${esc(alsoText(j.secondaryDimensions))} <span class="by m">by a model</span><br>${askedLine(
           j.asked,
           s,
         )}<br><span class="mute m">turns ${esc(j.turns.join(', '))}</span></li>`,

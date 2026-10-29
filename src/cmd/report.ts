@@ -8,11 +8,11 @@ import { lookupSession, MIN_ID_PREFIX, type SessionLookup, sessionSizes } from '
 import { gatherReport, type ReportData } from '../gather.ts';
 import { findingsFor, readJudgeState } from '../judge/state.ts';
 import { pendingWork, progressLine } from '../judge/schedule.ts';
-import { JUDGE_RUNNING_STALE_MS } from '../judge/lock.ts';
+import { JUDGE_STALE_MS, jobsHealth } from '../jobs.ts';
 import { renderHtml } from '../html.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from '../range.ts';
 import { leadSegments } from '../render.ts';
-import { currentRun, measuredCallMs, openStore } from '../store.ts';
+import { currentRun, measuredCallMs, openStore, readLabels, withStore } from '../store.ts';
 import { readDismissed } from '../dismiss.ts';
 import { nextRung } from '../session-block.ts';
 import { plural } from '../format.ts';
@@ -56,7 +56,8 @@ export async function cmdReport(a: Argv): Promise<number> {
   // No implicit range for HTML or for `--session`: naming a session must never come back empty.
   // Plain-text `report` keeps its 7-day default.
   const asked = ['last', 'since', 'until'].some((k) => typeof f[k] === 'string');
-  const wantsAll = !asked && (f['html'] === true || typeof f['out'] === 'string' || only !== undefined);
+  const wantsAll =
+    !asked && (f['html'] === true || f['json'] === true || typeof f['out'] === 'string' || only !== undefined);
 
   // The judge's findings, so `report` sees the model tier too.
   const judgeState = readJudgeState(config.archive);
@@ -71,6 +72,15 @@ export async function cmdReport(a: Argv): Promise<number> {
     dismissed: readDismissed(config.archive),
   });
 
+  if (f['json'] === true) {
+    // For the insights pane: the report's data plus how much is read and how the jobs are doing.
+    const sizes = sessionSizes(config.sources);
+    const w = pendingWork(judgeState, sizes);
+    const labels = Object.fromEntries((withStore(config.archive, readLabels) ?? []).map((l) => [l.key, l.verdict]));
+    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels };
+    process.stdout.write(`${JSON.stringify(out)}\n`);
+    return 0;
+  }
   if (f['html'] === true || typeof f['out'] === 'string') {
     return writeHtmlReport(data, config.archive, f, config.sources);
   }
@@ -237,7 +247,7 @@ export function writeHtmlReport(
     const db = openStore(archive);
     let line = '';
     try {
-      const run = currentRun(db, JUDGE_RUNNING_STALE_MS);
+      const run = currentRun(db, JUDGE_STALE_MS);
       const measured = measuredCallMs(db);
       const { unread } = pendingWork(readJudgeState(archive), sessionSizes(sources));
       line = progressLine({

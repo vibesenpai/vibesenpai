@@ -99,6 +99,12 @@ export type Event = {
   textSummary?: string;
 
   /**
+   * A command the developer invoked (`invocation`, text `/name args`) or the instructions it expanded to
+   * (`instructions`). Set by each harness's parser; never an agent-loaded skill.
+   */
+  devCommand?: { name: string; part: 'invocation' | 'instructions' };
+
+  /**
    * `message.usage`, verbatim. `cacheRead` re-counts the whole prefix per call, so ratios on it
    * are meaningless; `cacheCreation` is the real cost. See GRAVEYARD.md.
    */
@@ -114,7 +120,7 @@ export type Event = {
  * The only fields a detector may read: reading command text in a detector is a compile error.
  * Why: CLAUDE.md "A detector reads structure".
  */
-export type StructuralEvent = Omit<Event, 'command' | 'pattern' | 'textSummary'>;
+export type StructuralEvent = Omit<Event, 'command' | 'pattern' | 'textSummary' | 'devCommand'>;
 
 /** Evidence pointer. `uuid` is the identity; `seq` can renumber on re-parse and is display only. */
 export type TurnRef = {

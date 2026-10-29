@@ -22,6 +22,14 @@ import type { Event, TurnType } from '../types.ts';
 const META_CONTENT =
   /^\s*<(local-command-(caveat|stdout|stderr)|command-name|command-message|command-args|system-reminder)\b/;
 
+/** `/name args` from a slash-command echo; undefined for any other text. */
+export function slashCommand(text: string): string | undefined {
+  const name = /<command-name>\s*(\/?[^<\s]+)\s*<\/command-name>/.exec(text)?.[1];
+  if (name === undefined) return undefined;
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? '';
+  return `${name.startsWith('/') ? name : `/${name}`}${args === '' ? '' : ` ${args}`}`;
+}
+
 /** Record types that carry no analysable signal. Traversed, never emitted. */
 const NOISE_TYPES = new Set([
   'attachment', // mostly hook_success
@@ -143,16 +151,50 @@ function redactToFixedPoint(s: string, limit = 4): string {
 let keepFullText = false;
 let pendingFullText: string | undefined;
 
-export function withFullText<T>(fn: () => T): { result: T; fullText: Map<number, string> } {
+/** A project instruction the harness loaded (CLAUDE.md, a rule, memory), redacted, and the seq it applies from. */
+export type Instruction = { fromSeq: number; source: string; text: string };
+
+export function withFullText<T>(fn: () => T): { result: T; fullText: Map<number, string>; instructions: Instruction[] } {
   keepFullText = true;
   capturedFullText = new Map();
+  capturedInstructions = [];
   try {
     const result = fn();
-    return { result, fullText: capturedFullText };
+    return { result, fullText: capturedFullText, instructions: capturedInstructions };
   } finally {
     keepFullText = false;
     pendingFullText = undefined;
     capturedFullText = new Map();
+    capturedInstructions = [];
+  }
+}
+
+let capturedInstructions: Instruction[] = [];
+
+/** `CLAUDE.md`, `rules/hooks.md`, `memory`: what a finding can cite as its source. */
+function instructionSource(path: string, kind: unknown): string {
+  if (kind === 'AutoMem') return 'memory';
+  const rule = /\/\.claude\/rules\/(.+)$/.exec(path);
+  if (rule !== null) return `rules/${rule[1] as string}`;
+  return path.split('/').at(-1) ?? path;
+}
+
+/**
+ * Keep the instructions an `attachment` record carries, in judge mode only: CLAUDE.md, rules and
+ * memory as the harness loaded them. Redacted here; never stored. See `src/judge/lookback.ts`.
+ */
+function captureInstructions(a: unknown, fromSeq: number): void {
+  if (!keepFullText || a === null || typeof a !== 'object') return;
+  const at = a as { type?: unknown; files?: unknown; content?: unknown };
+  const add = (path: unknown, kind: unknown, content: unknown): void => {
+    if (typeof path !== 'string' || typeof content !== 'string' || content.trim() === '') return;
+    capturedInstructions.push({ fromSeq, source: instructionSource(path, kind), text: redactToFixedPoint(redact(content).text) });
+  };
+  if (at.type === 'instructions' && Array.isArray(at.files)) {
+    for (const f of at.files as { path?: unknown; type?: unknown; content?: unknown }[]) add(f.path, f.type, f.content);
+  } else if (at.type === 'nested_memory' && at.content !== null && typeof at.content === 'object') {
+    const c = at.content as { path?: unknown; type?: unknown; content?: unknown };
+    add(c.path, c.type, c.content);
   }
 }
 
@@ -370,6 +412,8 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
 
   // For the abandonment pass, which needs the whole file.
   const nodes: TreeNode[] = [];
+  /** The developer's slash commands by echo uuid: their instructions are the `isMeta` record parented on it. */
+  const commandByUuid = new Map<string, string>();
   /** Per-path file version, so a *rising* version marks a real change. */
   const fileVersions = new Map<string, number>();
   /** event index → the uuid it came from, so the flag can be applied after. */
@@ -391,6 +435,7 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
     const type = r.type ?? (r.role === 'user' || r.role === 'assistant' ? r.role : '(missing)');
     if (NOISE_TYPES.has(type)) {
       bump(skipped, type);
+      if (type === 'attachment') captureInstructions((r as { attachment?: unknown }).attachment, seq);
       // Still part of the tree, or the spine walk breaks.
       if (r.uuid !== undefined) {
         nodes.push({
@@ -450,7 +495,18 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
 
         // `isMeta`: a slash command's own stdout (ours included), not the developer speaking.
         if (r.isMeta === true) {
-          push('local_command', { ...sum(toolResultText(content) ?? '') });
+          const text = toolResultText(content) ?? '';
+          const of = r.parentUuid == null ? undefined : commandByUuid.get(r.parentUuid);
+          // A skill the agent loaded hangs off its tool result, so it never matches here.
+          const isInstructions = of !== undefined && text.trim() !== '' && !META_CONTENT.test(text);
+          push('local_command', { ...sum(text), ...(isInstructions ? { devCommand: { name: of, part: 'instructions' as const } } : {}) });
+          break;
+        }
+        const cmd = typeof content === 'string' ? slashCommand(content) : undefined;
+        if (cmd !== undefined) {
+          const name = cmd.split(' ')[0] as string;
+          if (r.uuid !== undefined) commandByUuid.set(r.uuid, name);
+          push('local_command', { ...sum(cmd), devCommand: { name, part: 'invocation' } });
           break;
         }
         if (typeof content === 'string') {
@@ -480,7 +536,9 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
                 ...sum(text),
               });
             } else if (b?.type === 'text') {
-              push('user_prompt', { ...sum(b.text) });
+              // A reminder or command echo inside array content is the harness, not the person.
+              const isPrompt = typeof b.text !== 'string' || !META_CONTENT.test(b.text);
+              push(isPrompt ? 'user_prompt' : 'local_command', { ...sum(b.text) });
             }
           }
         }

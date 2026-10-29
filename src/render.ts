@@ -9,8 +9,9 @@ import type { Event, Finding } from './types.ts';
 import { adviceFor, reasonOf, type Reason } from './detect/labels.ts';
 import { sessionStats, type Rebuild, type SessionStats } from './stats.ts';
 import { approx, costFor } from './cost.ts';
-import { duration, durationOf, human, shortenPath, wrap } from './format.ts';
+import { alsoText, duration, durationOf, human, shortenPath, wrap } from './format.ts';
 import { bold, dim, pad, red, rule, yellow } from './style.ts';
+import { establishedLine, SHOW_ESTABLISHED, type Established } from './judge/lookback.ts';
 
 const INDENT = '  ';
 
@@ -368,7 +369,7 @@ function dejargon(text: string): string {
 }
 
 export function renderJudged(
-  findings: { dimension: string; turns: number[]; why: string; quote?: string }[],
+  findings: { dimension: string; secondaryDimensions?: string[]; turns: number[]; why: string; quote?: string; established?: Established }[],
   unjudgedTurns: number,
 ): string[] {
   if (findings.length === 0 && unjudgedTurns <= 0) return [];
@@ -377,7 +378,7 @@ export function renderJudged(
   for (const f of findings) {
     // Per-row model marker, so a judge finding is never mistaken for a rule finding.
     out.push(
-      `${INDENT.repeat(2)}${bold(f.dimension)} ${dim('— flagged by a model')}  ` +
+      `${INDENT.repeat(2)}${bold(f.dimension)}${alsoText(f.secondaryDimensions)} ${dim('— flagged by a model')}  ` +
         `${dim(`turn${f.turns.length === 1 ? '' : 's'} ${f.turns.join(', ')}`)}`,
     );
     // Quote first: it is the evidence; the reasoning is a gloss.
@@ -385,6 +386,9 @@ export function renderJudged(
       for (const l of wrap(`"${firstSentence(f.quote, 160)}"`, 62)) {
         out.push(`${INDENT.repeat(3)}${yellow(l)}`);
       }
+    }
+    if (SHOW_ESTABLISHED && f.established !== undefined) {
+      for (const l of wrap(`Established: ${firstSentence(establishedLine(f.established), 160)}`, 62)) out.push(`${INDENT.repeat(3)}${l}`);
     }
     for (const l of wrap(firstSentence(f.why, 240), 62)) out.push(`${INDENT.repeat(3)}${dim(l)}`);
   }

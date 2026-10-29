@@ -30,7 +30,8 @@ Outranks correctness of findings.
 - Analysis is **detached, never in-process**. A hook spawns and exits.
 - State files are written temp-then-rename (`src/files.ts`).
 - **Never open the harness's own files for writing.** We read `~/.claude/projects`.
-- A circuit breaker self-disables after repeated failures and records why.
+- Background jobs heal at the next hook: a dead or hung pass is reclaimed, failures back off and
+  retry, and repeated *paid* failures hold the judge. See `.claude/rules/hooks.md`.
 - `AGENTSENSEI_DISABLE=1` short-circuits every hook on line one.
 
 ## Principle One: the live surface must never interrupt
@@ -105,7 +106,7 @@ Full terms: `.claude/rules/judge.md`. The two that must never slip:
 - `tsconfig` covers `src/`, `test/` and `scripts/`.
 - **Every published frequency comes from `npm run measure`**, over the pinned corpus.
 - `npm run verify:corpus` is the gate: it fails on count drift or any leak.
-- No invisible characters in source (`test/source-hygiene.test.ts`). A `//` comment that mentions the
+- No invisible characters in source (`test/source-hygiene.spec.ts`). A `//` comment that mentions the
   `ts-expect-error` directive is one.
 
 ## Layout

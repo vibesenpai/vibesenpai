@@ -6,21 +6,20 @@ import { basename, join } from 'node:path';
 import { discoverTranscripts, sessionSizes } from '../read.ts';
 import { readJudgeState, writeSettings } from '../judge/state.ts';
 import { pendingWork } from '../judge/schedule.ts';
-import { takeJudgeLock, JUDGE_LOCK_OWNER_ENV } from '../judge/lock.ts';
+import { clean, jobsFor } from '../jobs.ts';
+import { releaseHold, supervise, type JobSpec } from '../supervise/index.ts';
+import type { Config } from '../config.ts';
 import { renderExtract } from '../judge/prompt.ts';
 import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS } from '../judge/packet.ts';
 import { parseTranscript, withFullText } from '../parsers/claude-code.ts';
-import { runDetached } from '../spawn.ts';
 import { duration, plural } from '../format.ts';
 import { type Argv, configFromFlags } from './common.ts';
 
-/** Start the judge for one session, or the whole backlog, and do not wait. */
-export function spawnJudge(sessionId?: string): void {
-  // The caller took the lock in this process; the pass releases it as this pid.
-  runDetached('judge.ts', sessionId === undefined ? [] : [sessionId], {
-    ...process.env,
-    [JUDGE_LOCK_OWNER_ENV]: String(process.pid),
-  });
+/** Start the judge now through the supervisor, as the Stop hook would. False if a pass already holds it. */
+function startJudge(config: Config): boolean {
+  const judge = jobsFor(config, { judge: true }).find((j) => j.name === 'judge') as JobSpec;
+  const decided = supervise([{ ...judge, isDue: () => true }], { archive: config.archive, clean });
+  return decided['judge'] === 'start';
 }
 
 export function cmdJudge(a: Argv): number {
@@ -98,12 +97,10 @@ export function cmdJudge(a: Argv): number {
       console.log('  nothing has been sent. re-run with --apply to start it.');
       return 0;
     }
-    // Take the lock atomically, as the hook does, so two passes never overlap.
-    if (!takeJudgeLock(config.archive)) {
-      console.log('a pass is already running — nothing started.');
+    if (!startJudge(config)) {
+      console.log('a pass is already running, or retrying after a failure — nothing started.');
       return 0;
     }
-    spawnJudge();
     console.log(`reading ${plural(pending, 'session')} — about ${duration(seconds)}.`);
     console.log(dim('  it runs in the background; findings appear as they land.'));
     return 0;
@@ -174,6 +171,8 @@ export function cmdJudge(a: Argv): number {
   }
 
   writeSettings(config.archive, { ...state.settings, enabled: true });
+  // Enabling is also the explicit act that releases a hold after repeated paid failures.
+  releaseHold(config.archive, 'judge');
   console.log('\n  judge enabled. it runs detached, after your turn ends.');
   console.log('  `agentsensei judge --disable --apply` stops it.');
   return 0;

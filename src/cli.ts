@@ -3,10 +3,11 @@
 
 import { realpathSync } from 'node:fs';
 
-import { cmdConfig, cmdDoctor, cmdScan, cmdSkeleton, cmdStanding } from './cmd/admin.ts';
+import { cmdConfig, cmdDoctor, cmdScan, cmdSkeleton, cmdStanding, cmdTick } from './cmd/admin.ts';
 import { cmdInsights } from './cmd/insights.ts';
 import { cmdFix } from './cmd/fix.ts';
 import { cmdDismiss } from './cmd/dismiss.ts';
+import { cmdLabel } from './cmd/label.ts';
 import { cmdJudge } from './cmd/judge.ts';
 import { cmdReport } from './cmd/report.ts';
 import type { Argv } from './cmd/common.ts';
@@ -44,12 +45,14 @@ Usage
   agentsensei report            retrospective over a date range
   agentsensei fix               a recommendation, with its evidence
   agentsensei dismiss           set findings aside: --list, <id>… [--wrong], --all, --undo
+  agentsensei label <id> <v>    mark a finding: mistake | suggestion | wrong (--list for all)
   agentsensei standing          what your history says
   agentsensei judge             the model pass: --status, --backlog, --enable, --disable
   agentsensei doctor            harnesses, paths, parser coverage
   agentsensei config            resolved values and which layer set each
   agentsensei scan              read new transcript data (copies nothing)
   agentsensei skeleton <id>     print a session's windows as evidence
+  agentsensei tick              heal and run due background jobs (--judge to include the model pass)
 
 Options
   --source <path>    transcript source (repeatable)
@@ -70,6 +73,7 @@ report
   --until <date>     YYYY-MM-DD
   --session <id>     one session only
   --html             write an HTML report; --open opens it, --out <path> picks the file
+  --json             the report's data as JSON (what the insights pane reads)
 
 judge
   --status           what has been read, what is left, what it cost
@@ -105,6 +109,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdDismiss(a);
     case 'judge':
       return cmdJudge(a);
+    case 'tick':
+      return cmdTick(a);
+    case 'label':
+      return cmdLabel(a);
     case undefined:
     case 'help':
       console.log(USAGE);

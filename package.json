@@ -10,6 +10,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:pane": "claude plugin test .",
     "typecheck": "tsc --noEmit",
     "cli": "node --experimental-strip-types src/cli.ts",
     "verify:corpus": "bash scripts/verify-corpus.sh",

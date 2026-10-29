@@ -13,5 +13,6 @@
     "developer-tools",
     "agent-evaluation"
   ],
-  "repository": "https://github.com/crozzfire/agentsensei"
+  "repository": "https://github.com/crozzfire/agentsensei",
+  "types": "./types/index.d.ts"
 }

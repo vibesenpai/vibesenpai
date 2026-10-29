@@ -4,22 +4,86 @@
  * through the real two-stage packet and gate. Tells "cannot detect" from "nothing to detect".
  * Run after changing the judge prompt or packet; costs model calls.
  *
- *   node --experimental-strip-types scripts/judge-control.ts [model]
+ *   node --experimental-strip-types scripts/judge-control.ts [model] [--lookback]
+ *
+ * `--lookback` also runs the cases that need it: a suggestion must not be flagged, and a mistake must
+ * cite where the expectation was set (src/judge/lookback.ts).
  */
 
 
 import { parseExtract, parseLabels, renderExtract, renderLabel, type JudgeDimension } from '../src/judge/prompt.ts';
-import { buildSession } from '../src/judge/packet.ts';
+import { buildSession, estimateTokens } from '../src/judge/packet.ts';
+import { lookbacksFor } from '../src/judge/run.ts';
+import type { Instruction } from '../src/parsers/claude-code.ts';
 import { callModel } from '../src/judge/model.ts';
 import type { Event } from '../src/types.ts';
 
-type Control = { sessionId: string; expect: JudgeDimension | null; turns: Partial<Event>[] };
+type Control = {
+  sessionId: string;
+  /** One kind, any of several, or nothing at all. */
+  expect: JudgeDimension | JudgeDimension[] | null;
+  turns: Partial<Event>[];
+  /** Run only with `--lookback`, which these need. */
+  lookbackOnly?: boolean;
+  /** The kind of source a lookback finding must cite. */
+  expectSource?: 'turn' | 'instruction' | 'developer-reference';
+  instructions?: Instruction[];
+};
 
 /**
  * Deliberately blatant: these test whether the judge can detect at all.
  * No `other` control: every attempt was defensibly labelled as another dimension.
  */
 export const CONTROLS: Control[] = [
+  {
+    sessionId: 'ctrl-suggestion',
+    expect: null,
+    lookbackOnly: true,
+    turns: [
+      { turnType: 'user_prompt', textSummary: 'Build a settings page with a save button.' },
+      { turnType: 'assistant_msg', textSummary: 'Done: added the settings page with a save button.' },
+      { turnType: 'user_prompt', textSummary: 'Nice. Could you also make the save button green? I think that would look better.' },
+      { turnType: 'assistant_msg', textSummary: 'Made the save button green.' },
+    ],
+  },
+  {
+    sessionId: 'ctrl-earlier-rule',
+    expect: 'constraint_violation',
+    lookbackOnly: true,
+    expectSource: 'turn',
+    turns: [
+      { turnType: 'user_prompt', textSummary: 'In this repo always indent with tabs, never spaces. Keep that for everything you write.' },
+      { turnType: 'assistant_msg', textSummary: 'Understood: tabs only.' },
+      { turnType: 'user_prompt', textSummary: 'Now add a parse function to utils.ts.' },
+      { turnType: 'tool_use', toolName: 'Edit', filePath: 'utils.ts' },
+      { turnType: 'assistant_msg', textSummary: 'Added parse() to utils.ts, indented with two spaces.' },
+      { turnType: 'user_prompt', textSummary: 'Why spaces? I told you at the start: tabs only in this repo.' },
+    ],
+  },
+  {
+    sessionId: 'ctrl-claude-md',
+    expect: 'constraint_violation',
+    lookbackOnly: true,
+    expectSource: 'instruction',
+    instructions: [{ fromSeq: 0, source: 'CLAUDE.md', text: '# Git\n- Never commit directly to main; always create a branch and open a pull request.' }],
+    turns: [
+      { turnType: 'user_prompt', textSummary: 'The login fix looks good, go ahead and commit it.' },
+      { turnType: 'tool_use', toolName: 'Bash', command: 'git commit -am "fix login" && git push origin main' },
+      { turnType: 'assistant_msg', textSummary: 'Committed and pushed the fix straight to main.' },
+      { turnType: 'user_prompt', textSummary: 'You pushed to main? Our project rules say never commit directly to main.' },
+    ],
+  },
+  {
+    sessionId: 'ctrl-dev-reference',
+    expect: ['misread_intent', 'constraint_violation'],
+    lookbackOnly: true,
+    expectSource: 'developer-reference',
+    turns: [
+      { turnType: 'user_prompt', textSummary: 'Add an export button to the dashboard.' },
+      { turnType: 'assistant_msg', textSummary: 'Added an export button that downloads the data as JSON.' },
+      { turnType: 'user_prompt', textSummary: 'No, export must be CSV, the same format we settled on for the reports last week.' },
+    ],
+  },
   {
     sessionId: 'ctrl-constraint',
     expect: 'constraint_violation',
@@ -92,8 +156,13 @@ export const CONTROLS: Control[] = [
   },
 ];
 
-export function controlSessions(): ReturnType<typeof buildSession>[] {
-  return CONTROLS.map((c) => {
+/** The controls to run: the lookback-only ones join when `lookback` is on, with their earlier prompts and instructions. */
+export function controlsFor(lookback: boolean): Control[] {
+  return CONTROLS.filter((c) => lookback || c.lookbackOnly !== true);
+}
+
+export function controlSessions(lookback = false): ReturnType<typeof buildSession>[] {
+  return controlsFor(lookback).map((c) => {
     const events = c.turns.map((t, i) => ({
       uuid: `${c.sessionId}-${i}`,
       sessionId: c.sessionId,
@@ -104,7 +173,10 @@ export function controlSessions(): ReturnType<typeof buildSession>[] {
     // Constructed, so the full text is the summary.
     const full = new Map<number, string>();
     for (const e of events) if (e.textSummary !== undefined) full.set(e.seq, e.textSummary);
-    return buildSession(c.sessionId, events, full);
+    const session = buildSession(c.sessionId, events, full);
+    if (!lookback) return session;
+    const prompts = events.filter((e) => e.turnType === 'user_prompt').map((e) => ({ seq: e.seq, text: e.textSummary ?? '' }));
+    return { ...session, lookback: { prompts, instructions: c.instructions ?? [] } };
   });
 }
 
@@ -119,37 +191,45 @@ function call(packet: string, model: string): string {
 }
 
 async function main(): Promise<void> {
-  const model = process.argv[2] ?? 'haiku';
-  const sessions = controlSessions();
+  const lookback = process.argv.includes('--lookback');
+  const model = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? 'haiku';
+  const controls = controlsFor(lookback);
+  const sessions = controlSessions(lookback);
+  const extractPacket = renderExtract(sessions);
 
   // Two stages, the path that ships.
-  const extracted = parseExtract(call(renderExtract(sessions), model), sessions);
+  const extracted = parseExtract(call(extractPacket, model), sessions);
+  const lookbacks = lookbacksFor(sessions, extracted.episodes, estimateTokens(extractPacket));
   const dropped = [...extracted.dropped];
   const findings =
     extracted.episodes.length === 0
       ? []
       : (() => {
-          const r = parseLabels(call(renderLabel(extracted.episodes), model), extracted.episodes);
+          const r = parseLabels(call(renderLabel(extracted.episodes, lookbacks), model), extracted.episodes, lookbacks);
           dropped.push(...r.dropped);
           return r.findings;
         })();
-  const got = new Map(findings.map((f) => [f.sessionId, f.dimension]));
+  const got = new Map(findings.map((f) => [f.sessionId, f]));
 
   let pass = 0;
   console.log(
-    `judge control · ${model} · ${extracted.episodes.length} episode(s) -> ${findings.length} labelled, ${dropped.length} dropped\n`,
+    `judge control · ${model}${lookback ? ' · lookback' : ''} · ${extracted.episodes.length} episode(s) -> ${findings.length} labelled, ${dropped.length} dropped\n`,
   );
-  for (const c of CONTROLS) {
+  for (const c of controls) {
     const g = got.get(c.sessionId);
-    const ok = c.expect === null ? g === undefined : g === c.expect;
+    const kinds = c.expect === null ? [] : Array.isArray(c.expect) ? c.expect : [c.expect];
+    const kindOk = c.expect === null ? g === undefined : g !== undefined && kinds.includes(g.dimension);
+    const sourceOk = c.expectSource === undefined || g?.established?.source === c.expectSource;
+    const ok = kindOk && sourceOk;
     if (ok) pass++;
+    const source = g?.established === undefined ? '' : ` (from ${g.established.source})`;
     console.log(
-      `  ${ok ? 'ok  ' : 'MISS'}  ${c.sessionId.padEnd(16)} expected ${String(c.expect).padEnd(23)} got ${String(g)}`,
+      `  ${ok ? 'ok  ' : 'MISS'}  ${c.sessionId.padEnd(18)} expected ${String(c.expect).padEnd(23)}${c.expectSource === undefined ? '' : ` from ${c.expectSource}`} got ${String(g?.dimension)}${source}`,
     );
   }
   if (dropped.length > 0) console.log(`\n  dropped: ${JSON.stringify(dropped)}`);
-  console.log(`\n  ${pass}/${CONTROLS.length}`);
-  process.exit(pass === CONTROLS.length ? 0 : 1);
+  console.log(`\n  ${pass}/${controls.length}`);
+  process.exit(pass === controls.length ? 0 : 1);
 }
 
 main().catch((e: unknown) => {

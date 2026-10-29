@@ -250,7 +250,7 @@ describe('the rule tier is persisted at all', () => {
 describe('every archive writer uses a distinct temp path', () => {
   // A shared temp path let two concurrent writers race on rename (ENOENT).
   it('includes the pid', () => {
-    for (const f of ['src/files.ts', 'src/catalog.ts', 'src/standing.ts', 'src/judge/state.ts', 'src/breaker.ts']) {
+    for (const f of ['src/files.ts', 'src/catalog.ts', 'src/standing.ts', 'src/judge/state.ts', 'src/supervise/record.ts']) {
       const src = readFileSync(f, 'utf8');
       const temps = [...src.matchAll(/`\$\{[^`]*\}\.(?:\$\{process\.pid\}\.)?tmp`/g)].map((m) => m[0]);
       for (const t of temps) {

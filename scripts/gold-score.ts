@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
 import { parseExtract, parseLabels, renderExtract, renderLabel } from '../src/judge/prompt.ts';
-import { buildSession, estimateTokens, type JudgePacketSession } from '../src/judge/packet.ts';
+import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS, type JudgePacketSession } from '../src/judge/packet.ts';
 import { callModel, wouldLeak } from '../src/judge/model.ts';
 import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from './gold.ts';
 import type { Event } from '../src/types.ts';
@@ -62,6 +62,10 @@ async function main(): Promise<void> {
   const negativesMode = process.argv.includes('--negatives');
   // `--extract-only` stops after stage A, so extraction is measured on its own.
   const extractOnly = process.argv.includes('--extract-only');
+  // `--paired`: each batch's records are labelled twice, without secondary kinds and with, so the difference is the label stage's.
+  const paired = process.argv.includes('--paired');
+  // `--estimate`: print the batches and their size, send nothing.
+  const estimateOnly = process.argv.includes('--estimate');
   let files: Map<string, string>;
   if (negativesMode) {
     const mapping = process.env['AGENTSENSEI_GOLD_MAPPING'] ?? '/tmp/cam-check/data/core/session_mapping.json';
@@ -119,7 +123,17 @@ async function main(): Promise<void> {
   }
   if (current.length > 0) batches.push(current);
 
+  if (estimateOnly) {
+    const extract = batches.reduce((n, b) => n + estimateTokens(renderExtract(b)) + JUDGE_OVERHEAD_TOKENS, 0);
+    // Label calls: about the invocation overhead each, one per batch, two when paired.
+    const label = batches.length * (paired ? 2 : 1) * JUDGE_OVERHEAD_TOKENS;
+    console.log(`${packets.length} sessions in ${batches.length} batches: about ${Math.round((extract + label) / 1000)}k tokens. nothing sent.`);
+    return;
+  }
+
   const found: JudgeOutput[] = [];
+  /** With `--paired`: the same records labelled without secondary kinds. */
+  const foundMain: JudgeOutput[] = [];
   const dropped: Record<string, number> = {};
   for (const [i, batch] of batches.entries()) {
     process.stdout.write(`  batch ${i + 1}/${batches.length} (${batch.length} sessions) … `);
@@ -160,12 +174,19 @@ async function main(): Promise<void> {
         console.log(`${ex.episodes.length} episode(s), LABEL CALL FAILED`);
         continue;
       }
+      if (paired) {
+        const mainReply = call(renderLabel(ex.episodes, undefined, { secondary: false }), model);
+        if (mainReply !== undefined) {
+          foundMain.push(...parseLabels(mainReply, ex.episodes).findings.map((f) => ({ sessionId: f.sessionId, dimension: f.dimension, turns: f.turns })));
+        }
+      }
       const lb = parseLabels(labelReply, ex.episodes);
       for (const d of lb.dropped) dropped[d.reason] = (dropped[d.reason] ?? 0) + d.count;
       found.push(
         ...lb.findings.map((f) => ({
           sessionId: f.sessionId,
           dimension: f.dimension,
+          ...(f.secondaryDimensions !== undefined ? { secondaryDimensions: f.secondaryDimensions } : {}),
           turns: f.turns,
           quote: f.quote,
         })),
@@ -181,6 +202,7 @@ async function main(): Promise<void> {
       // The commit and dirty flag, so results from different code are never compared as variance.
       code: provenance(),
       found,
+      ...(paired ? { foundMain } : {}),
       sessions: packets.map((p) => p.sessionId),
       located: [...located],
     }, null, 2));
@@ -196,6 +218,10 @@ async function main(): Promise<void> {
     console.log(`  sessions where we found something : ${bySession.size}`);
     console.log(`  findings (all false-positive candidates) : ${found.length}`);
     console.log(`  per dimension: ${JSON.stringify(byDim)}`);
+    const also: Record<string, number> = {};
+    for (const f of found) for (const k of f.secondaryDimensions ?? []) also[k] = (also[k] ?? 0) + 1;
+    console.log(`  secondary kinds: ${JSON.stringify(also)}`);
+    if (paired) console.log(`  labelled without secondary kinds: ${foundMain.length} findings`);
     console.log(
       `\n  spent: ${spent.calls} call(s) · ${spent.input.toLocaleString()} in · ` +
         `${spent.output.toLocaleString()} out` +
@@ -205,6 +231,8 @@ async function main(): Promise<void> {
   }
 
   const s = score(episodes, located, found, packets.map((p) => p.sessionId));
+  // The same findings with only their main kind: comparable with runs before secondary kinds existed.
+  const primaryOnly = score(episodes, located, found.map(({ secondaryDimensions: _, ...f }) => f), packets.map((p) => p.sessionId));
 
   const pct = (r: number | undefined): string => (r === undefined ? 'n/a' : `${(r * 100).toFixed(0)}%`);
 
@@ -214,16 +242,24 @@ async function main(): Promise<void> {
   // Loosest first. All three need a finding within TURN_TOLERANCE of located evidence.
   console.log(`  SESSION-level  (any dimension) : ${s.sessionLevel.caught}/${s.sessionLevel.withEpisode}   ${pct(s.sessionLevel.recall)}   <- headline`);
   console.log(`  episode-level  (any dimension) : ${s.episodeLevel.caught}/${s.episodeLevel.total}   ${pct(s.episodeLevel.recall)}`);
+  console.log(`  caught as one of the four kinds: ${s.caughtAnyKind.caught}/${s.caughtAnyKind.total}   ${pct(s.caughtAnyKind.recall)}`);
+  for (const [dim, v] of Object.entries(s.caughtAnyKind.byDimension)) console.log(`    ${dim.padEnd(24)} caught ${v.caught}/${v.total}`);
   console.log(
     `  claim-level    (exact dimension): ${s.matched}/${s.inScope}   ${pct(s.recall)}` +
       (extractOnly ? '   <- MEANINGLESS in extract-only mode, the dimension is a placeholder' : ''),
   );
+  console.log(`  claim-level, main kind only    : ${primaryOnly.matched}/${primaryOnly.inScope}   ${pct(primaryOnly.recall)}`);
+  const unpaired = paired ? score(episodes, located, foundMain, packets.map((p) => p.sessionId)) : undefined;
+  if (unpaired !== undefined) {
+    console.log(`  claim-level, labelled without secondary kinds: ${unpaired.matched}/${unpaired.inScope}   ${pct(unpaired.recall)}   (${foundMain.length} findings against ${found.length})`);
+    for (const [dim, v] of Object.entries(unpaired.byDimension)) console.log(`    without: ${dim.padEnd(24)} ${v.matched}/${v.inScope}`);
+  }
   console.log('');
   console.log(`  right dimension, wrong place: ${s.rightDimensionWrongPlace}`);
   console.log(`  unmatched findings       : ${s.unmatched}  — read these; they are not automatically wrong`);
   console.log('');
   for (const [dim, v] of Object.entries(s.byDimension)) {
-    console.log(`    ${dim.padEnd(24)} ${v.matched}/${v.inScope}`);
+    console.log(`    ${dim.padEnd(24)} ${v.matched}/${v.inScope}   (main kind only ${primaryOnly.byDimension[dim]?.matched ?? 0})`);
   }
   const conf = Object.entries(s.confusion).sort((a, b) => b[1] - a[1]).slice(0, 6);
   if (conf.length > 0) {

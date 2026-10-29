@@ -207,3 +207,10 @@ describe('the session-start block can see the model tier', () => {
     expect(reportBlock(empty, undefined, [])).toContain('nothing to flag');
   });
 });
+
+describe('session start leads with what is new', () => {
+  it('names new findings first, and says nothing when there are none', () => {
+    expect(reportBlock(base(), undefined, [], 0, [], 2).split('\n')[2]).toBe('  2 new findings since your last session');
+    expect(reportBlock(base(), undefined, [], 0, [], 0)).not.toMatch(/new finding/);
+  });
+});

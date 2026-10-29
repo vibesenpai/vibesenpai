@@ -10,7 +10,7 @@ import { parse, registry } from '../parsers/index.ts';
 import { readJudgeState, tallyByDimension } from '../judge/state.ts';
 import { detectorsFor, unknownDimensions } from '../detect/index.ts';
 import { leadSegments } from '../render.ts';
-import { readBreaker, isTripped } from '../breaker.ts';
+import { jobsHealth, superviseAll } from '../jobs.ts';
 import { readStanding } from '../standing.ts';
 import { nextRung, reportBlock } from '../session-block.ts';
 import { runAndWait } from '../spawn.ts';
@@ -111,29 +111,28 @@ export function cmdDoctor(a: Argv): number {
     console.log(`  source     ${s}  (${detail})`);
   }
 
-  // Say when the ambient layer has gone silent.
-  const breaker = readBreaker(config.archive);
-  if (isTripped(breaker)) {
-    console.log(
-      `  ambient    DISABLED after ${breaker.consecutiveFailures} consecutive failures` +
-        (breaker.trippedAt !== undefined ? ` (since ${breaker.trippedAt.slice(0, 16)})` : ''),
-    );
-    console.log(`             ${breaker.reason ?? 'no reason recorded'}`);
-    console.log(`             one successful analysis closes it; nothing to reset by hand`);
-  } else if (breaker.consecutiveFailures > 0) {
-    console.log(`  ambient    ${breaker.consecutiveFailures} recent failure(s), still enabled`);
-  } else {
-    const st = readStanding(config.archive);
-    console.log(
-      st === undefined
-        ? `  report     nothing computed yet — runs when a session starts`
-        : `  report     ${st.sessions} session(s), ${st.edits} edits, computed ${localStamp(st.computedAt)}`,
-    );
-    // Exactly what a new session will show.
-    const js = readJudgeState(config.archive);
-    const block = reportBlock(st, nextRung('block'), tallyByDimension(js), js.dismissed ?? 0);
-    if (block !== '') for (const l of block.split('\n')) console.log(`             ${l}`);
+  // Background jobs: what each is doing, and why one is not.
+  const jobs = jobsHealth(config.archive);
+  for (const j of jobs) {
+    const state =
+      j.state === 'retrying'
+        ? `retrying · ${j.failures} failure(s) since ${localStamp(j.since)} · next try ${localStamp(j.retryAt)}`
+        : j.state === 'held'
+          ? `held after ${j.paidFailures} failed paid calls · \`judge --enable --apply\` releases it`
+          : j.state;
+    console.log(`  ${`job ${j.job}`.padEnd(13)}${state}`);
+    if (j.state === 'retrying' || j.state === 'held') console.log(`             ${j.reason}`);
   }
+  const st = readStanding(config.archive);
+  console.log(
+    st === undefined
+      ? `  report     nothing computed yet — runs when a session starts`
+      : `  report     ${st.sessions} session(s), ${st.edits} edits, computed ${localStamp(st.computedAt)}`,
+  );
+  // Exactly what a new session will show.
+  const js = readJudgeState(config.archive);
+  const block = reportBlock(st, nextRung('block'), tallyByDimension(js), js.dismissed ?? 0, jobs);
+  if (block !== '') for (const l of block.split('\n')) console.log(`             ${l}`);
   if (process.env['AGENTSENSEI_DISABLE'] === '1') {
     console.log(`  ambient    AGENTSENSEI_DISABLE=1 is set — every hook exits on line one`);
   }
@@ -276,5 +275,16 @@ export async function cmdStanding(a: Argv): Promise<number> {
     console.log('\n  a new session shows:');
     for (const l of block.split('\n')) console.log(`    ${l}`);
   }
+  return 0;
+}
+
+/**
+ * `tick`: one supervisor pass, for any harness or scheduler that is not the plugin's hooks.
+ * Free jobs only unless `--judge`: no command spends by accident.
+ */
+export function cmdTick(a: Argv): number {
+  const { config } = configFromFlags(a);
+  const decided = superviseAll(config, { judge: a.flags['judge'] === true });
+  for (const [job, what] of Object.entries(decided)) console.log(`${job.padEnd(10)} ${what}`);
   return 0;
 }

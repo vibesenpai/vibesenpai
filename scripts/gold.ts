@@ -129,7 +129,10 @@ export function loadNegatives(mappingPath: string, episodes: GoldEpisode[]): Set
   return out;
 }
 
-export type JudgeOutput = { sessionId: string; dimension: JudgeDimension; turns: number[] };
+export type JudgeOutput = { sessionId: string; dimension: JudgeDimension; secondaryDimensions?: JudgeDimension[]; turns: number[] };
+
+/** Every kind a finding claims; the gold set multi-labels, so a secondary kind is a claim too. */
+const kinds = (f: JudgeOutput): JudgeDimension[] => [f.dimension, ...(f.secondaryDimensions ?? [])];
 
 type GoldScore = {
   /** Episodes in our four dimensions, on sessions we actually judged. */
@@ -155,6 +158,12 @@ type GoldScore = {
   /** Episodes caught at the right place, whatever label we gave them (the gold set multi-labels). */
   episodeLevel: { total: number; caught: number; recall: number | undefined };
 
+  /**
+   * Episodes caught at the right place under any of the four kinds, main or secondary; `other` does not count.
+   * The kinds overlap and the labels are partly subjective, so being caught at all is the measure that matters most.
+   */
+  caughtAnyKind: { total: number; caught: number; recall: number | undefined; byDimension: Record<string, { total: number; caught: number }> };
+
   /** Our label against theirs, for episodes we located but labelled otherwise. */
   confusion: Record<string, number>;
 };
@@ -179,7 +188,8 @@ export function score(
   const outOfScope = relevant.length - inScopeEps.length;
 
   const byDimension: GoldScore['byDimension'] = {};
-  const usedFindings = new Set<number>();
+  // A finding answers at most one episode per kind it claims.
+  const usedClaims = new Set<string>();
   let matched = 0;
   let nearMiss = 0;
 
@@ -191,7 +201,7 @@ export function score(
 
       const sameDim = mine
         .map((f, i) => ({ f, i }))
-        .filter(({ f, i }) => !usedFindings.has(i) && f.sessionId === ep.sessionSha && f.dimension === dim);
+        .filter(({ f, i }) => !usedClaims.has(`${i}:${dim}`) && f.sessionId === ep.sessionSha && kinds(f).includes(dim));
 
       const hit = sameDim.find(({ f }) =>
         evidence.length === 0
@@ -200,7 +210,7 @@ export function score(
       );
 
       if (hit !== undefined) {
-        usedFindings.add(hit.i);
+        usedClaims.add(`${hit.i}:${dim}`);
         matched++;
         slot.matched++;
       } else if (sameDim.length > 0) {
@@ -215,13 +225,25 @@ export function score(
     return evidence.length === 0 || f.turns.some((t) => evidence.some((e) => Math.abs(t - e) <= TURN_TOLERANCE));
   };
 
+  const caughtAnyKind: GoldScore['caughtAnyKind'] = { total: inScopeEps.length, caught: 0, recall: undefined, byDimension: {} };
+  for (const ep of inScopeEps) {
+    const hit = mine.some((f) => f.sessionId === ep.sessionSha && near(f, ep) && kinds(f).some((k) => k !== 'other'));
+    if (hit) caughtAnyKind.caught++;
+    for (const d of ep.dimensions) {
+      const slot = (caughtAnyKind.byDimension[d] ??= { total: 0, caught: 0 });
+      slot.total++;
+      if (hit) slot.caught++;
+    }
+  }
+  caughtAnyKind.recall = inScopeEps.length === 0 ? undefined : caughtAnyKind.caught / inScopeEps.length;
+
   const confusion: Record<string, number> = {};
   let episodesCaught = 0;
   for (const ep of inScopeEps) {
     const here = mine.filter((f) => f.sessionId === ep.sessionSha && near(f, ep));
     if (here.length > 0) episodesCaught++;
     for (const f of here) {
-      if (ep.dimensions.includes(f.dimension)) continue;
+      if (kinds(f).some((k) => ep.dimensions.includes(k))) continue;
       for (const d of ep.dimensions) {
         const key = `${f.dimension} -> ${d}`;
         confusion[key] = (confusion[key] ?? 0) + 1;
@@ -241,7 +263,7 @@ export function score(
     matched,
     recall: claims === 0 ? undefined : matched / claims,
     rightDimensionWrongPlace: nearMiss,
-    unmatched: mine.length - usedFindings.size,
+    unmatched: mine.filter((_, i) => !kinds(mine[i] as JudgeOutput).some((k) => usedClaims.has(`${i}:${k}`))).length,
     outOfScope,
     sessionsJudged: judged.size,
     byDimension,
@@ -255,6 +277,7 @@ export function score(
       caught: episodesCaught,
       recall: inScopeEps.length === 0 ? undefined : episodesCaught / inScopeEps.length,
     },
+    caughtAnyKind,
     confusion,
   };
 }

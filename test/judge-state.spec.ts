@@ -8,7 +8,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS, emptyState, findingsFor, readJudgeState, recordPass, recordSpend, writeSettings } from '../src/judge/state.ts';
 import { BYTES_PER_TURN, FALLBACK_MS_PER_TOKEN, analysisBlock, dueForJudging, oldestUnread } from '../src/judge/schedule.ts';
-import { JUDGE_RUNNING_STALE_MS, clearJudgeRunning, judgeRunning, takeJudgeLock } from '../src/judge/lock.ts';
 
 const archive = (): string => mkdtempSync(join(tmpdir(), 'as-judge-'));
 
@@ -297,42 +296,6 @@ describe('a rate needs two sizes, not two samples', () => {
     expect(r).toBeDefined();
     expect(r as number).toBeGreaterThan(0);
     db.close();
-  });
-});
-
-describe('two passes cannot take the same work', () => {
-  // Take-or-fail in one operation; a check-then-write let two hooks both take the lock.
-  const scratch = (): string => mkdtempSync(join(tmpdir(), 'as-lock2-'));
-
-  it('is take-or-fail in one operation', () => {
-    const dir = scratch();
-    expect(takeJudgeLock(dir)).toBe(true);
-    expect(takeJudgeLock(dir), 'the second caller must lose').toBe(false);
-  });
-
-  it('is not released by a process that does not hold it', () => {
-    // Only the holder may release.
-    const dir = scratch();
-    takeJudgeLock(dir);
-    clearJudgeRunning(dir, 999_999);
-    expect(judgeRunning(dir), 'someone else cannot free it').toBe(true);
-    clearJudgeRunning(dir);
-    expect(judgeRunning(dir)).toBe(false);
-  });
-
-  it('breaks a lock whose owner died', () => {
-    // Injected time makes any lock look stale, so this only asserts a dead owner does not block forever.
-    const dir = scratch();
-    takeJudgeLock(dir);
-    expect(takeJudgeLock(dir), 'held').toBe(false);
-    expect(takeJudgeLock(dir, Date.now() + JUDGE_RUNNING_STALE_MS + 1), 'stale').toBe(true);
-  });
-
-  it('is free again after a normal release', () => {
-    const dir = scratch();
-    takeJudgeLock(dir);
-    clearJudgeRunning(dir);
-    expect(takeJudgeLock(dir)).toBe(true);
   });
 });
 

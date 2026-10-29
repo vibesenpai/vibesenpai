@@ -210,7 +210,7 @@ describe('the packet', () => {
     expect(part?.session.packet.turns[0]?.text).toMatch(/^\[one message sent in parts: characters 1-/);
   });
 
-  // Prompt wording is pinned in test/two-stage.test.ts; this tests the shared `buildSession`.
+  // Prompt wording is pinned in test/two-stage.spec.ts; this tests the shared `buildSession`.
 });
 
 describe('the redaction gate refuses rather than redacts', () => {

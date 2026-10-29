@@ -53,7 +53,9 @@ export function callModel(
   opts: ModelOptions = {},
 ): ModelReply | undefined {
   try {
-    return parseReply(execFileSync('claude', modelArgs(packet, model), { ...modelExecOptions(opts), encoding: 'utf8' }));
+    return parseReply(
+      execFileSync('claude', modelArgs(model), { ...modelExecOptions(opts), input: packet, encoding: 'utf8' }),
+    );
   } catch {
     return undefined;
   }
@@ -67,7 +69,7 @@ export function callModelAsync(
 ): Promise<ModelReply | undefined> {
   return new Promise((resolve) => {
     try {
-      const child = execFile('claude', modelArgs(packet, model), { ...modelExecOptions(opts), encoding: 'utf8' }, (err, out) => {
+      const child = execFile('claude', modelArgs(model), { ...modelExecOptions(opts), encoding: 'utf8' }, (err, out) => {
         if (err !== null) {
           resolve(undefined);
           return;
@@ -78,16 +80,17 @@ export function callModelAsync(
           resolve(undefined);
         }
       });
-      // `execFile` ignores `stdio`, and the CLI reads a non-TTY stdin: close it or every call times out.
-      child.stdin?.end();
+      // The packet goes on stdin, which must be closed or the CLI waits until the timeout.
+      child.stdin?.end(packet);
     } catch {
       resolve(undefined);
     }
   });
 }
 
-function modelArgs(packet: string, model: string): string[] {
-  return ['-p', packet, '--output-format', 'json', '--allowed-tools', '', '--model', model];
+/** The packet is sent on stdin, never as an argument: Linux caps one argument at 128 KiB, and a full batch nears it. */
+function modelArgs(model: string): string[] {
+  return ['-p', '--output-format', 'json', '--allowed-tools', '', '--model', model];
 }
 
 function modelExecOptions(opts: ModelOptions) {
@@ -95,7 +98,7 @@ function modelExecOptions(opts: ModelOptions) {
     cwd: modelCwd(),
     timeout: opts.timeoutMs ?? 300_000,
     maxBuffer: opts.maxBufferBytes ?? 64 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'],
+    stdio: ['pipe', 'pipe', 'ignore'] as ['pipe', 'pipe', 'ignore'],
     env: { ...process.env, AGENTSENSEI_DISABLE: '1' },
   };
 }

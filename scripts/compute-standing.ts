@@ -11,7 +11,8 @@ import { resolveConfig } from '../src/config.ts';
 import {
   computeStanding, isFresh, readStanding, writeStanding, type SessionInput,
 } from '../src/standing.ts';
-import { recordFailure, recordSuccess } from '../src/breaker.ts';
+import { clean, STANDING_DEADLINE_MS } from '../src/jobs.ts';
+import { runJob, type Outcome } from '../src/supervise/index.ts';
 import {
   openStore, putOccurrences, putSessionCost, transact, type Db, type SessionCostRow,
 } from '../src/store.ts';
@@ -22,14 +23,14 @@ import { discoverTranscripts, projectOf } from '../src/read.ts';
 import { readDismissed } from '../src/dismiss.ts';
 import { spanOf } from '../src/render.ts';
 
-async function main(): Promise<void> {
+async function main(): Promise<Outcome> {
   const { config } = resolveConfig();
 
   // Skip if fresh, so several windows do not reparse history; `--force` overrides.
   const force = process.argv.includes('--force');
-  if (!force && isFresh(readStanding(config.archive))) return;
+  if (!force && isFresh(readStanding(config.archive))) return { status: 'ok' };
 
-  try {
+  {
     const sessions: SessionInput[] = [];
     const costs: SessionCostRow[] = [];
     let unreadable = 0;
@@ -98,15 +99,14 @@ async function main(): Promise<void> {
         db?.close();
       }
     }
-    recordSuccess(config.archive);
-  } catch (err) {
-    recordFailure(config.archive, err instanceof Error ? err.message : 'standing pass failed');
+    return { status: 'ok' };
   }
 }
 
-
 try {
-  await main();
+  const { archive } = resolveConfig().config;
+  // Concurrent runs are safe (atomic writes, idempotent upserts), so a manual refresh never waits.
+  await runJob('standing', archive, { deadlineMs: STANDING_DEADLINE_MS, allowConcurrent: true, clean }, main);
 } catch {
   // Last line of defence.
 }

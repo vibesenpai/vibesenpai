@@ -8,6 +8,8 @@ import { basename } from 'node:path';
 import type { Standing } from './standing.ts';
 import { human, shortenPath } from './format.ts';
 import { reasonLabel } from './detect/labels.ts';
+import { localStamp } from './format.ts';
+import type { JobHealth } from './supervise/index.ts';
 
 /** How many dimensions the block will name before deferring to `now`. */
 export const MAX_DIMENSIONS = 2;
@@ -57,8 +59,13 @@ export function reportBlock(
   judged: JudgedTally = [],
   /** Judge findings a dismissal is hiding. The rule tier's count is on `s`. */
   judgedDismissed = 0,
+  /** Background jobs; only a failing one says anything. */
+  jobs: JobHealth[] = [],
+  /** Model findings judged since the previous session started. */
+  fresh = 0,
 ): string {
-  if (s === undefined) return '';
+  const failing = healthLines(jobs);
+  if (s === undefined) return failing.length === 0 ? '' : `\nagentsensei\n${failing.map((l) => `  ${l}`).join('\n')}`;
 
   // Names itself, since it appears in a session the user did not invoke it in. The token figure
   // is the rule tier's only: judge findings carry no price.
@@ -74,6 +81,7 @@ export function reportBlock(
   const head =
     `agentsensei · your last ${s.sessions} session${s.sessions === 1 ? '' : 's'}${headline}`;
   const lines: string[] = [];
+  if (fresh > 0) lines.push(`  ${fresh} new finding${fresh === 1 ? '' : 's'} since your last session`);
 
   for (const d of s.dimensions.slice(0, MAX_DIMENSIONS)) {
     lines.push(`  ${dimensionLine(d)}`);
@@ -101,6 +109,7 @@ export function reportBlock(
 
   const cost = cacheLine(s);
   if (cost !== '') lines.push(`  ${cost}`);
+  for (const l of failing) lines.push(`  ${l}`);
 
   if (lines.length === 0) {
     // Reached only when both tiers are empty. Said rather than omitted, so it does not read as broken.
@@ -132,4 +141,22 @@ export function nextRung(from: 'block' | 'insights' | 'report' | 'fix'): string 
     case 'fix':
       return 'Run /agentsensei:report for more details';
   }
+}
+
+const JOB_LABEL: Record<string, string> = { judge: 'The judge', standing: 'The history pass' };
+
+/** One plain fact per failing job (Principle One: no imperative, no severity word). Silent when healthy. */
+export function healthLines(jobs: JobHealth[]): string[] {
+  const out: string[] = [];
+  for (const j of jobs) {
+    const who = JOB_LABEL[j.job] ?? j.job;
+    if (j.state === 'retrying') {
+      const times = j.failures === 1 ? 'once' : `${j.failures} times`;
+      const next = Date.parse(j.retryAt) <= Date.now() ? 'retrying at the next turn' : `next try ${localStamp(j.retryAt).slice(11)}`;
+      out.push(`${who} has failed ${times} since ${localStamp(j.since).slice(11)} (${j.reason}) · ${next}`);
+    } else if (j.state === 'held') {
+      out.push(`${who} stopped after ${j.paidFailures} failed paid calls (${j.reason}) · it stays stopped until re-enabled`);
+    }
+  }
+  return out;
 }
