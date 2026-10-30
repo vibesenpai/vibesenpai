@@ -100,7 +100,7 @@ export function reportBlock(
       .map((j) => j.dimension);
     const more = judged.length > names.length ? `, +${judged.length - names.length} more` : '';
     lines.push(
-      `  ${judgedTotal} flagged by a model — ${names.join(', ')}${more}`,
+      `  ${judgedTotal} flagged — ${names.join(', ')}${more}`,
     );
   }
 
@@ -159,4 +159,25 @@ export function healthLines(jobs: JobHealth[]): string[] {
     }
   }
   return out;
+}
+
+/**
+ * Said once per machine, before anything is spent: the Stop hook that spends runs only after this
+ * session's first turn. A statement of fact with the figures and the off switch (.claude/rules/judge.md).
+ */
+export function disclosure(settings: { dailyTokens: number; catchUp: number }, env: NodeJS.ProcessEnv = process.env): string {
+  // Only these say how the person is billed; their absence proves nothing.
+  const api = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX'].some((k) => (env[k] ?? '') !== '');
+  return [
+    '',
+    'agentsensei is on. Starting when this turn ends, it reads your sessions in the background',
+    `with Claude Haiku ${api ? 'on your API key' : 'on your plan or API key'}: up to ${settings.catchUp} recent past sessions first,`,
+    `then each new one, about 60k tokens a session and at most ${human(settings.dailyTokens)} tokens a day.`,
+    'Nothing has been spent yet.',
+    '',
+    '  /agentsensei:insights         what it has found',
+    '  /agentsensei:judge off        stop the model reads; the free checks keep running',
+    '  /plugin disable agentsensei   stop everything',
+    '',
+  ].join('\n');
 }

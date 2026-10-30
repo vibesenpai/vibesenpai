@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { redact } from '../redact.ts';
 import { outputDigest, isPlausibleTimestamp } from '../normalise.ts';
 import type { Event, TurnType } from '../types.ts';
+import { fixIdsIn } from '../fix-marker.ts';
 
 /** A `user` record whose string content starts with one of these is a slash-command echo, not a human. */
 const META_CONTENT =
@@ -499,7 +500,13 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
           const of = r.parentUuid == null ? undefined : commandByUuid.get(r.parentUuid);
           // A skill the agent loaded hangs off its tool result, so it never matches here.
           const isInstructions = of !== undefined && text.trim() !== '' && !META_CONTENT.test(text);
-          push('local_command', { ...sum(text), ...(isInstructions ? { devCommand: { name: of, part: 'instructions' as const } } : {}) });
+          // A command the developer typed whose output carries our marker applied that fix.
+          const fixes = isInstructions ? fixIdsIn(text) : undefined;
+          push('local_command', {
+            ...sum(text),
+            ...(isInstructions ? { devCommand: { name: of, part: 'instructions' as const } } : {}),
+            ...(fixes !== undefined ? { fixApplied: fixes } : {}),
+          });
           break;
         }
         const cmd = typeof content === 'string' ? slashCommand(content) : undefined;
@@ -512,8 +519,10 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
         if (typeof content === 'string') {
           // Prompts get the larger cap; other text keeps 200 (compared by digest, not read).
           const isPrompt = !META_CONTENT.test(content);
+          const fixes = isPrompt ? fixIdsIn(content) : undefined;
           push(isPrompt ? 'user_prompt' : 'local_command', {
             ...(isPrompt ? sum(content, PROMPT_SUMMARY_MAX) : sum(content)),
+            ...(fixes !== undefined ? { fixApplied: fixes } : {}),
           });
         } else if (Array.isArray(content)) {
           // tool_result blocks are the harness replying, not the human.
@@ -538,7 +547,8 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
             } else if (b?.type === 'text') {
               // A reminder or command echo inside array content is the harness, not the person.
               const isPrompt = typeof b.text !== 'string' || !META_CONTENT.test(b.text);
-              push(isPrompt ? 'user_prompt' : 'local_command', { ...sum(b.text) });
+              const fixes = isPrompt && typeof b.text === 'string' ? fixIdsIn(b.text) : undefined;
+              push(isPrompt ? 'user_prompt' : 'local_command', { ...sum(b.text), ...(fixes !== undefined ? { fixApplied: fixes } : {}) });
             }
           }
         }

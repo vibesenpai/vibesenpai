@@ -1,5 +1,5 @@
 // The insights pane, against a stubbed engine and a stubbed `agentsensei report --json`.
-import { expect, test, type TestBody } from 'claude-code/testing'
+import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import type { PaneData } from '../types'
 
@@ -14,6 +14,26 @@ const DATA: PaneData = {
   recommendations: {
     misread_intent: { dimension: 'misread_intent', prompt: 'For the rest of this session: before acting on anything ambiguous, state the request.' },
   },
+  fixes: [
+    { fixId: '16ae85', dimension: 'misread_intent', target: 'project-instructions', text: '- Before acting on anything ambiguous, state the request.', destination: '.claude/rules/agentsensei.md', request: 'unused' },
+    { fixId: '298aaf', dimension: 'edit_retry', target: 'project-instructions', text: '- Re-read right before editing.', destination: '.claude/rules/agentsensei.md', request: 'unused' },
+    {
+      fixId: 'dea0d0', dimension: 'overreach', target: 'project-instructions', text: '- Do only what was asked.', destination: '.claude/rules/agentsensei.md', request: 'unused',
+      applied: { at: '2026-10-21T10:00:00.000Z', sessionId: 'aaaaaaaa-1111' }, inEffect: true,
+      before: { times: 4, sessions: 9 }, since: { times: 1, sessions: 4 }, cameBack: { sessionId: '9b0e44d1-xxxx', turn: 88 },
+    },
+    {
+      fixId: '3704ae', dimension: 'inaccurate_self_report', target: 'project-instructions', text: '- Quote the output.', destination: '.claude/rules/agentsensei.md', request: 'unused',
+      applied: { at: '2026-10-22T10:00:00.000Z', sessionId: 'aaaaaaaa-1111' }, inEffect: false,
+    },
+  ],
+  spend: {
+    allTime: { calls: 114, tokensIn: 3_800_000, tokensOut: 226_000, usdMicros: 1_870_000, usdSince: '2026-10-29T10:00:00.000Z' },
+    last7d: { calls: 12, tokensIn: 610_000, tokensOut: 40_000, usdMicros: 310_000 },
+    today: { tokens: 610_000, limit: 2_000_000 },
+    older: 3, catchUp: 200, enabled: true, billing: 'unknown',
+  },
+  dismissed: 4,
   sessions: [
     {
       sessionId: 'aaaaaaaa-1111',
@@ -32,7 +52,7 @@ const DATA: PaneData = {
       ],
       judged: [
         { id: 'judged-old', at: EARLIER, dimension: 'misread_intent', turns: [4], why: 'Read the question as a request.', quote: 'are we planning trends?' },
-        { id: 'judged-new', at: NOW, dimension: 'misread_intent', secondaryDimensions: ['overreach'], turns: [9], why: 'Kept the plain name.', quote: 'I want it to be /agentsensei:fix', asked: { seq: 8, text: 'rename the command' }, established: 'turn 3 — “call it /agentsensei:fix”' },
+        { id: 'judged-new', at: NOW, dimension: 'misread_intent', secondaryDimensions: ['overreach'], turns: [9], why: 'Kept the plain name.', quote: 'I want it to be /agentsensei:fix', quoteBy: 'developer', asked: { seq: 8, text: 'rename the command' }, established: 'turn 3 — “call it /agentsensei:fix”' },
       ],
       stats: { rebuilds: { count: 1, tokens: 120_000, events: [{ seq: 30, tokens: 120_000, cached: 140_000, gapMinutes: 75 }] } },
     },
@@ -46,30 +66,40 @@ const PANE = {
   props: { title: 'agentsensei', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
 } as const
 
-type Calls = { argv: string[][] }
+type Calls = { argv: string[][]; filled: string[]; draft?: string; refuse?: 'dialog' | 'no_composer'; copied?: string; mtime?: number; rateLimits?: { kind: string; percentUsed: number }[]; excerpt?: unknown }
 
 /** Run `/agentsensei:insights`; the kit fills the fields a typed command carries. */
 const insights = ($: Parameters<TestBody>[0]) => $.command.run({ command: 'agentsensei:insights' } as never)
 
 /** The engine beneath the plugin: a placed pane, a store that last saw us in the past, and our CLI answering. */
-function engine(on: Parameters<TestBody>[1], data: PaneData | null, calls: Calls, isPlaced = true, onCopy?: (text: string) => void): void {
+function engine(on: Parameters<TestBody>[1], data: PaneData | null, calls: Calls, isPlaced = true, termProgram?: string): void {
+  on('env.get', (_, e) => ({ value: (e as { name: string }).name === 'TERM_PROGRAM' ? termProgram : undefined }))
   on('ui.open', () => ({ value: isPlaced ? { isPlaced: true as const } : { isPlaced: false as const, reason: 'no room' } }))
   on('store.get', () => ({ value: '2026-10-10T00:00:00.000Z' }))
   on('store.set', () => ({ value: undefined }))
-  on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
+  on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: calls.mtime ?? 1, isLink: false } }))
+  on('prompt.read', () => ({ value: { text: calls.draft ?? '', cursor: 0 } }))
+  on('prompt.fill', (_, e) => {
+    if (calls.refuse !== undefined) return { isFilled: false, refusal: calls.refuse }
+    calls.filled.push((e as { text: string }).text)
+    return { isFilled: true }
+  })
   on('ui.copy', (_, e) => {
-    onCopy?.((e as { text: string }).text)
+    calls.copied = (e as { text: string }).text
     return { value: { isCopied: true } }
   })
   on('process.run', (_, e) => {
-    calls.argv.push([...(e as { argv: string[] }).argv])
-    return { value: { exitCode: 0, stdout: data === null ? '' : JSON.stringify(data), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    const argv = (e as { argv: string[] }).argv
+    calls.argv.push([...argv])
+    const out = argv.includes('excerpt') ? calls.excerpt ?? { kept: false } : data
+    return { value: { exitCode: 0, stdout: out === null ? '' : JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('command.run', () => ({ text: 'the text version' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: {}, rateLimits: calls.rateLimits ?? [] } as never }))
 }
 
 test('opens on the command, reads the analysis, and shows new findings first', async ($, on) => {
-  const calls: Calls = { argv: [] }
+  const calls: Calls = { argv: [], filled: [] }
   engine(on, DATA, calls)
   const r = await insights($)
   expect(r.text).toBe('Insights opened beside the chat.')
@@ -77,17 +107,18 @@ test('opens on the command, reads the analysis, and shows new findings first', a
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /2\/3 sessions read/ }))?.text).toMatch(/2\/3 sessions read/)
-    expect((await ui.find({ type: 'Text', text: /New since you last looked · 1/ }))?.text).toBeDefined()
-    // The old finding is not new; the method is always stated.
-    expect(await ui.find({ type: 'Text', text: /flagged by a model/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /2\/3 sessions read/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /New since you last looked/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /│ Findings │/ })).toBeDefined()
+    // How a finding was flagged is never shown.
+    expect(await ui.find({ type: 'Text', text: /flagged by/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /also overreach/ })).toBeDefined()
     await ui.unmount()
   }
 })
 
 test('falls through to the text version where no pane can be placed', async ($, on) => {
-  const calls: Calls = { argv: [] }
+  const calls: Calls = { argv: [], filled: [] }
   engine(on, DATA, calls, false)
   const r = await insights($)
   expect(r.text).toBe('the text version')
@@ -95,13 +126,13 @@ test('falls through to the text version where no pane can be placed', async ($, 
 })
 
 test('a finding expands to its turns and reason, and Dismiss calls the CLI with its id', async ($, on) => {
-  const calls: Calls = { argv: [] }
+  const calls: Calls = { argv: [], filled: [] }
   engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
 
   await ui.press({ key: 'item:new:judged-new' })
-  expect(await ui.find({ type: 'Text', text: /You asked: / })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /You asked:/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /rename the command/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Why: / })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Kept the plain name/ })).toBeDefined()
@@ -112,30 +143,116 @@ test('a finding expands to its turns and reason, and Dismiss calls the CLI with 
   await ui.unmount()
 })
 
-test('the fix copies its prompt', async ($, on) => {
-  const calls: Calls = { argv: [] }
-  let copied = ''
-  engine(on, DATA, calls, true, (t) => {
-    copied = t
-  })
+test('Apply drafts the request into an empty prompt box, with the marker, and never sends it', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'copy-prompt:misread_intent' })
-  expect(copied).toMatch(/before acting on anything ambiguous/)
+  expect((await ui.find({ type: 'Button', key: 'apply:16ae85' }))?.props['variant']).toBe('primary')
+  const tree = JSON.stringify(await ui.find({ type: 'Box' }))
+  expect(tree).toMatch(/"label":"Apply"/)
+  expect(tree).not.toMatch(/"label":"Copy/)
+  // The fix says what kind of change it is and where it lands, not just its words.
+  expect(await ui.find({ type: 'Text', text: /A rule the agent reads in every session of this project:/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Added to \.claude\/rules\/agentsensei\.md/ })).toBeDefined()
+  await ui.press({ key: 'apply:16ae85' })
+  expect(calls.filled).toHaveLength(1)
+  expect(calls.filled[0]).toMatch(/Add this line to \.claude\/rules\/agentsensei\.md/)
+  expect(calls.filled[0]).toMatch(/\(agentsensei fix 16ae85\)$/)
+  // The pressed fix folds to one line, and its Apply goes away.
+  expect(await ui.find({ type: 'Text', text: /^✓ Fix drafted in your prompt box\. Press Enter to apply it\.$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Rules load when a session starts, so it takes effect in your next session, or after \/compact\.$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apply:16ae85' })).toBeUndefined()
+
+  await ui.unmount()
+})
+
+test('Apply leaves a draft the person typed alone', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], draft: 'half a thought' }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'apply:16ae85' })
+  expect(calls.filled).toHaveLength(0)
+  expect(await ui.find({ type: 'Text', text: /Your prompt box has a draft\. Clear it, then press Apply again\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the Fixes tab applies several as one request, and says how an applied one did', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:fixes' })
+  expect(await ui.find({ type: 'Text', text: /│ Fixes │/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apply-picked' })).toBeUndefined()
+  await ui.press({ key: 'pick:16ae85' })
+  await ui.press({ key: 'pick:298aaf' })
+  expect((await ui.find({ type: 'Button', key: 'apply-picked' }))?.props['label']).toBe('Apply 2')
+  await ui.press({ key: 'apply-picked' })
+  expect(calls.filled[0]).toMatch(/these lines/)
+  expect(calls.filled[0]).toMatch(/\(agentsensei fix 16ae85, 298aaf\)$/)
+  expect(await ui.find({ type: 'Text', text: /Applied Oct 21/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /4 times in 9 sessions/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1 time in 4 sessions/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Came back in 9b0e44d1, turn 88/ })).toBeDefined()
+  // Requested but never loaded: still offered, since the developer may have said no.
+  expect(await ui.find({ type: 'Text', text: /^Requested Oct 22 · not in effect yet: rules load in a new session, or after \/compact$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'pick:3704ae' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('with every fix applied, the Fixes tab drops the Waiting heading', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, { ...DATA, fixes: DATA.fixes!.filter((x) => x.inEffect === true) }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:fixes' })
+  expect(await ui.find({ type: 'Text', text: /^Waiting$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Every fix on offer is applied/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Applied$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the Health tab states the jobs, what was read and what was spent', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:health' })
+  expect(await ui.find({ type: 'Text', text: /2 of 3 sessions read/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /610k of 2\.0M tokens/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^114 calls · 3\.8M in · 226k out · \$1\.87$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /on a subscription it comes out of your plan's usage instead/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /3 past sessions not read/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /judge off stops them/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /4 findings/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('on a subscription, Health says the dollars are not a bill, and shows nothing of the plan beyond agentsensei', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], rateLimits: [{ kind: 'five_hour', percentUsed: 34 }, { kind: 'seven_day', percentUsed: 12.4 }] }
+  engine(on, { ...DATA, spend: { ...DATA.spend!, today: { tokens: 2_000_000, limit: 2_000_000 } } }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:health' })
+  expect(await ui.find({ type: 'Text', text: /5-hour limit|Claude usage/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /comes out of your plan's usage, not a bill/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /budget reached, continues tomorrow/ })).toBeDefined()
   await ui.unmount()
 })
 
 test('an empty history says so instead of throwing', async ($, on) => {
-  const calls: Calls = { argv: [] }
-  engine(on, { ...DATA, sessions: [], recommendations: {}, read: 0, total: 0 }, calls)
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, { ...DATA, sessions: [], recommendations: {}, fixes: [], read: 0, total: 0 }, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /Nothing flagged yet/ }))?.text).toBe('Nothing flagged yet.')
+  expect(await ui.find({ type: 'Text', text: /Nothing flagged in 0 sessions read/ })).toBeDefined()
   await ui.unmount()
 })
 
 test('a narrow pane clips quotes rather than overflowing', async ($, on) => {
-  const calls: Calls = { argv: [] }
+  const calls: Calls = { argv: [], filled: [] }
   const long = 'x'.repeat(200)
   engine(on, { ...DATA, sessions: [{ ...DATA.sessions[0]!, judged: [{ id: 'j', at: NOW, dimension: 'misread_intent', turns: [1], why: 'w', quote: long }] }] }, calls)
   await insights($)
@@ -146,34 +263,41 @@ test('a narrow pane clips quotes rather than overflowing', async ($, on) => {
   await ui.unmount()
 })
 
-test('a block shows the problem before the fix, and the fix in full', async ($, on) => {
-  const calls: Calls = { argv: [] }
+test('the new finding comes before the fix, and the fix is shown in full', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
   engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const texts = JSON.stringify(await ui.find({ type: 'Box' }))
-  expect(texts.indexOf('I want it to be')).toBeLessThan(texts.indexOf('Fix: '))
-  expect(await ui.find({ type: 'Text', text: /state the request\./ })).toBeDefined()
+  expect(texts.indexOf('I want it to be')).toBeLessThan(texts.indexOf('Before acting on anything ambiguous'))
+  // A dimension's findings come before its fix, so Apply sits below the evidence.
+  expect(texts.indexOf('"key":"list:misread_intent"')).toBeGreaterThan(-1)
+  expect(texts.indexOf('"key":"list:misread_intent"')).toBeLessThan(texts.indexOf('"key":"apply:16ae85"'))
+  // No hotkeys on the tabs: the terminal prints them as a "1:" prefix.
+  expect((await ui.find({ type: 'Button', key: 'tab:fixes' }))?.props['hotkey']).toBeUndefined()
+  // Wrapped by hand so every line of the prompt starts with the bar.
+  expect(await ui.find({ type: 'Text', text: /^▎ Before acting on anything ambiguous,/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^▎ request\.$/ })).toBeDefined()
   await ui.unmount()
 })
 
 
 test('the first block starts open and collapses when pressed', async ($, on) => {
-  const calls: Calls = { argv: [] }
+  const calls: Calls = { argv: [], filled: [] }
   engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const first = DATA.sessions[0]!.judged[0]!.dimension
-  expect(await ui.find({ type: 'Text', text: /Fix: / })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apply:16ae85' })).toBeDefined()
   await ui.press({ key: `block:${first}` })
-  expect(await ui.find({ type: 'Text', text: /Fix: / })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'apply:16ae85' })).toBeUndefined()
   await ui.press({ key: `block:${first}` })
-  expect(await ui.find({ type: 'Text', text: /Fix: / })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apply:16ae85' })).toBeDefined()
   await ui.unmount()
 })
 
 test('Suggestion records a label with the CLI', async ($, on) => {
-  const calls: Calls = { argv: [] }
+  const calls: Calls = { argv: [], filled: [] }
   engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -181,4 +305,200 @@ test('Suggestion records a label with the CLI', async ($, on) => {
   await ui.press({ key: 'suggestion:judged-new' })
   expect(calls.argv.some((a) => a.join(' ').endsWith('label judged-new suggestion'))).toBe(true)
   await ui.unmount()
+})
+
+test('a dimension lists its findings only when its accordion is opened', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', key: 'item:misread_intent:judged-old' })).toBeUndefined()
+  await ui.press({ key: 'list:misread_intent' })
+  expect(await ui.find({ type: 'Button', key: 'item:misread_intent:judged-old' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a finding offers Finding is wrong, Not the agent\'s fault and Hide, and no Yes', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  expect((await ui.find({ type: 'Button', key: 'wrong:judged-new' }))?.props['label']).toBe('Finding is wrong')
+  expect((await ui.find({ type: 'Button', key: 'suggestion:judged-new' }))?.props['label']).toBe("Not the agent's fault")
+  expect((await ui.find({ type: 'Button', key: 'dismiss:judged-new' }))?.props['label']).toBe('Hide')
+  expect(await ui.find({ type: 'Button', key: 'mistake:judged-new' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('an answered finding says what the answer did, in place of the buttons', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, { ...DATA, labels: { 'judged-new': 'mistake' } }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  expect(await ui.find({ type: 'Text', text: /You said: a real mistake\. It counts toward the fix below\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'mistake:judged-new' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('wears the mark: a picture where the terminal draws one, the SVG on the desktop, else the name alone', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls, true, 'iTerm.app')
+  await insights($)
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Image' }))?.props['columns']).toBe(10)
+  expect(await ui.find({ type: 'Text', text: /^agentsensei$/ })).toBeDefined()
+  await ui.unmount()
+  ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(String((await ui.find({ type: 'Svg' }))?.props['source'] ?? '')).toMatch(/aria-label="agentsensei"/)
+  await ui.unmount()
+})
+
+test('draws no picture in a terminal that cannot show one', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls, true, 'Apple_Terminal')
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Image' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^agentsensei$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('when the prompt box refuses, Apply puts the request on the clipboard and says so beside the button', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], refuse: 'dialog' }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'apply:16ae85' })
+  expect(calls.copied).toMatch(/\(agentsensei fix 16ae85\)$/)
+  expect(await ui.find({ type: 'Text', text: /on your clipboard\. Paste it into your prompt and press Enter\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an unanswered finding shows its dimension\'s fix above the answers, and an answer takes it away', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  await ui.press({ key: 'apply:judged-new:16ae85' })
+  expect(calls.filled.at(-1)).toMatch(/\(agentsensei fix 16ae85\)$/)
+  await ui.press({ key: 'wrong:judged-new' })
+  expect(await ui.find({ type: 'Button', key: 'apply:judged-new:16ae85' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('Finding is wrong shows at once and records the answer', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  await ui.press({ key: 'wrong:judged-new' })
+  expect(calls.argv.some((a) => a.join(' ').endsWith('label judged-new wrong'))).toBe(true)
+  // No re-read after an answer: the finding stays where it is.
+  expect(calls.argv.filter((a) => a.includes('--json'))).toHaveLength(1)
+  expect(await ui.find({ type: 'Text', text: /^✓ Hidden\. Noted as a wrong finding\.$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /hidden: wrong finding/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Not the agent\'s fault hides the finding in place, says so, and Undo takes it back', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  await ui.press({ key: 'suggestion:judged-new' })
+  expect(await ui.find({ type: 'Text', text: /^✓ Hidden\. It doesn't count against the agent\.$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /hidden: not the agent's fault/ })).toBeDefined()
+  await ui.press({ key: 'undo:judged-new' })
+  expect(calls.argv.some((a) => a.join(' ').endsWith('label judged-new --undo'))).toBe(true)
+  expect(await ui.find({ type: 'Button', key: 'suggestion:judged-new' })).toBeDefined()
+  await ui.unmount()
+})
+
+const EXCERPT = {
+  kept: true,
+  moreBefore: true,
+  moreAfter: false,
+  parts: [[
+    { role: 'developer', at: '2026-10-29T21:12:00.000Z', cited: false, text: 'rename the command', tools: [] },
+    { role: 'agent', at: '2026-10-29T21:13:00.000Z', cited: false, text: 'Renamed it to /fix.', tools: ['Edit commands/fix.md', 'Bash npm test · failed'] },
+    { role: 'developer', at: '2026-10-29T21:14:00.000Z', cited: true, text: 'I want it to be /agentsensei:fix', tools: [] },
+  ]],
+}
+
+test('an open finding reads its conversation, marks the cited turn, and asks for more around it', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], excerpt: EXCERPT }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  expect(calls.argv.some((a) => a.join(' ').includes('excerpt aaaaaaaa-1111 --turns 9 --around 3'))).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /^▶$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^You asked:$/ }), 'the conversation replaces the quote blocks').toBeUndefined()
+  // Collapsed: a line per message, tool calls as a count, no "more" yet.
+  expect(await ui.find({ type: 'Text', text: /^ · 2 tool calls · 1 failed$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'more:judged-new' })).toBeUndefined()
+  await ui.press({ key: 'conv:judged-new' })
+  expect(await ui.find({ type: 'Text', text: /^2 tool calls · 1 failed$/ })).toBeDefined()
+  await ui.press({ key: 'more:judged-new' })
+  expect(calls.argv.some((a) => a.join(' ').includes('--around 6'))).toBe(true)
+  await ui.unmount()
+})
+
+test('once the transcript is gone, the finding keeps its quote and says so', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  expect(await ui.find({ type: 'Text', text: /no longer keeps this session's transcript/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^▶$/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('an agent\'s words never pass for the developer\'s: the prompt heads the row, the quote is said to be the agent\'s', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  const judged = { id: 'j-agent', at: NOW, dimension: 'misread_intent', turns: [5183], why: 'Did no work.', quote: 'No response requested.', quoteBy: 'agent' as const, asked: { seq: 5180, text: 'Alright lets continue with the fix task' } }
+  engine(on, { ...DATA, sessions: [{ ...DATA.sessions[0]!, judged: [judged] }] }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const label = String((await ui.find({ type: 'Button', key: 'item:new:j-agent' }))?.props['label'] ?? '')
+  expect(label).toMatch(/Alright lets continue with the fix task/)
+  expect(label).not.toMatch(/No response requested/)
+  await ui.press({ key: 'item:new:j-agent' })
+  expect(await ui.find({ type: 'Text', text: /^The agent said:$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /You asked:/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'suggestion:j-agent' }), "the agent's words are not the developer's suggestion").toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'wrong:j-agent' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the header carries the status on the right and a Refresh that re-reads without leaving the pane', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^2\/3 sessions read$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^updated / })).toBeDefined()
+  await ui.press({ key: 'refresh-top' })
+  expect(calls.argv.filter((a) => a.includes('--json'))).toHaveLength(2)
+  await ui.unmount()
+})
+
+test('an open pane re-reads by itself when a background pass writes, and not otherwise', async ($, on) => {
+  const clock = mock.clock(on)
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const reads = () => calls.argv.filter((a) => a.includes('--json')).length
+  expect(reads()).toBe(1)
+  await clock.advance(30_000)
+  expect(reads()).toBe(1)
+  calls.mtime = 2
+  await clock.advance(30_000)
+  expect(reads()).toBe(2)
 })

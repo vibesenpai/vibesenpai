@@ -48,7 +48,12 @@ CREATE TABLE IF NOT EXISTS run (
   -- them produced an ETA calibrated on the smallest quartile of the queue.
   packet_tokens INTEGER,
   -- Findings the lookback gate dropped as suggestions or unverified sources.
-  gated INTEGER
+  gated INTEGER,
+  -- What the run's calls cost, as the harness reported it. Windows (today, 7 days) sum these.
+  calls       INTEGER,
+  tokens_in   INTEGER,
+  tokens_out  INTEGER,
+  usd_micros  INTEGER
 );
 `;
 
@@ -107,6 +112,27 @@ CREATE TABLE IF NOT EXISTS label (
   dimension TEXT NOT NULL,
   verdict   TEXT NOT NULL,   -- 'mistake' | 'suggestion' | 'wrong'
   at        TEXT NOT NULL
+);
+`;
+
+/**
+ * Fixes, by our own ids and hashes of our own rule text: when one was applied (its marker seen in a
+ * developer prompt) and when its rule was first seen loaded. The earliest sighting per project wins.
+ */
+const FIX_DDL = `
+CREATE TABLE IF NOT EXISTS fix_applied (
+  fix_id     TEXT NOT NULL,
+  project    TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  at         TEXT NOT NULL,
+  PRIMARY KEY (fix_id, project)
+);
+CREATE TABLE IF NOT EXISTS rule_loaded (
+  rule_hash  TEXT NOT NULL,
+  project    TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  at         TEXT NOT NULL,
+  PRIMARY KEY (rule_hash, project)
 );
 `;
 
@@ -193,6 +219,7 @@ ${SKIPPED_DDL}
 ${PART_DDL}
 ${DISMISSAL_DDL}
 ${LABEL_DDL}
+${FIX_DDL}
 `;
 
 /** Open the store, creating it if needed. WAL lets readers read during a write; busy_timeout waits rather than throws. */
@@ -240,11 +267,12 @@ export function openStore(archive: string): Db {
         db.exec(RUN_DDL);
       }
     }
-    // `gated` came later still: added in place, never a rebuild.
+    // Later columns are added in place, never a rebuild.
     const rcols = (db.prepare('PRAGMA table_info(run)').all() as { name: string }[]).map((c) => c.name);
-    if (rcols.length > 0 && !rcols.includes('gated')) {
+    for (const col of ['gated', 'calls', 'tokens_in', 'tokens_out', 'usd_micros']) {
+      if (rcols.length === 0 || rcols.includes(col)) continue;
       try {
-        db.exec('ALTER TABLE run ADD COLUMN gated INTEGER');
+        db.exec(`ALTER TABLE run ADD COLUMN ${col} INTEGER`);
       } catch {
         // Already there.
       }
@@ -262,6 +290,7 @@ export function openStore(archive: string): Db {
     db.exec(PART_DDL);
     db.exec(DISMISSAL_DDL);
     db.exec(LABEL_DDL);
+    db.exec(FIX_DDL);
 
     // `session` gained `packet_tokens` the same way.
     const scols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map(
@@ -326,8 +355,12 @@ export function transact<T>(db: Db, fn: () => T): T {
 /** Record what a model call cost. Deliberately outside the findings' transaction: we paid either way. */
 export function addSpend(
   db: Db,
-  delta: { calls?: number; tokensIn?: number; tokensOut?: number },
+  delta: { calls?: number; tokensIn?: number; tokensOut?: number; usd?: number },
 ): void {
+  // Calls recorded before dollars were: the dollar total starts here, and says so.
+  if (delta.usd !== undefined && readSpend(db).usdMicros === undefined && readSpend(db).calls > 0) {
+    db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)').run('usd_since', new Date().toISOString());
+  }
   const bump = db.prepare(
     `INSERT INTO spend(key, n) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET n = n + excluded.n`,
@@ -335,16 +368,81 @@ export function addSpend(
   if (delta.calls) bump.run('calls', delta.calls);
   if (delta.tokensIn) bump.run('tokens_in', delta.tokensIn);
   if (delta.tokensOut) bump.run('tokens_out', delta.tokensOut);
+  if (delta.usd !== undefined) bump.run('usd_micros', Math.round(delta.usd * 1e6));
 }
 
-export function readSpend(db: Db): { calls: number; tokensIn: number; tokensOut: number } {
+export type Spend = {
+  calls: number;
+  tokensIn: number;
+  tokensOut: number;
+  /** Absent when no call in the window reported dollars. */
+  usdMicros?: number;
+  /** Set when calls before this time were recorded without dollars. */
+  usdSince?: string;
+  /** For a window: runs before this time carry no figures, so the window starts here. */
+  since?: string;
+};
+
+export function readSpend(db: Db): Spend {
   const rows = db.prepare('SELECT key, n FROM spend').all();
   const by = new Map(rows.map((r) => [String(r['key']), Number(r['n'])]));
+  const since = db.prepare("SELECT value FROM meta WHERE key = 'usd_since'").get() as { value: string } | undefined;
+  const usd = by.get('usd_micros');
   return {
     calls: by.get('calls') ?? 0,
     tokensIn: by.get('tokens_in') ?? 0,
     tokensOut: by.get('tokens_out') ?? 0,
+    ...(usd === undefined ? {} : { usdMicros: usd }),
+    ...(since === undefined ? {} : { usdSince: since.value }),
   };
+}
+
+/** Judge spend from runs started at or after `iso`. */
+export function spendSince(db: Db, iso: string): Spend {
+  const r = db
+    .prepare(
+      `SELECT SUM(calls) calls, SUM(tokens_in) tin, SUM(tokens_out) tout, SUM(usd_micros) usd
+       FROM run WHERE kind = 'judge' AND started_at >= ?`,
+    )
+    .get(iso) as { calls: number | null; tin: number | null; tout: number | null; usd: number | null };
+  const usdSince = readSpend(db).usdSince;
+  // Runs from before the spend columns carry none: the window's figures start at the first that does.
+  const t = db
+    .prepare(
+      `SELECT (SELECT MIN(started_at) FROM run WHERE kind = 'judge' AND calls IS NOT NULL) first,
+              (SELECT MAX(started_at) FROM run WHERE kind = 'judge' AND calls IS NULL AND ended_at IS NOT NULL) lastBare`,
+    )
+    .get() as { first: string | null; lastBare: string | null };
+  const tracked = t.lastBare === null ? undefined : { value: t.first ?? new Date().toISOString() };
+  return {
+    calls: r.calls ?? 0,
+    tokensIn: r.tin ?? 0,
+    tokensOut: r.tout ?? 0,
+    ...(r.usd === null ? {} : { usdMicros: r.usd }),
+    ...(usdSince !== undefined && usdSince > iso ? { usdSince } : {}),
+    ...(tracked !== undefined && tracked.value > iso ? { since: tracked.value } : {}),
+  };
+}
+
+/** Tokens in and out the judge spent since `iso`: what a daily budget counts. */
+export function tokensSince(db: Db, iso: string): number {
+  const s = spendSince(db, iso);
+  return s.tokensIn + s.tokensOut;
+}
+
+/** When the automatic catch-up stops: sessions last written before this are read only on request. */
+export function readCatchUpFrom(db: Db): number | undefined {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'catch_up_from'").get() as { value: string } | undefined;
+  return row === undefined ? undefined : Number(row.value);
+}
+
+export function clearCatchUpFrom(db: Db): void {
+  db.prepare("DELETE FROM meta WHERE key = 'catch_up_from'").run();
+}
+
+/** Set once; a later call keeps the first value, so the catch-up happens only once. */
+export function writeCatchUpFrom(db: Db, mtimeMs: number): void {
+  db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)').run('catch_up_from', String(mtimeMs));
 }
 
 /** Advance how far a session has been analysed. `MAX`, so a resumed pass never moves it backwards. */
@@ -428,10 +526,16 @@ export function endRun(
   durationMs?: number,
   packetTokens?: number,
   gated?: number,
+  spent?: { calls: number; tokensIn: number; tokensOut: number; usd?: number },
 ): void {
   db.prepare(
-    'UPDATE run SET ended_at = ?, status = ?, duration_ms = ?, packet_tokens = ?, gated = ? WHERE id = ?',
-  ).run(new Date().toISOString(), status, durationMs ?? null, packetTokens ?? null, gated ?? null, id);
+    `UPDATE run SET ended_at = ?, status = ?, duration_ms = ?, packet_tokens = ?, gated = ?,
+       calls = ?, tokens_in = ?, tokens_out = ?, usd_micros = ? WHERE id = ?`,
+  ).run(
+    new Date().toISOString(), status, durationMs ?? null, packetTokens ?? null, gated ?? null,
+    spent?.calls ?? null, spent?.tokensIn ?? null, spent?.tokensOut ?? null,
+    spent?.usd === undefined ? null : Math.round(spent.usd * 1e6), id,
+  );
 }
 
 /** The pass in flight, if any. Bounded by `staleMs`: a killed process leaves its row open. */
@@ -582,6 +686,10 @@ export function putLabel(db: Db, r: LabelRow): void {
   ).run(r.key, r.dimension, r.verdict, r.at);
 }
 
+export function removeLabel(db: Db, key: string): void {
+  db.prepare('DELETE FROM label WHERE key = ?').run(key);
+}
+
 export function readLabels(db: Db): LabelRow[] {
   return (db.prepare('SELECT key, dimension, verdict, at FROM label ORDER BY at').all() as LabelRow[]).map((r) => ({ ...r }));
 }
@@ -646,4 +754,32 @@ export function withStore<T>(archive: string, fn: (db: Db) => T): T | undefined 
   } catch {
     return undefined;
   }
+}
+
+/** A fix seen applied, or its rule seen loaded: `key` is a fix id or a rule hash. */
+export type FixSighting = { key: string; project: string; sessionId: string; at: string };
+
+function putSightings(db: Db, table: 'fix_applied' | 'rule_loaded', col: 'fix_id' | 'rule_hash', rows: FixSighting[]): void {
+  const put = db.prepare(
+    `INSERT INTO ${table}(${col}, project, session_id, at) VALUES (?, ?, ?, ?) ` +
+      `ON CONFLICT(${col}, project) DO UPDATE SET session_id = excluded.session_id, at = excluded.at ` +
+      `WHERE excluded.at < ${table}.at`,
+  );
+  for (const r of rows) put.run(r.key, r.project, r.sessionId, r.at);
+}
+
+function readSightings(db: Db, table: 'fix_applied' | 'rule_loaded', col: 'fix_id' | 'rule_hash'): FixSighting[] {
+  return (db.prepare(`SELECT ${col} k, project, session_id, at FROM ${table}`).all() as { k: string; project: string; session_id: string; at: string }[])
+    .map((r) => ({ key: r.k, project: r.project, sessionId: r.session_id, at: r.at }));
+}
+
+export const putFixApplied = (db: Db, rows: FixSighting[]): void => putSightings(db, 'fix_applied', 'fix_id', rows);
+export const putRuleLoaded = (db: Db, rows: FixSighting[]): void => putSightings(db, 'rule_loaded', 'rule_hash', rows);
+export const readFixApplied = (db: Db): FixSighting[] => readSightings(db, 'fix_applied', 'fix_id');
+export const readRuleLoaded = (db: Db): FixSighting[] => readSightings(db, 'rule_loaded', 'rule_hash');
+
+/** Each session's project key and first timestamp, for counting before and after a fix. */
+export function sessionSpans(db: Db): Map<string, { project: string; firstTs?: string }> {
+  const rows = db.prepare('SELECT id, project, first_ts FROM session').all() as { id: string; project: string; first_ts: string | null }[];
+  return new Map(rows.map((r) => [r.id, { project: r.project, ...(r.first_ts !== null ? { firstTs: r.first_ts } : {}) }]));
 }

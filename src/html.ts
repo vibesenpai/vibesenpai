@@ -91,7 +91,6 @@ pre{background:var(--inset);border:1px solid var(--line);border-radius:4px;paddi
 margin:.3rem 0 .8rem;white-space:pre-wrap;word-break:break-word;font-size:.84rem}
 .pill{display:inline-block;border:1px solid var(--line);border-radius:3px;padding:0 .4rem;
 font:500 .68rem/1.6 var(--mono);color:var(--mute);text-transform:uppercase;letter-spacing:.05em}
-.by{color:var(--model)}
 .term{border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:.3rem 0 .8rem;background:var(--inset)}
 .term-bar{display:flex;align-items:center;gap:.6rem;padding:.35rem .5rem .35rem .75rem;background:var(--panel);border-bottom:1px solid var(--line)}
 .dots{display:flex;gap:.3rem}.dots i{width:.5rem;height:.5rem;border-radius:50%;background:var(--line)}
@@ -282,7 +281,7 @@ function recBlock(r: Recommendation | undefined): string {
 <div class="boxes">${boxes}</div>
 ${config}
 ${r.prompt === undefined ? '' : term('prompt · paste into your session', r.prompt, true)}
-${r.memory === undefined ? '' : term('CLAUDE.md · add to make it stick', r.memory)}
+${r.rule === undefined ? '' : term('a standing rule · to make it stick', r.rule)}
 ${r.prompt === undefined ? '' : `<p class="note">adopting this changes the sessions it is measuring, so this dimension will read as suppressed rather than improved until you drop it again.</p>`}
 </div>`;
 }
@@ -294,7 +293,6 @@ function findingsSection(d: ReportData, f: Facts): string {
     )} edits in ${esc(plural(d.standing.sessions, 'session'))}</p></div>`);
   }
 
-  // One list for both tiers; model findings stay marked "by a model".
   const blocks: { times: number; html: string }[] = [];
   const moments = (n: number, sessions: number, body: string): string =>
     `<details class="moments"><summary><span class="name">${esc(plural(n, 'moment'))}</span><span class="mute">${esc(
@@ -346,7 +344,7 @@ function findingsSection(d: ReportData, f: Facts): string {
       times: inst.length,
       html: `<details class="model"><summary><span class="name">${esc(dim)}</span><span class="mute">${esc(
         `${plural(inst.length, 'time')} · ${plural(sessions, 'session')}`,
-      )} · <span class="by">by a model</span></span><span class="end">${esc(plural(turns, 'turn'))} cited</span></summary><div>${moments(
+      )}</span><span class="end">${esc(plural(turns, 'turn'))} cited</span></summary><div>${moments(
         inst.length,
         sessions,
         inst.map((i) => judgedInstance(i.j, i.s)).join(''),
@@ -415,7 +413,7 @@ function sessionFindings(s: SessionView): string {
     }),
     ...s.judged.map(
       (j) =>
-        `<li><span class="name">${esc(j.dimension)}</span>${esc(alsoText(j.secondaryDimensions))} <span class="by m">by a model</span><br>${askedLine(
+        `<li><span class="name">${esc(j.dimension)}</span>${esc(alsoText(j.secondaryDimensions))}<br>${askedLine(
           j.asked,
           s,
         )}<br><span class="mute m">turns ${esc(j.turns.join(', '))}</span></li>`,
@@ -592,7 +590,7 @@ ${cacheSection(d)}
 ${sessionsSection(d)}
 ${coverageSection(d)}
 <footer>
-<p class="about"><b>About these numbers.</b> Findings marked <i>by a model</i> are an AI model’s reading of your sessions and can be wrong — check the quoted turn before acting on one. The rest come from the harness’s own refusals. Discarded-token figures are estimated from your transcripts and are lower bounds; cache figures are the harness’s own counts.</p>
+<p class="about"><b>About these numbers.</b> Most findings are an AI model’s reading of your sessions and can be wrong — check the quoted turn before acting on one. The rest come from the harness’s own refusals. Discarded-token figures are estimated from your transcripts and are lower bounds; cache figures are the harness’s own counts.</p>
 <span class="foot-mark">${MARK_SVG}</span><strong>agentsensei</strong> ·
 generated ${esc(localStamp(d.generatedAt))} ·
 preset ${esc(d.preset)}${d.muted.length > 0 ? ` · muted ${esc(d.muted.join(', '))}` : ''}

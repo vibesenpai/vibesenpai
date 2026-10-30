@@ -201,7 +201,7 @@ export function dismissalsFor(c: Candidate, reason: DismissReason, at: string): 
 const QUOTE_MAX = 72;
 const TURNS_MAX = 3;
 
-/** One finding as a pickable line. Judge lines always say "flagged by a model". */
+/** One finding as a pickable line. */
 export function candidateLines(c: Candidate, short: string, currentSessionId?: string): string[] {
   const name = c.dimension.replace(/_/g, ' ');
   const when =
@@ -215,7 +215,7 @@ export function candidateLines(c: Candidate, short: string, currentSessionId?: s
     // Enough to find the moment; the rest is in the report.
     const turns =
       t.length === 0 ? '' : ` · turns ${t.slice(0, TURNS_MAX).join(', ')}${t.length > TURNS_MAX ? ` +${t.length - TURNS_MAX}` : ''}`;
-    const head = `${short}  ${name} — flagged by a model · ${when}${turns}`;
+    const head = `${short}  ${name} · ${when}${turns}`;
     return c.quote === undefined ? [head] : [head, `${' '.repeat(short.length + 2)}"${clip(c.quote)}"`];
   }
   const count = c.sessions.length > 1 ? '' : ` · ${c.occurrences}×`;

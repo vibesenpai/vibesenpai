@@ -59,15 +59,16 @@ dimension. Same target, different tier, opposite outcome.
 
 [How the judge works →](/agentsensei/architecture/judge/)
 
-## They never blur
+## Two kinds of claim, one display
 
 | | rule tier | judge |
 |---|---|---|
 | reads | structure | conversation |
 | confidence | `certain` — the harness said so | a model's reading |
-| shown as | the finding | **flagged by a model** |
+| shown as | the finding | the finding |
 | costs | nothing | your quota, when you ask |
 
 A judge finding that cannot quote the packet it came from is discarded on the
-way out. The headline counts both tiers; nothing in the display implies they
-are the same kind of claim.
+way out. The headline counts both tiers, and the display does not say which tier a
+finding came from: that it was flagged is what matters. The method is kept in
+the data, and the report's footer says most findings are a model's reading.

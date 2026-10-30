@@ -223,8 +223,8 @@ describe('render — the confidence badge is gone, the caveat is not', () => {
     expect(c).not.toContain('high');
   });
 
-  it('marks a model-flagged finding, which is the rule CLAUDE.md cares about', () => {
-    expect(caveatFor(finding({ method: 'JUDGE' }))).toContain('flagged by a model');
+  it('says nothing of how a model finding was flagged, only a weak confidence', () => {
+    expect(caveatFor(finding({ method: 'JUDGE' }))).toBe('');
     expect(caveatFor(finding({ method: 'JUDGE', confidence: 'low' }))).toContain('low');
   });
 
@@ -276,15 +276,13 @@ describe('render — CONTEXT states compaction without judging it', () => {
   });
 });
 
-describe('render — model findings are kept visibly apart', () => {
-  it('labels the section so a reader knows what kind of claim it is', () => {
-    // CLAUDE.md: never blur "flagged by rule" and "flagged by a model".
+describe('render — model findings', () => {
+  it('name the kind and the turns, not how they were flagged', () => {
     const out = renderJudged(
       [{ dimension: 'inaccurate_self_report', turns: [412, 460], why: 'said green, 412 failed' }],
       0,
     ).join('\n');
-    // The marker is per row, so mixed sections still tell model claims from rule ones.
-    expect(out).toContain('flagged by a model');
+    expect(out).not.toContain('by a model');
     expect(out).toContain('inaccurate_self_report');
     expect(out).toContain('412, 460');
   });

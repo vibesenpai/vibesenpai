@@ -8,6 +8,7 @@ import { cmdInsights } from './cmd/insights.ts';
 import { cmdFix } from './cmd/fix.ts';
 import { cmdDismiss } from './cmd/dismiss.ts';
 import { cmdLabel } from './cmd/label.ts';
+import { cmdExcerpt } from './cmd/excerpt.ts';
 import { cmdJudge } from './cmd/judge.ts';
 import { cmdReport } from './cmd/report.ts';
 import type { Argv } from './cmd/common.ts';
@@ -46,6 +47,7 @@ Usage
   agentsensei fix               a recommendation, with its evidence
   agentsensei dismiss           set findings aside: --list, <id>… [--wrong], --all, --undo
   agentsensei label <id> <v>    mark a finding: mistake | suggestion | wrong (--list for all)
+  agentsensei excerpt <session> the conversation around --turns <a,b>, as JSON (--around n)
   agentsensei standing          what your history says
   agentsensei judge             the model pass: --status, --backlog, --enable, --disable
   agentsensei doctor            harnesses, paths, parser coverage
@@ -113,6 +115,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return cmdTick(a);
     case 'label':
       return cmdLabel(a);
+    case 'excerpt':
+      return cmdExcerpt(a);
     case undefined:
     case 'help':
       console.log(USAGE);
@@ -141,7 +145,9 @@ function invokedDirectly(): boolean {
 
 if (invokedDirectly()) {
   try {
-    process.exit(await main());
+    const code = await main();
+    // A pipe takes 64 KB at once; exiting before it drains cuts `report --json` short.
+    process.stdout.write('', () => process.exit(code));
   } catch (err) {
     // A bad flag is a user error, not a crash. No stack trace.
     console.error(err instanceof Error ? err.message : String(err));

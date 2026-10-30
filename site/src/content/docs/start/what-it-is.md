@@ -7,7 +7,7 @@ description: Find out why your agents failed you — and an honest account of wh
 turns where effort was wasted, and tells you what that cost in tokens.
 
 ```
-  11,000+ tokens discarded on 4 findings · 19 more flagged by a model
+  11,000+ tokens discarded on 4 findings · 19 more flagged
     18 sessions · 2,460 edits
 ```
 

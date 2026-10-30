@@ -168,15 +168,12 @@ function turnColumns(e: Event, subject: string): { what: string; detail: string 
   }
 }
 
-/**
- * The qualifier on a finding, or ''. A certain rule finding says nothing; anything weaker says so in words,
- * and a model finding always reads "flagged by a model".
- */
+/** The qualifier on a finding, or ''. Certain says nothing; anything weaker says so in words. */
 const MODEL_METHODS = new Set(['LEX', 'EMB', 'CLS', 'NLI', 'JUDGE']);
 
 export function caveatFor(f: Finding): string {
   if (MODEL_METHODS.has(f.method)) {
-    return f.confidence === 'certain' ? 'flagged by a model' : `flagged by a model · ${f.confidence}`;
+    return f.confidence === 'certain' || f.confidence === 'high' ? '' : `${f.confidence} confidence`;
   }
   switch (f.confidence) {
     case 'certain':
@@ -376,9 +373,8 @@ export function renderJudged(
 
   const out: string[] = [];
   for (const f of findings) {
-    // Per-row model marker, so a judge finding is never mistaken for a rule finding.
     out.push(
-      `${INDENT.repeat(2)}${bold(f.dimension)}${alsoText(f.secondaryDimensions)} ${dim('— flagged by a model')}  ` +
+      `${INDENT.repeat(2)}${bold(f.dimension)}${alsoText(f.secondaryDimensions)}  ` +
         `${dim(`turn${f.turns.length === 1 ? '' : 's'} ${f.turns.join(', ')}`)}`,
     );
     // Quote first: it is the evidence; the reasoning is a gloss.
@@ -445,11 +441,11 @@ export function leadSegments(f: LeadFacts): { figure?: string; rest: string } {
     };
   }
   const n = (c: number): string => `${c} finding${c === 1 ? '' : 's'}`;
-  const also = f.judgedCount > 0 ? ` · ${f.judgedCount} more flagged by a model` : '';
+  const also = f.judgedCount > 0 ? ` · ${f.judgedCount} more flagged` : '';
   if (f.wasted > 0) {
     return { figure: `${approx(f.wasted)} tokens`, rest: ` discarded on ${n(f.ruleCount)}${also}` };
   }
-  if (f.ruleCount === 0) return { figure: n(f.judgedCount), rest: ' flagged by a model' };
+  if (f.ruleCount === 0) return { figure: n(f.judgedCount), rest: ' flagged' };
   return { figure: n(f.total), rest: ` across ${f.editCount} edits` };
 }
 

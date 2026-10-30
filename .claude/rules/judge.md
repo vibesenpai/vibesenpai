@@ -19,12 +19,20 @@ model download, no telemetry.
   `test/spend-boundary.spec.ts` pins this.
 - **Redacted at construction, asserted before every call.** `redact(packet) === packet` or the send
   aborts (`wouldLeak`). About half of real sessions carry secret-class content.
-- **Batched, accounted in tokens.** ~26k tokens of invocation overhead per call dwarf a typical
-  session, so sessions share a call. Usage is recorded; never dollars.
+- **Batched, accounted in tokens and dollars.** ~26k tokens of invocation overhead per call dwarf a
+  typical session, so sessions share a call. Each call's tokens and Claude Code's own dollar figure
+  (`total_cost_usd`) are recorded in `spend` and on the `run` row. Dollars are shown as API prices:
+  on a subscription they are plan usage, not a bill.
+- **Limited when automatic** (`src/judge/limits.ts`). The Stop hook's pass gets `AGENTSENSEI_LIMITS=1`
+  and stops at `dailyTokens` (default 2M, per local day) and at a one-time catch-up of `catchUp`
+  (default 200) never-read past sessions, newest first; the cutoff is stored once in `meta`.
+  Explicit runs (`judge --backlog --apply`, `tick --judge`) and benchmarks are never limited.
+- **Disclosed before the first spend:** the one-time session-start notice states the figures and
+  the off switch (`/agentsensei:judge off`).
 - **The child is isolated.** `AGENTSENSEI_DISABLE=1` and a dedicated working directory that
   `discoverTranscripts` filters out, so the judge never reads its own sessions.
-- **A model finding never blurs into a rule finding.** `method: 'JUDGE'` renders as "flagged by a
-  model", and a finding that cannot quote the packet is discarded.
+- **A finding that cannot quote the packet is discarded.** `method: 'JUDGE'` is kept in the data; the
+  UI does not show how a finding was flagged (CLAUDE.md, "Precision over recall").
 - **Lookback** (`src/judge/lookback.ts`, on by default): a `misread_intent` or `constraint_violation`
   must cite where the expectation was set before the agent acted (an earlier prompt, a loaded
   instruction, or the developer's own reference to an earlier decision). The gate checks the quote

@@ -6,10 +6,7 @@ import type { Event } from '../src/types.ts';
 let seq = 0;
 const ev = (o: Partial<Event> & Pick<Event, 'turnType'>): Event =>
   ({ uuid: `u${++seq}`, sessionId: 's1', seq, ts: '2026-01-01T00:00:00.000Z', ...o }) as Event;
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { recommend, renderFix, memoryAllowed, MEMORY_WORD_BUDGET, compactionsFor } from '../src/fix.ts';
+import { applyPlan, compactionsFor, fixIdOf, fixIdsIn, fixMarker, recommend, renderFix } from '../src/fix.ts';
 import type { Standing } from '../src/standing.ts';
 
 const base = (over: Partial<Standing> = {}): Standing => ({
@@ -110,7 +107,7 @@ describe('fix — choosing what to recommend', () => {
     const r = recommend(base({ reasons: { 'not-read-first': 9 } }));
     expect(r?.kind).toBe('REPORT');
     expect(r?.prompt).toBeUndefined();
-    expect(r?.memory).toBeUndefined();
+    expect(r?.rule).toBeUndefined();
     expect(r?.because).toMatch(/already refuses/i);
   });
 });
@@ -165,10 +162,10 @@ describe('fix — what it renders', () => {
     expect(out.indexOf('measured')).toBeLessThan(out.indexOf('for this session'));
   });
 
-  it('offers both a session prompt and a CLAUDE.md line', () => {
+  it('offers both a session prompt and a standing rule', () => {
     const out = renderFix(recommend(base()), 'core');
     expect(out).toContain('for this session');
-    expect(out).toContain('CLAUDE.md');
+    expect(out).toContain('a standing rule');
   });
 
   it('warns that adopting it perturbs the measurement', () => {
@@ -199,23 +196,34 @@ describe('fix — what it renders', () => {
   });
 });
 
-describe('fix — the CLAUDE.md budget, which was not checked at all', () => {
-  it('offers a rule when there is room', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'as-fix-budget-'));
-    writeFileSync(join(dir, 'CLAUDE.md'), 'a short file.');
-    expect(memoryAllowed(dir)).toBe(true);
+describe('fix — what Apply would change', () => {
+  it('prefers a standing rule to a session prompt', () => {
+    const r = recommend(base({ reasons: { 'string-not-found': 4 } }));
+    expect(applyPlan(r!)).toMatchObject({ target: 'project-instructions', text: expect.stringMatching(/^- Re-read/) });
   });
 
-  it('refuses a rule once the file is past the measured ceiling', () => {
-    // Long CLAUDE.md files perform worse (docs/artifacts.md), so `fix` does not append on every run.
-    const dir = mkdtempSync(join(tmpdir(), 'as-fix-budget-'));
-    writeFileSync(join(dir, 'CLAUDE.md'), Array.from({ length: MEMORY_WORD_BUDGET + 50 }, () => 'word').join(' '));
-    expect(memoryAllowed(dir)).toBe(false);
+  it('gives every judged dimension with a mechanism a rule', () => {
+    for (const dimension of ['constraint_violation', 'overreach', 'inaccurate_self_report', 'misread_intent']) {
+      const r = recommend(undefined, [{ sessionId: 's', dimension, turns: [3], why: 'w', at: '2026-10-28T00:00:00Z' }] as never);
+      expect(applyPlan(r!)?.target, dimension).toBe('project-instructions');
+    }
   });
 
-  it('treats a missing CLAUDE.md as room, not as a refusal', () => {
-    // A project with no CLAUDE.md is the common case and must not be refused.
-    expect(memoryAllowed(mkdtempSync(join(tmpdir(), 'as-fix-none-')))).toBe(true);
+  it('has nothing to apply for a report', () => {
+    const r = recommend(base({ reasons: { 'not-read-first': 9 } }));
+    expect(applyPlan(r!)).toBeUndefined();
+  });
+
+  it('keeps a fix id when its wording changes', () => {
+    const r = recommend(base({ reasons: { 'string-not-found': 4 } }))!;
+    expect(applyPlan({ ...r, rule: '- reworded' })?.fixId).toBe(applyPlan(r)?.fixId);
+    expect(fixIdOf('project-instructions', 'edit_retry', 'stale-read')).not.toBe(applyPlan(r)?.fixId);
+  });
+
+  it('reads back the ids its own marker carries, and nothing else', () => {
+    expect(fixIdsIn(`add this line ${fixMarker(['a1b2c3', '0f9e8d'])}`)).toEqual(['a1b2c3', '0f9e8d']);
+    expect(fixIdsIn('agentsensei fix a1b2c3')).toBeUndefined();
+    expect(fixIdsIn('(agentsensei fix XYZ)')).toBeUndefined();
   });
 });
 

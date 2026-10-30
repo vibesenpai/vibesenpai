@@ -90,7 +90,8 @@ export function countDenominators(events: Event[]): Denominators {
     creditedByTool.some((t) => t === harnessPath || t.endsWith(`/${harnessPath}`));
 
   for (const e of sorted) {
-    if (e.turnType === 'user_prompt') d.turnCount++;
+    // A prompt that applies one of our fixes is ours, not a turn of the developer's work.
+    if (e.turnType === 'user_prompt' && e.fixApplied === undefined) d.turnCount++;
 
     if (e.tokens !== undefined && countOnce.has(e)) {
       d.tokens.input += e.tokens.input ?? 0;

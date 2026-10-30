@@ -38,6 +38,11 @@ export function human(n: number): string {
   return String(n);
 }
 
+/** `$1.87`, or `< $0.01` below a cent. From micro-dollars. */
+export function dollars(micros: number): string {
+  return micros < 10_000 ? '< $0.01' : `$${(micros / 1e6).toFixed(2)}`;
+}
+
 /** Compact elapsed time between two timestamps: `42m`, `1h35m`, `3d4h`. */
 export function durationOf(from: string | undefined, to: string | undefined): string | undefined {
   if (from === undefined || to === undefined) return undefined;

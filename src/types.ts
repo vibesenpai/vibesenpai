@@ -104,6 +104,9 @@ export type Event = {
    */
   devCommand?: { name: string; part: 'invocation' | 'instructions' };
 
+  /** Fix ids a developer prompt carries in agentsensei's marker: the moment those fixes were applied. */
+  fixApplied?: string[];
+
   /**
    * `message.usage`, verbatim. `cacheRead` re-counts the whole prefix per call, so ratios on it
    * are meaningless; `cacheCreation` is the real cost. See GRAVEYARD.md.

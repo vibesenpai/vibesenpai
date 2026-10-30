@@ -251,6 +251,14 @@ export async function runBatch(
   const packetTokens = estimateTokens(extractPacket);
   // Findings the lookback gate dropped; stays undefined when lookback did not run.
   let gated: number | undefined;
+  const spent = { calls: 0, tokensIn: 0, tokensOut: 0, usd: 0 };
+  const pay = (r: { inputTokens: number; outputTokens: number; usd: number }): void => {
+    spent.calls += 1;
+    spent.tokensIn += r.inputTokens;
+    spent.tokensOut += r.outputTokens;
+    spent.usd += r.usd;
+    recordSpend(archive, { calls: 1, tokensIn: r.inputTokens, tokensOut: r.outputTokens, usd: r.usd });
+  };
   try {
     if (wouldLeak(extractPacket)) return fail(redactionRefusal(ids));
     if (!holds()) return fenced();
@@ -262,11 +270,7 @@ export async function runBatch(
 
     // Spend is recorded now (we paid); the watermark moves only with the findings,
     // so a stage-B failure re-bills instead of losing episodes.
-    recordSpend(archive, {
-      calls: 1,
-      tokensIn: extracted.inputTokens,
-      tokensOut: extracted.outputTokens,
-    });
+    pay(extracted);
 
     const { episodes, dropped } = parseExtract(extracted.reply, batch.sessions);
     // An unreadable reply is a failure, not "nothing found": the watermark must not move past unread bytes.
@@ -292,11 +296,7 @@ export async function runBatch(
       // Nothing recorded, so the watermark stays and these bytes are judged again.
       return fail(`judge label call failed; ${episodes.length} episode(s) unlabelled`);
     }
-    recordSpend(archive, {
-      calls: 1,
-      tokensIn: labelled.inputTokens,
-      tokensOut: labelled.outputTokens,
-    });
+    pay(labelled);
 
     const labels = parseLabels(labelled.reply, episodes, lookbacks);
     const findings = labels.findings;
@@ -310,7 +310,7 @@ export async function runBatch(
     // A reply that crashes its parser lands here, after the spend: a paid failure.
     return fail(`judge pass failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
-    if (runId !== undefined) withStore(archive, (db) => endRun(db, runId, 'done', callMs, packetTokens, gated));
+    if (runId !== undefined) withStore(archive, (db) => endRun(db, runId, 'done', callMs, packetTokens, gated, spent));
   }
 }
 

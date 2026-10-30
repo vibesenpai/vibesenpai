@@ -71,12 +71,12 @@ describe('what can be dismissed', () => {
     db.close();
   });
 
-  it('marks every judge line as flagged by a model', () => {
+  it('never says how a finding was flagged', () => {
     const db = seed(archive());
     const out = renderCandidates(candidates(db, emptyDismissed()));
     const judgeLine = out.split('\n').find((l) => l.includes('misread intent'));
-    expect(judgeLine).toContain('flagged by a model');
-    expect(out.split('\n').find((l) => l.includes('edit retry'))).not.toContain('model');
+    expect(judgeLine).toBeDefined();
+    expect(out).not.toMatch(/by a model|by rule/);
     db.close();
   });
 });

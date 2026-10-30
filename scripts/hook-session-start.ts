@@ -12,21 +12,7 @@ import {
 } from '../src/judge/state.ts';
 import { resolveConfig } from '../src/config.ts';
 import { readStanding } from '../src/standing.ts';
-import { nextRung, reportBlock } from '../src/session-block.ts';
-
-/** Said once per machine: what it does, how to check its cost, and the off switch last. */
-const DISCLOSURE = [
-  '',
-  'agentsensei is on — it reads your finished sessions in the background',
-  'and shows where effort went to waste.',
-  '',
-  'It reads them with Claude on your own plan; /usage shows what it spent.',
-  '',
-  '  /agentsensei:insights   what it has found, here and across your history',
-  '  /agentsensei:report     every session, as a file',
-  '  /plugin disable agentsensei   stop it',
-  '',
-].join('\n');
+import { disclosure, nextRung, reportBlock } from '../src/session-block.ts';
 
 function main(): void {
   if (process.env['AGENTSENSEI_DISABLE'] === '1') return;
@@ -47,7 +33,7 @@ function main(): void {
 
   // One-time disclosure, prepended so it is one message. Only this hook can say it:
   // the `Stop` hook that spends prints nothing.
-  const notice = state.settings.enabled && !hasDisclosed(config.archive) ? DISCLOSURE : '';
+  const notice = state.settings.enabled && !hasDisclosed(config.archive) ? disclosure(state.settings) : '';
   if (notice !== '') markDisclosed(config.archive);
 
   const message = `${notice}${block}`;

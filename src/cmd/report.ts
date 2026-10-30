@@ -12,7 +12,12 @@ import { JUDGE_STALE_MS, jobsHealth } from '../jobs.ts';
 import { renderHtml } from '../html.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from '../range.ts';
 import { leadSegments } from '../render.ts';
-import { currentRun, measuredCallMs, openStore, readLabels, withStore } from '../store.ts';
+import { currentRun, measuredCallMs, openStore, readFixApplied, readLabels, readRuleLoaded, readSpend, sessionSpans, spendSince, withStore, type Spend } from '../store.ts';
+import { todayLeft, waitingOnRequest } from '../judge/limits.ts';
+import { applyPlan, type ApplyPlan } from '../fix.ts';
+import { fixStates, type FixState, type OutcomeSession } from '../outcome.ts';
+import { applyRequest, destination, projectKey } from '../harness/claude-code.ts';
+import type { JudgeState } from '../judge/state.ts';
 import { readDismissed } from '../dismiss.ts';
 import { nextRung } from '../session-block.ts';
 import { plural } from '../format.ts';
@@ -77,7 +82,8 @@ export async function cmdReport(a: Argv): Promise<number> {
     const sizes = sessionSizes(config.sources);
     const w = pendingWork(judgeState, sizes);
     const labels = Object.fromEntries((withStore(config.archive, readLabels) ?? []).map((l) => [l.key, l.verdict]));
-    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels };
+    const fixes = fixesFor(data, judgeState, config.archive, projectKey(process.cwd()));
+    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), dismissed: judgeState.dismissed ?? 0 };
     process.stdout.write(`${JSON.stringify(out)}\n`);
     return 0;
   }
@@ -160,7 +166,7 @@ export async function cmdReport(a: Argv): Promise<number> {
       for (const j of s.judged) byDimension.set(j.dimension, (byDimension.get(j.dimension) ?? 0) + 1);
     }
     if (byDimension.size > 0) {
-      console.log('  flagged by a model');
+      console.log('  also flagged');
       for (const [dim, n] of [...byDimension].sort((a, b) => b[1] - a[1])) {
         console.log(`    ${dim.padEnd(w)}  ${n} finding(s)`);
       }
@@ -267,4 +273,59 @@ export function writeHtmlReport(
   console.log(`  ${dim(nextRung('report'))}`);
   console.log('');
   return 0;
+}
+
+/** Every fix the pane can offer in this project, each with its request text and whether it worked. */
+function fixesFor(data: ReportData, judge: JudgeState, archive: string, project: string): (FixState & { destination: string; request: string })[] {
+  const plans = Object.values(data.recommendations).map(applyPlan).filter((p): p is ApplyPlan => p !== undefined);
+  const stored = withStore(archive, (db) => ({ applied: readFixApplied(db), loaded: readRuleLoaded(db), spans: sessionSpans(db) }));
+  const spans = stored?.spans ?? new Map<string, { project: string; firstTs?: string }>();
+  const sessions: OutcomeSession[] = data.sessions.map((s) => {
+    const found: OutcomeSession['found'] = {};
+    const add = (dim: string, times: number, turn: number | undefined): void => {
+      const f = (found[dim] ??= { times: 0 });
+      f.times += times;
+      if (f.turn === undefined && turn !== undefined && Number.isFinite(turn)) f.turn = turn;
+    };
+    for (const f of s.findings) add(f.dimension, f.occurrences, Number(f.evidence[0]?.turn));
+    for (const j of s.judged) add(j.dimension, 1, j.turns[0]);
+    const span = spans.get(s.sessionId);
+    const at = span?.firstTs ?? s.firstTs;
+    return { id: s.sessionId, project: span?.project ?? '', ...(at !== undefined ? { at } : {}), judged: (judge.ledger[s.sessionId] ?? 0) > 0, found };
+  });
+  const byModel = (dim: string): boolean => !data.standing.dimensions.some((d) => d.dimension === dim);
+  return fixStates(plans, stored?.applied ?? [], stored?.loaded ?? [], sessions, project, byModel)
+    .map((f) => ({ ...f, destination: destination(f), request: applyRequest([f]) }));
+}
+
+/** What the judge spent, and the limits on what it may spend next, for the pane's Health tab. */
+function spendFor(
+  state: JudgeState,
+  archive: string,
+  sizes: { id: string; sizeBytes: number; mtimeMs: number }[],
+): {
+  allTime?: Spend;
+  last7d?: Spend;
+  today?: { tokens: number; limit: number };
+  older: number;
+  catchUp: number;
+  enabled: boolean;
+  billing: 'api' | 'unknown';
+} {
+  const week = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const left = todayLeft(archive, state.settings.dailyTokens);
+  const allTime = withStore(archive, readSpend);
+  const last7d = withStore(archive, (db) => spendSince(db, week));
+  // Set only for API or cloud billing; their absence proves nothing, so it stays unknown.
+  const env = process.env;
+  const api = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX'].some((k) => (env[k] ?? '') !== '');
+  return {
+    ...(allTime === undefined ? {} : { allTime }),
+    ...(last7d === undefined ? {} : { last7d }),
+    ...(left === undefined ? {} : { today: { tokens: Math.max(state.settings.dailyTokens - left, 0), limit: state.settings.dailyTokens } }),
+    older: waitingOnRequest(archive, state, sizes),
+    catchUp: state.settings.catchUp,
+    enabled: state.settings.enabled,
+    billing: api ? 'api' : 'unknown',
+  };
 }

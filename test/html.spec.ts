@@ -248,11 +248,10 @@ describe('the report can see the model tier', () => {
     expect(html).toContain('DO NOT write or edit any files yet');
   });
 
-  it('marks the tier rather than letting it pass as a certain finding', () => {
-    // A model finding is labelled as one beside its counts, so the tiers never blur.
+  it('shows a model finding without saying how it was flagged', () => {
     const html = renderHtml(data({ sessions: [session({ judged: [judged()] })] }));
     expect(html).toContain('<details class="model">');
-    expect(html).toMatch(/<details class="model"><summary>[\s\S]*?<span class="by">by a model<\/span>/);
+    expect(html).not.toMatch(/<span class="by[^"]*">by a model/);
   });
 
   it('clamps the model prose to a budget, at a sentence end', () => {
@@ -374,14 +373,14 @@ describe('the drill-down', () => {
       data({
         sessions: [session({ findings: [finding()] as never })],
         recommendations: {
-          edit_retry: { kind: 'PROMPT', dimension: 'edit_retry', evidence: 'e', because: 'b', prompt: 'read <first>', memory: '- read first' },
+          edit_retry: { kind: 'PROMPT', dimension: 'edit_retry', evidence: 'e', because: 'b', prompt: 'read <first>', rule: '- read first' },
         } as never,
       }),
     );
     expect(html).toContain('<span class="term-lbl">prompt · paste into your session</span><button type="button" class="copy" hidden>copy</button>');
     // The button is hidden until the script reveals it; with no script, the text still stands.
     expect(html).toContain('<span class="glyph" aria-hidden="true">❯</span><code>read &lt;first&gt;</code>');
-    expect(html).toContain('<span class="term-lbl">CLAUDE.md · add to make it stick</span>');
+    expect(html).toContain('<span class="term-lbl">a standing rule · to make it stick</span>');
     expect(html).toContain('<code>- read first</code>');
     expect(html).not.toContain('paste or adopt');
   });
@@ -410,10 +409,10 @@ describe('the drill-down', () => {
     expect(block).toContain('1 moment');
   });
 
-  it('says which numbers a model produced, at the foot of the page', () => {
+  it('says once, at the foot of the page, that most findings are a model\'s reading', () => {
     const foot = renderHtml(data()).split('<footer>')[1] ?? '';
     expect(foot).toContain('About these numbers.');
-    expect(foot).toContain('<i>by a model</i>');
+    expect(foot).toContain('an AI model’s reading');
     expect(foot).toContain('can be wrong');
     expect(foot).toContain('lower bounds');
   });

@@ -37,6 +37,10 @@ type JudgeSettings = {
   concurrency: number;
   /** Require misreads and violations to cite an earlier source (src/judge/lookback.ts). */
   lookback: boolean;
+  /** Tokens (in + out) the automatic pass may spend per local day. Explicit runs ignore it. */
+  dailyTokens: number;
+  /** Never-read past sessions the automatic pass catches up on, newest first, once. */
+  catchUp: number;
 };
 
 export const DEFAULT_SETTINGS: JudgeSettings = {
@@ -50,6 +54,9 @@ export const DEFAULT_SETTINGS: JudgeSettings = {
   concurrency: 3,
   // A misread or violation must cite an earlier source; a suggestion is not a mistake. See src/judge/lookback.ts.
   lookback: true,
+  // About 33 sessions a day at the measured ~60k each. See src/judge/limits.ts.
+  dailyTokens: 2_000_000,
+  catchUp: 200,
 };
 
 /** A stored judge finding: what the model returned, plus when, and its occurrence id once read back. */
@@ -68,7 +75,7 @@ export type JudgeState = {
   findings: JudgedFinding[];
   /** Findings hidden by a dismissal, counted so a surface can say so. */
   dismissed?: number;
-  /** Cumulative judge spend, in tokens, never dollars. */
+  /** Cumulative judge spend, in tokens. Dollars live in the store (`readSpend`). */
   usage: { calls: number; inputTokens: number; outputTokens: number };
   /** Set when the store could not be read, so a surface does not present zeros as fact. */
   storeUnreadable?: boolean;
@@ -287,7 +294,7 @@ export function recordPass(
 /** Record what a call cost, outside any transaction, since the spend happened regardless. */
 export function recordSpend(
   archive: string,
-  delta: { calls?: number; tokensIn?: number; tokensOut?: number },
+  delta: { calls?: number; tokensIn?: number; tokensOut?: number; usd?: number },
 ): void {
   let db: Db | undefined;
   try {

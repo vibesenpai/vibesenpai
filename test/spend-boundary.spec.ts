@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { DEFAULT_SETTINGS } from '../src/judge/state.ts';
+import { disclosure } from '../src/session-block.ts';
 
 /** Source with comments stripped, so the guard reads code, not prose. */
 function code(path: string): string {
@@ -19,7 +20,8 @@ const cliCode = (): string =>
 
 describe('the Stop hook is the producer', () => {
   it('runs the supervisor with the judge included; session start never does', () => {
-    expect(code('scripts/hook-stop.ts')).toMatch(/superviseAll\(.*\{ judge: true \}/);
+    // And only the Stop hook's pass is held to the spend limits.
+    expect(code('scripts/hook-stop.ts')).toMatch(/superviseAll\(.*\{ judge: true, limits: true \}/);
     expect(code('scripts/hook-session-start.ts')).toMatch(/superviseAll\(.*\{ judge: false \}/);
   });
 
@@ -32,6 +34,25 @@ describe('the Stop hook is the producer', () => {
 
   it('`tick` leaves the judge out unless asked', () => {
     expect(cliCode()).toMatch(/superviseAll\(config, \{ judge: a\.flags\['judge'\] === true \}\)/);
+  });
+});
+
+describe('limits hold the automatic pass, never our own runs', () => {
+  it('the pass reads them from the environment the Stop hook set', () => {
+    expect(code('scripts/judge.ts')).toMatch(/drain\(ctx\.holds, limited\(\)\)/);
+    expect(code('src/jobs.ts')).toMatch(/limits \? \{ \.\.\.env, \[LIMITS_ENV\]: '1' \} : env/);
+  });
+
+  it('--backlog and tick start it unlimited', () => {
+    const cli = cliCode();
+    expect(cli).toMatch(/jobsFor\(config, \{ judge: true \}\)/);
+    expect(cli).not.toMatch(/limits: true/);
+  });
+
+  it('benchmarks call the model directly, outside the limited drain', () => {
+    for (const f of ['scripts/gold-score.ts', 'scripts/lookback-eval.ts', 'scripts/judge-control.ts']) {
+      expect(code(f), f).not.toMatch(/LIMITS_ENV|limited\(/);
+    }
   });
 });
 
@@ -93,21 +114,29 @@ describe('the first spend is disclosed once', () => {
   // The `Stop` hook spends but prints nothing; `systemMessage` at session start reaches the user.
   const hook = code('scripts/hook-session-start.ts');
 
-  it('says what it does before what it costs', () => {
-    expect(hook).toMatch(/reads your finished sessions/);
-    expect(hook).toMatch(/where effort went to waste/);
+  const text = disclosure({ dailyTokens: 2_000_000, catchUp: 200 }, {});
+
+  it('says what it does, with what, and that nothing is spent yet', () => {
+    expect(text).toMatch(/reads your sessions in the background/);
+    expect(text).toMatch(/Claude Haiku on your plan or API key/);
+    expect(text).toMatch(/Nothing has been spent yet/);
+    expect(hook).toMatch(/disclosure\(state\.settings\)/);
   });
 
-  it('makes the cost checkable instead of asserting a figure', () => {
-    // `/usage` attributes spend by plugin, so the user can check the real number.
-    expect(hook).toMatch(/on your own plan/);
-    expect(hook).toMatch(/\/usage/);
-    expect(hook, 'no uncalibratable token figure').not.toMatch(/58k/);
+  it('states the figures and both limits', () => {
+    expect(text).toMatch(/about 60k tokens a session/);
+    expect(text).toMatch(/at most 2\.0M tokens a day/);
+    expect(text).toMatch(/up to 200 recent past sessions/);
   });
 
-  it('offers a way in, not just a way out', () => {
-    expect(hook).toMatch(/\/agentsensei:insights/);
-    expect(hook).toMatch(/plugin disable agentsensei/);
+  it('names API billing only when the environment says so', () => {
+    expect(disclosure({ dailyTokens: 1, catchUp: 1 }, { ANTHROPIC_API_KEY: 'x' })).toMatch(/Claude Haiku on your API key/);
+  });
+
+  it('offers a way in and both ways out', () => {
+    expect(text).toMatch(/\/agentsensei:insights/);
+    expect(text).toMatch(/\/agentsensei:judge off/);
+    expect(text).toMatch(/plugin disable agentsensei/);
   });
 
   it('goes out through systemMessage, not the model channel', () => {

@@ -14,8 +14,11 @@ import {
 import { clean, STANDING_DEADLINE_MS } from '../src/jobs.ts';
 import { runJob, type Outcome } from '../src/supervise/index.ts';
 import {
-  openStore, putOccurrences, putSessionCost, transact, type Db, type SessionCostRow,
+  openStore, putFixApplied, putOccurrences, putRuleLoaded, putSessionCost, transact,
+  type Db, type FixSighting, type SessionCostRow,
 } from '../src/store.ts';
+import { knownRules } from '../src/fix.ts';
+import { sightingsIn } from '../src/outcome.ts';
 import { withFullText } from '../src/parsers/claude-code.ts';
 import { renderExtract } from '../src/judge/prompt.ts';
 import { buildSession, estimateTokens } from '../src/judge/packet.ts';
@@ -33,16 +36,23 @@ async function main(): Promise<Outcome> {
   {
     const sessions: SessionInput[] = [];
     const costs: SessionCostRow[] = [];
+    const applied: FixSighting[] = [];
+    const loaded: FixSighting[] = [];
+    const rules = knownRules();
     let unreadable = 0;
     for (const f of discoverTranscripts(config.sources)) {
       try {
         const id = basename(f, '.jsonl');
         const text = readFileSync(f, 'utf8');
         // One parse serves both the detectors and the judge's packet size.
-        const { result: parsed, fullText } = withFullText(() => parse(f, text, id));
+        const { result: parsed, fullText, instructions } = withFullText(() => parse(f, text, id));
         if (parsed.events.length === 0) continue;
         const project = projectOf(f);
         sessions.push({ sessionId: id, project, events: parsed.events });
+        // Ids and hashes of our own rule text only; the loaded instructions are never stored.
+        const seen = sightingsIn(id, project, parsed.events, instructions, rules);
+        applied.push(...seen.applied);
+        loaded.push(...seen.loaded);
 
         // What the judge will have to read, measured now so the queue needs no estimate.
         try {
@@ -83,6 +93,21 @@ async function main(): Promise<Outcome> {
         transact(db, () => putSessionCost(db as Db, costs));
       } catch {
         // Principle Zero: the rollup is already written.
+      } finally {
+        db?.close();
+      }
+    }
+
+    if (applied.length + loaded.length > 0) {
+      let db: Db | undefined;
+      try {
+        db = openStore(config.archive);
+        transact(db, () => {
+          putFixApplied(db as Db, applied);
+          putRuleLoaded(db as Db, loaded);
+        });
+      } catch {
+        // Principle Zero: an unrecorded fix is recorded on the next pass.
       } finally {
         db?.close();
       }

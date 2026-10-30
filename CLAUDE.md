@@ -4,6 +4,8 @@ Read [DECISIONS.md](DECISIONS.md) before proposing an architectural change: most
 reached by discarding a more obvious answer, and the reasoning is linked from each one.
 Area-specific rules load from `.claude/rules/` when you touch those files.
 
+- Rules learned from your own sessions: .claude/rules/agentsensei.md
+
 ## The thesis, which breaks ties in design arguments
 
 **A sensei teaches the developer. It does not drive the agent, and it does not hand out scores.**
@@ -69,8 +71,8 @@ pipeline's exit status belongs to `tail`), downgrade confidence or say nothing; 
 
 A false flag destroys trust permanently.
 
-- Every finding carries its **method** and **confidence**; the UI never blurs "flagged by rule" and
-  "flagged by a model".
+- Every finding carries its **method** and **confidence** in the data. The UI does not show how a
+  finding was flagged: that it was flagged is what matters to the user (decided 2026-10-28).
 - Thresholds are tuned to miss rather than over-fire. Ambient surfacing requires `certain` or `high`.
 - An unrecognised harness reason reads as "reason unknown", never as the nearest familiar one.
 - No percentages on small samples: show `3 → 1`, not "+50%".

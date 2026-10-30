@@ -1,10 +1,11 @@
 /**
  * `fix`: picks at most one recommendation (the "something applicable" output) and renders it.
- * Returns text only; nothing is applied. Artifact kinds and their evidence: docs/artifacts.md.
+ * Nothing is applied here: `applyPlan` describes the change, and the agent makes it on the developer's
+ * yes. Artifact kinds and their evidence: docs/artifacts.md.
  */
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+export { fixIdsIn, fixMarker } from './fix-marker.ts';
 import type { Event } from './types.ts';
 import type { Standing } from './standing.ts';
 import type { JudgedFinding } from './judge/state.ts';
@@ -34,8 +35,10 @@ export type Recommendation = {
   evidence: string;
   /** Text to hand the agent for this session. Absent on a `REPORT`. */
   prompt?: string;
-  /** A `CLAUDE.md` line; omitted when the file is over budget (see `memoryAllowed`). */
-  memory?: string;
+  /** A standing instruction line, for the project's rules file. */
+  rule?: string;
+  /** What the artifact is for (a harness reason or a dimension): the fix's identity, not its wording. */
+  key?: string;
   /** Hook or settings fragment for GUARD/VERIFY/CONFIG. Printed, never written. */
   config?: { what: string; snippet: string; costs: string; helps: string };
   /** An existing external pattern that solves this. */
@@ -51,31 +54,31 @@ export type Recommendation = {
 };
 
 /** Fix per harness reason (not per dimension). A reason absent here has no artifact. */
-const ARTIFACTS: Record<string, { prompt: string; memory: string }> = {
+const ARTIFACTS: Record<string, { prompt: string; rule: string }> = {
   'not-read-first': {
     prompt:
       'For the rest of this session: read a file before editing it. ' +
       'Do not issue an Edit or Write against a path you have not read in this session.',
-    memory: '- Read a file before editing it; never edit a path unread this session.',
+    rule: '- Read a file before editing it; never edit a path unread this session.',
   },
   'string-not-found': {
     prompt:
       'For the rest of this session: before editing, re-read the exact region you are about to ' +
       'change if anything may have altered it since you last read it — a linter, a formatter, ' +
       'another tool, or your own earlier edit.',
-    memory: '- Re-read right before editing if anything may have changed the file.',
+    rule: '- Re-read right before editing if anything may have changed the file.',
   },
   'stale-read': {
     prompt:
       'For the rest of this session: when an edit is refused as stale, re-read the file before ' +
       'retrying rather than reissuing the same edit.',
-    memory: '- After a stale-read refusal, re-read before retrying the edit.',
+    rule: '- After a stale-read refusal, re-read before retrying the edit.',
   },
   'ambiguous-target': {
     prompt:
       'For the rest of this session: when replacing text that appears more than once, quote ' +
       'enough surrounding context to make the match unique rather than retrying the short form.',
-    memory: '- Quote enough context to make an edit target unique.',
+    rule: '- Quote enough context to make an edit target unique.',
   },
 };
 
@@ -107,6 +110,7 @@ export type Compactions = Map<string, CompactionContext>;
 type DimensionFix = {
   kind: ArtifactKind;
   prompt?: string;
+  rule?: string;
   config?: { what: string; snippet: string; costs: string; helps: string };
   external?: { what: string; where: string };
   promptHelps?: string;
@@ -129,6 +133,7 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
       'For the rest of this session, before any edit or command: check it ' +
       'against every constraint stated earlier in this conversation, and say ' +
       'which one you checked against.',
+    rule: '- Before any edit or command, check it against every constraint stated earlier in the conversation, and name the one you checked.',
     promptHelps:
       'Naming the constraint out loud is what makes a slip visible to you ' +
       'while there is still time to stop it.',
@@ -151,6 +156,7 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
     prompt:
       'For the rest of this session: do only what was asked. If you think ' +
       'something adjacent needs doing, say so and wait rather than doing it.',
+    rule: '- Do only what was asked. If something adjacent needs doing, say so and wait.',
     promptHelps:
       'Turns a silent extra change into a sentence you can say no to.',
     because:
@@ -176,6 +182,7 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
     prompt:
       'For the rest of this session: do not report work as done or passing ' +
       'unless a command in this session shows it. Quote the output.',
+    rule: '- Never report work as done or passing unless a command in this session shows it; quote the output.',
     promptHelps:
       'A quoted command output is something you can check in a second; ' +
       '"tests pass" is something you have to take on trust.',
@@ -199,6 +206,7 @@ const BY_DIMENSION: Record<string, DimensionFix> = {
     prompt:
       'For the rest of this session: before acting on anything ambiguous, ' +
       'state the reading you are acting on in one line and wait.',
+    rule: '- Before acting on anything ambiguous, state the reading you are acting on in one line and wait.',
     promptHelps:
       'The same check as plan mode, without changing any settings — it just ' +
       'relies on the model remembering, where plan mode does not.',
@@ -277,7 +285,9 @@ export function recommend(
         (first.quote !== undefined && first.quote !== '' ? `\n             "${first.quote.slice(0, QUOTE_MAX)}"` : ''),
       because: overlay?.because ?? fix.because,
       ...(first.why === undefined || first.why === '' ? {} : { happened: first.why }),
+      key: dimension,
       ...(fix.prompt !== undefined ? { prompt: fix.prompt } : {}),
+      ...(fix.rule !== undefined ? { rule: fix.rule } : {}),
       ...(fix.promptHelps !== undefined ? { promptHelps: fix.promptHelps } : {}),
       ...(overlay?.config !== undefined
         ? { config: overlay.config }
@@ -369,7 +379,7 @@ export function recommend(
     };
   }
 
-  const artifact = ARTIFACTS[reason] as { prompt: string; memory: string };
+  const artifact = ARTIFACTS[reason] as { prompt: string; rule: string };
   // `?.`: `readStanding` casts without validating, so older files lack this field.
   const cost = s.wastedTokens?.[reason];
   const where =
@@ -383,8 +393,9 @@ export function recommend(
     evidence:
       `${plural(target.occurrences, 'edit')} rejected and retried across ${sessions}` +
       `${where} — ${n} because ${reasonLabel(reason)}`,
+    key: reason,
     prompt: artifact.prompt,
-    ...(memoryAllowed() ? { memory: artifact.memory } : {}),
+    rule: artifact.rule,
     because: `${reasonLabel(reason)} is the most common reason, at ${n} of ${target.occurrences}.`,
     ...(cost !== undefined && cost.written + cost.received > 0 ? { cost } : {}),
   };
@@ -419,19 +430,31 @@ export function compactionsFor(
 /** Quote length shown by `:fix`, matched to the HTML report. */
 export const QUOTE_MAX = 200;
 
-export const MEMORY_WORD_BUDGET = 500;
+/** Where a fix lands: harness-neutral. Each harness's adapter names the file. */
+export type ApplyTarget = 'session' | 'project-instructions' | 'project-hooks';
+
+export type ApplyPlan = { fixId: string; dimension: string; target: ApplyTarget; text: string };
 
 /**
- * Is there room in `CLAUDE.md` for another line? Word ceilings: docs/artifacts.md.
- * Absent or unreadable counts as room.
+ * The change one recommendation makes, or undefined when there is nothing to apply. A standing rule
+ * beats a session prompt. Hooks get no plan until each snippet is bounded (plan: apply-fixes, step 5).
  */
-export function memoryAllowed(cwd: string = process.cwd()): boolean {
-  try {
-    const words = readFileSync(join(cwd, 'CLAUDE.md'), 'utf8').split(/\s+/).filter(Boolean).length;
-    return words < MEMORY_WORD_BUDGET;
-  } catch {
-    return true;
-  }
+export function applyPlan(r: Recommendation): ApplyPlan | undefined {
+  const pick: [ApplyTarget, string] | undefined =
+    r.rule !== undefined ? ['project-instructions', r.rule] : r.prompt !== undefined ? ['session', r.prompt] : undefined;
+  if (pick === undefined) return undefined;
+  const [target, text] = pick;
+  return { fixId: fixIdOf(target, r.dimension, r.key ?? r.dimension), dimension: r.dimension, target, text };
+}
+
+/** Every standing rule a fix can add, for spotting one loaded in a later session. */
+export function knownRules(): string[] {
+  return [...Object.values(ARTIFACTS).map((a) => a.rule), ...Object.values(BY_DIMENSION).flatMap((d) => (d.rule === undefined ? [] : [d.rule]))];
+}
+
+/** Six hex characters from what the fix is for, never its wording, so a reworded fix keeps its history. */
+export function fixIdOf(target: ApplyTarget, dimension: string, key: string): string {
+  return createHash('sha256').update(`${target}:${dimension}:${key}`).digest('hex').slice(0, 6);
 }
 
 /** The recommendation, rendered: evidence first, then what to do. */
@@ -504,21 +527,9 @@ export function renderFix(
       lines.push('');
     }
   }
-  if (r.memory !== undefined) {
-    lines.push(`    ${cyan('to make it stick, add to CLAUDE.md')}`, '');
-    lines.push(`      ${r.memory}`, '');
-  } else if (r.prompt !== undefined && !memoryAllowed()) {
-    // Say why there is no rule, rather than silently omitting it.
-    for (const l of wrap(
-      `Not suggesting a CLAUDE.md line — yours is already over ${MEMORY_WORD_BUDGET} words. ` +
-        'Past that, extra rules tend to get skipped, and the file itself takes up room ' +
-        'the agent could use for your actual work. Removing a stale rule helps more than ' +
-        'adding another.',
-      60,
-    )) {
-      lines.push(`      ${dim(l)}`);
-    }
-    lines.push('');
+  if (r.rule !== undefined) {
+    lines.push(`    ${cyan('to make it stick, a standing rule')}`, '');
+    lines.push(`      ${r.rule}`, '');
   }
   if (r.kind === 'REPORT') {
     for (const l of wrap(r.because, 60)) lines.push(`      ${l}`);

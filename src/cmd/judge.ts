@@ -12,7 +12,9 @@ import type { Config } from '../config.ts';
 import { renderExtract } from '../judge/prompt.ts';
 import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS } from '../judge/packet.ts';
 import { parseTranscript, withFullText } from '../parsers/claude-code.ts';
-import { duration, plural } from '../format.ts';
+import { dollars, duration, human, plural } from '../format.ts';
+import { resetCatchUp, todayLeft, waitingOnRequest } from '../judge/limits.ts';
+import { readSpend, withStore } from '../store.ts';
 import { type Argv, configFromFlags } from './common.ts';
 
 /** Start the judge now through the supervisor, as the Stop hook would. False if a pass already holds it. */
@@ -61,18 +63,27 @@ export function cmdJudge(a: Argv): number {
       console.log(
         `  ${dim(
           state.settings.enabled
-            ? 'read in the background, all of it, from when a turn ends.'
+            ? 'read in the background from when a turn ends, within the daily limit.'
             : 'disabled — nothing will be read or sent.',
         )}`,
       );
     }
+    const { dailyTokens } = state.settings;
+    const left = todayLeft(config.archive, dailyTokens);
+    console.log('');
+    if (left !== undefined) {
+      console.log(`  today      ${human(Math.max(dailyTokens - left, 0))} of ${human(dailyTokens)} tokens${left <= 0 ? ' · budget reached, continues tomorrow' : ''}`);
+    }
+    const waiting = waitingOnRequest(config.archive, state, sessionSizes(config.sources));
+    if (waiting > 0) console.log(`  older      ${plural(waiting, 'session')} not read · --backlog reads them`);
     if (state.usage.calls > 0) {
-      console.log('');
+      const spend = withStore(config.archive, readSpend);
+      const usd = spend?.usdMicros === undefined ? '' : ` · ${dollars(spend.usdMicros)}`;
       console.log(
-        `  spent      ${state.usage.calls} call(s) · ${state.usage.inputTokens.toLocaleString()} in · ` +
-          `${state.usage.outputTokens.toLocaleString()} out`,
+        `  spent      ${state.usage.calls} call(s) · ${human(state.usage.inputTokens)} in · ` +
+          `${human(state.usage.outputTokens)} out${usd}`,
       );
-      console.log(`  ${dim('tokens, not dollars — a price depends on your plan and tier.')}`);
+      if (usd !== '') console.log(`  ${dim("dollars are Claude Code's own figure at API prices; on a subscription it is plan usage, not a bill.")}`);
     }
     return 0;
   }
@@ -116,6 +127,29 @@ export function cmdJudge(a: Argv): number {
     return 0;
   }
 
+  // The automatic pass's limits (src/judge/limits.ts). Explicit runs, like --backlog, ignore them.
+  for (const [flag, key, what] of [
+    ['daily-tokens', 'dailyTokens', 'tokens a day'],
+    ['catch-up', 'catchUp', 'past sessions to catch up on'],
+  ] as const) {
+    const v = f[flag];
+    if (v === undefined) continue;
+    const n = typeof v === 'string' ? Number(v) : NaN;
+    if (!Number.isInteger(n) || n < 0) {
+      console.log(`--${flag} takes a whole number`);
+      return 1;
+    }
+    if (f['apply'] !== true) {
+      console.log(`would set ${what} to ${n.toLocaleString()}. re-run with --apply.`);
+      return 0;
+    }
+    writeSettings(config.archive, { ...state.settings, [key]: n });
+    // A new catch-up size is measured afresh from today's unread sessions.
+    if (key === 'catchUp') resetCatchUp(config.archive);
+    console.log(`${what}: ${n.toLocaleString()}.`);
+    return 0;
+  }
+
   // Priced from a real packet, not an average.
   const sessions = [];
   for (const source of discoverTranscripts(config.sources).slice(0, 5)) {
@@ -153,9 +187,7 @@ export function cmdJudge(a: Argv): number {
         `${state.usage.outputTokens.toLocaleString()} out`,
     );
   }
-  console.log('');
-  console.log('  Tokens, not money: what a token costs depends on your plan, your');
-  console.log('  tier and the model, and on a subscription it is notional.');
+  console.log(`  limits   ${human(state.settings.dailyTokens)} tokens a day · catch-up on ${state.settings.catchUp} past sessions`);
 
   if (f['dry-run'] === true) {
     console.log('\n  --dry-run: nothing was sent.');

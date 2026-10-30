@@ -1,0 +1,5 @@
+- Before acting on anything ambiguous, state the reading you are acting on in one line and wait.
+- Before any edit or command, check it against every constraint stated earlier in the conversation, and name the one you checked.
+- Never report work as done or passing unless a command in this session shows it; quote the output.
+- Re-read right before editing if anything may have changed the file.
+- Do only what was asked. If something adjacent needs doing, say so and wait.

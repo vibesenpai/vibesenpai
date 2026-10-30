@@ -5,6 +5,7 @@
 
 import { basename } from 'node:path';
 import { parse } from './parsers/index.ts';
+import { withFullText } from './parsers/claude-code.ts';
 import { discoverTranscripts, projectLabel, projectOf, readSession } from './read.ts';
 import { countDenominators, runDetectors, type Denominators, type Detector } from './detect/index.ts';
 import { costFor, type Cost } from './cost.ts';
@@ -54,16 +55,21 @@ export type JudgedView = {
   why: string;
   /** The turn text the finding was anchored to, when the judge recorded one. */
   quote?: string;
+  /** Who wrote the quote, where the transcript shows it; absent when it cannot tell. */
+  quoteBy?: 'developer' | 'agent';
   /** What the person asked before the first cited turn. */
   asked?: Asked;
   /** Where the expectation was set, as one line (lookback). */
   established?: string;
+  /** When the first cited turn was written. */
+  turnAt?: string;
 };
 
 /** The prompt a cited turn answered: redacted `textSummary`, cut so it still survives `redact`. */
 export type Asked = { seq: number; ts?: string; text: string };
 
-export type AskedRow = EvidenceRow & { asked?: Asked };
+/** `ts`: when the row's turn was written. */
+export type AskedRow = EvidenceRow & { asked?: Asked; ts?: string };
 
 export type SessionView = {
   sessionId: string;
@@ -126,6 +132,19 @@ export function promptsOf(events: Event[]): Asked[] {
   return out;
 }
 
+/**
+ * Who wrote a quote: the developer when one of their prompts holds it, the agent when one of its messages
+ * does. Summaries are capped, so the full text is searched where the parser kept it; else unknown.
+ */
+export function quoteAuthor(events: Event[], quote: string, fullText?: ReadonlyMap<number, string>): 'developer' | 'agent' | undefined {
+  const flat = (t: string): string => t.replace(/\s+/g, ' ').trim();
+  const needle = flat(quote).replace(/[…]+$/, '').slice(0, 60);
+  if (needle.length < 8) return undefined;
+  const holds = (type: Event['turnType']): boolean =>
+    events.some((e) => e.turnType === type && !e.isSidechain && flat(fullText?.get(e.seq) ?? e.textSummary ?? '').includes(needle));
+  return holds('user_prompt') ? 'developer' : holds('assistant_msg') ? 'agent' : undefined;
+}
+
 /** The last prompt at or before `seq`. `prompts` is in seq order. */
 export function askedBefore(prompts: Asked[], seq: number): Asked | undefined {
   let lo = 0;
@@ -182,9 +201,11 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
     if (opts.onlySessionId !== undefined && sessionId !== opts.onlySessionId) continue;
 
     let parsed;
+    // Untruncated text, held in memory only, to find who wrote a quote.
+    let fullText = new Map<number, string>();
     try {
       const read = readSession({ source, sessionId, mode: 'live' });
-      parsed = parse(source, read.text, sessionId);
+      ({ result: parsed, fullText } = withFullText(() => parse(source, read.text, sessionId)));
     } catch {
       // Counted so the report cannot quietly analyse fewer sessions than it claims.
       unreadable++;
@@ -218,10 +239,12 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
 
     const byUuid = new Map(events.map((e) => [e.uuid, e]));
     const prompts = promptsOf(events);
+    const tsOf = new Map(events.map((e) => [e.seq, e.ts]));
     const withAsked = (r: EvidenceRow): AskedRow => {
       const seq = Number(r.turn);
       const asked = Number.isFinite(seq) ? askedBefore(prompts, seq) : undefined;
-      return asked === undefined ? r : { ...r, asked };
+      const ts = tsOf.get(seq);
+      return { ...r, ...(asked !== undefined ? { asked } : {}), ...(ts !== undefined ? { ts } : {}) };
     };
     const findings: FindingView[] = shown.map((f) => ({
       id: f.subjectId,
@@ -242,6 +265,8 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
     const judged: JudgedView[] = judgedRaw.map((j) => {
       const first = j.turns.length > 0 ? Math.min(...j.turns) : undefined;
       const asked = first === undefined ? undefined : askedBefore(prompts, first);
+      const by = j.quote === undefined ? undefined : quoteAuthor(events, j.quote, fullText);
+      const turnAt = first === undefined ? undefined : tsOf.get(first);
       return {
         ...(j.id !== undefined ? { id: j.id } : {}),
         at: j.at,
@@ -250,8 +275,10 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
         turns: j.turns,
         why: j.why,
         ...(j.quote !== undefined ? { quote: j.quote } : {}),
+        ...(by !== undefined ? { quoteBy: by } : {}),
         ...(asked !== undefined ? { asked } : {}),
         ...(SHOW_ESTABLISHED && j.established !== undefined ? { established: establishedLine(j.established) } : {}),
+        ...(turnAt !== undefined ? { turnAt } : {}),
       };
     });
 

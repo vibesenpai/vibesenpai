@@ -182,14 +182,14 @@ describe('the session-start block can see the model tier', () => {
 
   it('reports the total and names the commonest dimensions', () => {
     const out = reportBlock(base(), undefined, tally);
-    expect(out).toContain('13 flagged by a model');
+    expect(out).toContain('13 flagged —');
     expect(out).toContain('misread_intent');
   });
 
   it('keeps itself to one line, whatever the dimension count', () => {
     // Spelling out every dimension would swamp a short block.
     const out = reportBlock(base(), undefined, tally);
-    const judged = out.split('\n').filter((l) => l.includes('flagged by a model'));
+    const judged = out.split('\n').filter((l) => l.includes('flagged —'));
     expect(judged).toHaveLength(1);
     expect(judged[0]).toContain('+1 more');
   });
@@ -199,7 +199,7 @@ describe('the session-start block can see the model tier', () => {
     const empty = { ...base(), dimensions: [], reasons: {} };
     const out = reportBlock(empty, undefined, tally);
     expect(out).not.toContain('nothing to flag');
-    expect(out).toContain('13 flagged by a model');
+    expect(out).toContain('13 flagged —');
   });
 
   it('still says "nothing to flag" when both tiers are empty', () => {

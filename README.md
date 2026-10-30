@@ -18,7 +18,7 @@ reply, it worked.
 finds those moments, prices them, and quotes the turns back to you:
 
 ```
-  11,000+ tokens discarded on 4 findings · 19 more flagged by a model
+  11,000+ tokens discarded on 4 findings · 19 more flagged
     18 sessions · 2,460 edits
 ```
 
@@ -86,7 +86,7 @@ thing you never notice in the moment and that costs real tokens.
 Your transcripts are read in place — `scan` prints `copied nothing` and means
 it — and when the judge reads a session, what leaves is a **redacted subset of
 what your provider already has**, sent to the model on your own account. No
-third party ([what leaves your machine](#what-leaves-your-machine)).
+third party ([what leaves your machine](#what-leaves-your-machine-and-what-it-spends)).
 
 "Fully local" is not on that list on purpose. It is table stakes in this
 ecosystem rather than a reason to pick this one, and since the judge runs
@@ -153,8 +153,8 @@ deliberate, and it is why there are no made-up findings to pad the output.
 
 Two kinds of detection, and we are explicit about which is which.
 
-**Rules** read structure — tool calls, errors, file paths. They are cheap,
-deterministic, and run with no model at all.
+**The free checks** read structure — tool calls, errors, file paths. They are
+deterministic, run with no model at all, and spend nothing.
 
 | dimension | what it catches |
 |---|---|
@@ -162,8 +162,8 @@ deterministic, and run with no model at all.
 | `redundant_call` | the same call made again when nothing had changed |
 
 **The judge** reads the conversation, because some failures leave no structural
-trace. It is on from installation and runs **only when you run a command** —
-the `Stop` hook never spawns a pass.
+trace. It is on from installation and reads in the background after a turn
+ends, within the limits [below](#what-leaves-your-machine-and-what-it-spends).
 
 | dimension | what it catches |
 |---|---|
@@ -181,36 +181,39 @@ quietly leave it in the table.
 And some things we [deliberately do not detect](docs/dimensions.md), because we
 tried and could not do it honestly.
 
-## What leaves your machine
+## What leaves your machine, and what it spends
 
-Short version: **nothing, unless you turn the judge on.**
+Short version: **redacted session text, to Claude Haiku on your own plan or API key, within a
+daily limit.** The free checks send nothing.
 
 | | |
 |---|---|
 | reads | `~/.claude/projects/**` in place |
-| writes | `~/.local/share/agentsensei` (its own store), and `settings.json` **only** via `agentsensei install`, which prints the change and needs `--apply` |
-| sends | redacted session text to **your own model**, when you run a command. Never unprompted |
+| writes | `~/.local/share/agentsensei` (its own store). Never your settings or project files |
+| sends | redacted session text to Claude Haiku through your own `claude` CLI, from the background after a turn ends |
 
-When you run a command, redacted transcript text goes to a model so it can read
-the conversation. Four things make that defensible rather than a shrug:
+**It tells you before it spends.** The first session after install opens with a notice: what it
+reads, with what, the figures below, and the off switch. The first model call happens only after
+that session's first turn ends.
 
-**Nothing is sent unprompted.** The `Stop` hook does not spawn a pass — that
-boundary is what lets the judge ship on, and it is asserted by a test rather
-than promised.
+**What it spends.** About 60k tokens a session, measured. On install it catches up on up to 200
+of your most recent past sessions, then reads each new one. The background reads stop at
+**2M tokens a day** and carry on the next day. Older sessions are read only if you ask
+(`agentsensei judge --backlog --apply`). Both limits can be changed with
+`agentsensei judge --daily-tokens <n> --apply` and `--catch-up <n> --apply`.
+
+**What it spent.** The insights pane's Health tab shows tokens and Claude Code's own dollar
+figure for the last 7 days and all time. The dollar figure is at API prices: on a subscription
+it comes out of your plan's usage, not a bill, and the pane shows your plan's usage beside it.
 
 - **Redaction is asserted, not attempted.** The packet is checked immediately
   before the call, and the send is **aborted** if redaction would still change
   anything. Measured: 50% of real sessions carry secret-shaped content at that
   fidelity — API keys, JWTs, URL credentials — and tool output is where it
   concentrates.
-- **It is off until you say otherwise**, and `agentsensei judge` prints exactly
-  what one pass would send before you enable it.
+- **`/agentsensei:judge off` stops the model reads.** The free checks keep running.
 - **`AGENTSENSEI_DISABLE=1` stops everything**, immediately, including the hooks.
   If you are evaluating this on a work machine, that is your kill switch.
-
-Costs are reported in **tokens, never dollars** — what a token costs depends on
-your plan and tier, and on a subscription the dollar figure is notional. We
-report what you can actually verify.
 
 ## Why a model at all?
 

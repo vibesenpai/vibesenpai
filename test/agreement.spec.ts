@@ -16,21 +16,21 @@ describe('the lead attributes the price to the tier that produced it', () => {
     // The token figure must not read as the cost of every finding: only some dimensions are priced.
     const seg = leadSegments(facts());
     expect(seg.rest).toContain('on 4 findings');
-    expect(seg.rest).toContain('19 more flagged by a model');
+    expect(seg.rest).toContain('19 more flagged');
     // The total must not sit adjacent to the figure.
     expect(`${seg.figure}${seg.rest}`).not.toMatch(/tokens[^.]*·\s*23 findings/);
   });
 
   it('omits the model clause when the judge found nothing', () => {
     const seg = leadSegments(facts({ judgedCount: 0, total: 4 }));
-    expect(seg.rest).not.toContain('flagged by a model');
+    expect(seg.rest).not.toContain('flagged');
     expect(seg.rest).toContain('on 4 findings');
   });
 
   it('says so plainly when only the judge found anything', () => {
     const seg = leadSegments(facts({ ruleCount: 0, wasted: 0, total: 19 }));
     expect(seg.figure).toBe('19 findings');
-    expect(seg.rest).toBe(' flagged by a model');
+    expect(seg.rest).toBe(' flagged');
   });
 
   it('falls back to a count when nothing could be priced', () => {
