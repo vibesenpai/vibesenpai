@@ -11,6 +11,11 @@ Pre-alpha. Nothing has been released yet. Releases ship as a zip on a tagged Git
 
 ### Changed
 
+- **Three slash commands** (D70): `/vibesenpai:insights`, `/vibesenpai:judge` and `/vibesenpai:report`.
+  `/vibesenpai:fix`, `/vibesenpai:apply` and `/vibesenpai:dismiss` are removed; the pane does what they
+  did. It now shows each finding's own fix in place of its dimension's, says why a fix from another
+  project has no Apply, offers **Hide all** and **Restore all**, and when no prompt box takes a request
+  puts it on the clipboard or shows it to copy by hand.
 - **Renamed from agentsensei to vibesenpai** (D68). Commands are `/vibesenpai:*`, environment
   variables `VIBESENPAI_*`, the data folder `~/.local/share/vibesenpai`, the rules file
   `.claude/rules/vibesenpai.md`. Fix markers and judge folders under the old name are still

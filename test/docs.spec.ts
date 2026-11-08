@@ -432,9 +432,23 @@ describe('the plugin command files are not a stale copy', () => {
     expect(body('report')).toContain('--html --open');
   });
 
+  // Three since D70: the pane is where findings are acted on.
+  const shipped = readdirSync('commands').filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort();
+
+  it('ships exactly insights, judge and report', () => {
+    expect(shipped).toEqual(['insights', 'judge', 'report']);
+  });
+
+  it('no user-facing doc names a slash command the plugin does not ship', () => {
+    const stale = userFacingDocs().flatMap((f) =>
+      [...readFileSync(f, 'utf8').matchAll(/\/vibesenpai:([a-z][a-z-]*)/g)].map((m) => m[1] as string).filter((n) => !shipped.includes(n)).map((n) => `${f}: /vibesenpai:${n}`),
+    );
+    expect(stale).toEqual([]);
+  });
+
   it('every command invokes a subcommand the CLI dispatches', () => {
     const cli = readFileSync('src/cli.ts', 'utf8');
-    for (const name of ['insights', 'report', 'fix', 'dismiss']) {
+    for (const name of shipped) {
       const m = /cli\.ts"\s+(\w[\w-]*)/.exec(body(name));
       expect(m, `${name}.md invokes nothing`).not.toBeNull();
       const sub = m?.[1] ?? '';
@@ -444,7 +458,7 @@ describe('the plugin command files are not a stale copy', () => {
 
   it('runs through CLAUDE_PLUGIN_ROOT, never a hardcoded checkout', () => {
     // An absolute path baked at install time breaks when the checkout moves.
-    for (const name of ['insights', 'report', 'fix', 'dismiss']) {
+    for (const name of shipped) {
       expect(body(name)).toContain('${CLAUDE_PLUGIN_ROOT}');
     }
   });

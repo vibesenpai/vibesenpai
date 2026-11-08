@@ -2,8 +2,10 @@
 
 - vibesenpai never writes a project file or sends a prompt. Apply drafts a request into the prompt
   box (`$.prompt.fill`, never over a typed draft); the developer's Enter is the yes, and the agent
-  makes the change under the harness's own permission prompt. `/vibesenpai:apply` is the same yes,
-  typed.
+  makes the change under the harness's own permission prompt. The pane is the only place to apply
+  (D70); with no prompt box the request goes to the clipboard, else it is shown to copy by hand.
+- A finding's own fix is computed by the standing pass into `finding-fixes.json`, redacted at
+  construction (`src/fix-file.ts`); the pane never parses a session to build one.
 - The core (`applyPlan` in `src/fix.ts`) names a target, never a file. Each harness's adapter
   (`src/harness/claude-code.ts`) names the file and words the request. Claude Code: rules go to
   `.claude/rules/vibesenpai.md` with one pointer line in `CLAUDE.md`; no CLAUDE.md word budget.

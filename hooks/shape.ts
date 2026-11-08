@@ -100,7 +100,8 @@ export function view(data: PaneData, since: string | undefined): View {
   for (const i of all) byDim.set(i.dimension, [...(byDim.get(i.dimension) ?? []), i])
   const blocks: Block[] = [...byDim]
     .map(([dimension, items]) => {
-      const fix = data.fixes?.find((f) => f.dimension === dimension)
+      // The dimension's own fix; a finding's fix shows under that finding.
+      const fix = data.fixes?.find((f) => f.dimension === dimension && f.findingIds === undefined)
       return {
         dimension,
         items,
@@ -192,12 +193,23 @@ export function timesIn(times: number, sessions: number): string {
 
 export const windowText = (w: PaneWindow): string => timesIn(w.times, w.sessions)
 
+/** Who a fix is for: its dimension, and the findings when it is a finding's own. */
+export function fixOrigin(f: PaneFixState): string {
+  const dim = words(f.dimension)
+  if (f.shared !== undefined) return `For ${dim}, from ${f.shared.findings} findings in ${f.shared.sessions} sessions.`
+  if (f.findingIds !== undefined) return `For ${dim}, from ${f.findingIds.length === 1 ? 'one finding' : `${f.findingIds.length} findings`}.`
+  return `For ${dim}.`
+}
+
+/** Rules files load at session start or compaction, so a requested rule waits for one. */
+export const loadsLater = (f: PaneFixState): boolean => f.target === 'project-instructions' || f.target === 'scoped-instructions'
+
 /** Fixes not yet applied in this project, and those that were, most recent first. */
 export function fixesView(data: PaneData): { waiting: PaneFixState[]; applied: PaneFixState[] } {
   const all = data.fixes ?? []
   return {
-    // Requested but never loaded stays offered: the developer may have declined it.
-    waiting: all.filter((f) => f.applied === undefined || f.inEffect === false),
+    // Requested but never loaded stays offered: the developer may have declined it. One with no Apply here is not.
+    waiting: all.filter((f) => f.refusal === undefined && (f.applied === undefined || f.inEffect === false)),
     applied: all.filter((f) => f.applied !== undefined && f.inEffect !== false).sort((a, b) => (b.applied?.at ?? '').localeCompare(a.applied?.at ?? '')),
   }
 }
@@ -223,6 +235,7 @@ export function tabStrip(active: string, width: number): { top: string; cells: {
 
 /** What kind of change a fix makes, in words, by its harness-neutral target. */
 export function fixKind(f: PaneFixState): string {
+  if (f.kindLine !== undefined) return f.kindLine
   return f.target === 'project-instructions'
     ? 'A rule the agent reads in every session of this project:'
     : f.target === 'project-hooks'
@@ -231,10 +244,10 @@ export function fixKind(f: PaneFixState): string {
 }
 
 /** Where it goes, as a sentence; a session fix goes nowhere on disk. */
-export const fixWhere = (f: PaneFixState): string => (f.target === 'session' ? 'Sent as a prompt; nothing is written.' : `Added to ${f.destination}`)
+export const fixWhere = (f: PaneFixState): string => f.whereLine ?? (f.target === 'session' ? 'Sent as a prompt; nothing is written.' : `Added to ${f.destination}`)
 
 /** The fix's own words, without the list dash a rules file needs. */
-export const fixWords = (f: PaneFixState): string => f.text.replace(/^-\s*/, '')
+export const fixWords = (f: PaneFixState): string => (f.shown ?? f.text).replace(/^-\s*/, '')
 
 /** Word-wrapped to `max` columns, so each line can carry its own prefix (a bar the layout cannot repeat). */
 export function wrapLines(text: string, max: number): string[] {

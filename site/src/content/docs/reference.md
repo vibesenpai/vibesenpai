@@ -10,9 +10,8 @@ Typed in Claude Code, once the plugin is installed.
 | | |
 |---|---|
 | `/vibesenpai:insights` | What happened in the session you are in. Renders instantly from what has already been analysed, then reads this session with the model. |
-| `/vibesenpai:fix` | A recommendation, with the evidence for it — or a plain statement that no fix exists. |
 | `/vibesenpai:report` | Writes a self-contained HTML report of your history and prints the path. No JavaScript, no external resources, mode 0600. |
-| `/vibesenpai:dismiss` | Sets findings aside. With no arguments it lists them and asks which, and whether each is wrong or just not worth showing. `all` clears everything shown so far, and new findings still appear. `undo <id>` or `undo all` restores them. Nothing is deleted. |
+| `/vibesenpai:judge` | `on` or `off` turns the model reads on or off; with no argument it shows their status. The free checks keep running either way. |
 
 `/plugin disable vibesenpai` turns everything off.
 

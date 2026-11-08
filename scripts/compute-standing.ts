@@ -18,7 +18,9 @@ import {
   type Db, type FixSighting, type SessionCostRow,
 } from '../src/store.ts';
 import { knownRules } from '../src/fix.ts';
-import { findingRules } from '../src/finding-fix.ts';
+import { findingRules, fixesFor } from '../src/finding-fix.ts';
+import { writeFindingFixes } from '../src/fix-file.ts';
+import { sessionForFix } from '../src/cmd/common.ts';
 import { readJudgeState } from '../src/judge/state.ts';
 import { sightingsIn } from '../src/outcome.ts';
 import { withFullText } from '../src/parsers/claude-code.ts';
@@ -93,6 +95,14 @@ async function main(): Promise<Outcome> {
       { unreadable, dismissed: readDismissed(config.archive) },
     );
     writeStanding(config.archive, standing);
+
+    // Each judged finding's own fix, for the pane. Reads only the judged sessions again.
+    if (!process.argv.includes('--skip-fixes')) try {
+      const judged = readJudgeState(config.archive).findings;
+      writeFindingFixes(config.archive, fixesFor(judged, (id) => sessionForFix(config.sources, id)));
+    } catch {
+      // Principle Zero: the pane falls back to each dimension's fix.
+    }
 
     // One transaction each, upserted by content hash: rerunning is a no-op.
     if (costs.length > 0) {

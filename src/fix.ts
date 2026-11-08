@@ -495,7 +495,7 @@ export function renderFix(
     // "No findings in your history" is false once someone has dismissed them.
     lines.push(
       dismissed > 0
-        ? `  ${dim(`${dismissed} finding${dismissed === 1 ? ' is' : 's are'} dismissed; /vibesenpai:dismiss undo all restores them.`)}`
+        ? `  ${dim(`${dismissed} finding${dismissed === 1 ? ' is' : 's are'} dismissed; Restore all on the pane's Health tab brings them back.`)}`
         : `  ${dim('no findings in your history, or no standing computed — run `standing --refresh`.')}`,
     );
     return lines.join('\n');

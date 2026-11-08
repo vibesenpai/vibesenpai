@@ -137,9 +137,9 @@ export function nextRung(from: 'block' | 'insights' | 'report' | 'fix'): string 
     case 'insights':
       return 'Run /vibesenpai:report for more details';
     case 'report':
-      return 'Run /vibesenpai:fix for possible fixes';
+      return 'Run /vibesenpai:insights for the fixes, and Apply';
     case 'fix':
-      return 'Run /vibesenpai:report for more details';
+      return 'Run /vibesenpai:insights to apply it';
   }
 }
 

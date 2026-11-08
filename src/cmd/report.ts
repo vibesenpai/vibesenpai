@@ -17,6 +17,9 @@ import { batchCost, catchUpFrom, eligible, todayLeft, waitingOnRequest } from '.
 import { applyPlan, type ApplyPlan } from '../fix.ts';
 import { fixStates, type FixState, type OutcomeSession } from '../outcome.ts';
 import { applyRequest, destination, projectKey } from '../harness/claude-code.ts';
+import { applyRefusal, fixDisplay, whereLine } from '../harness/fix-display.ts';
+import { findingPlan, KIND_WORDS, type FindingFix } from '../finding-fix.ts';
+import { readFindingFixes } from '../fix-file.ts';
 import type { JudgeState } from '../judge/state.ts';
 import { readDismissed } from '../dismiss.ts';
 import { nextRung } from '../session-block.ts';
@@ -83,7 +86,7 @@ export async function cmdReport(a: Argv): Promise<number> {
     const w = pendingWork(judgeState, sizes);
     const labels = Object.fromEntries((withStore(config.archive, readLabels) ?? []).map((l) => [l.key, l.verdict]));
     const fixes = fixesFor(data, judgeState, config.archive, projectKey(process.cwd()));
-    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), progress: progressFor(judgeState, config.archive, sizes), dismissed: judgeState.dismissed ?? 0 };
+    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), progress: progressFor(judgeState, config.archive, sizes), dismissed: (judgeState.dismissed ?? 0) + (data.standing.dismissed ?? 0) };
     process.stdout.write(`${JSON.stringify(out)}\n`);
     return 0;
   }
@@ -275,27 +278,93 @@ export function writeHtmlReport(
   return 0;
 }
 
-/** Every fix the pane can offer in this project, each with its request text and whether it worked. */
-function fixesFor(data: ReportData, judge: JudgeState, archive: string, project: string): (FixState & { destination: string; request: string })[] {
+/** What the pane shows of a fix beyond its state: whose it is, its kind in words, and why it has no Apply. */
+type FixMeta = { findingIds?: string[]; shared?: { findings: number; sessions: number }; kindLine?: string; whereLine?: string; shown?: string; refusal?: string };
+type PaneFixOut = FixState & FixMeta & { destination: string; request: string };
+
+/**
+ * Every fix the pane can offer, each with its request text and whether it worked: each dimension's, and each
+ * finding's own (D67), read from the standing pass. A finding's fix from another project is listed with no Apply.
+ */
+function fixesFor(data: ReportData, judge: JudgeState, archive: string, project: string): PaneFixOut[] {
   const plans = Object.values(data.recommendations).map(applyPlan).filter((p): p is ApplyPlan => p !== undefined);
+  const own = ownFixes(archive, project);
+  plans.push(...own.plans);
   const stored = withStore(archive, (db) => ({ applied: readFixApplied(db), loaded: readRuleLoaded(db), spans: sessionSpans(db) }));
   const spans = stored?.spans ?? new Map<string, { project: string; firstTs?: string }>();
-  const sessions: OutcomeSession[] = data.sessions.map((s) => {
+  const sessions = outcomeSessions(data.sessions, own.keyOf, spans, judge.ledger);
+  const byModel = (dim: string): boolean => !data.standing.dimensions.some((d) => d.dimension === dim);
+  const states = fixStates(plans, stored?.applied ?? [], stored?.loaded ?? [], sessions, project, byModel)
+    .map((f) => ({ ...f, ...own.meta.get(f.fixId), destination: destination(f), request: applyRequest([f]) }));
+  return [...states, ...own.refused];
+}
+
+/**
+ * Each session as the outcome counts it: occurrences per dimension, and per finding-fix key so a finding's own
+ * fix counts its own constraint (`action:git push`), not its whole dimension.
+ */
+export function outcomeSessions(
+  list: ReportData['sessions'],
+  keyOf: Map<string, string>,
+  spans: Map<string, { project: string; firstTs?: string }>,
+  ledger: Record<string, number>,
+): OutcomeSession[] {
+  return list.map((s) => {
     const found: OutcomeSession['found'] = {};
-    const add = (dim: string, times: number, turn: number | undefined): void => {
-      const f = (found[dim] ??= { times: 0 });
+    const keys: NonNullable<OutcomeSession['keys']> = {};
+    const tally = (into: OutcomeSession['found'], k: string, times: number, turn: number | undefined): void => {
+      const f = (into[k] ??= { times: 0 });
       f.times += times;
       if (f.turn === undefined && turn !== undefined && Number.isFinite(turn)) f.turn = turn;
     };
-    for (const f of s.findings) add(f.dimension, f.occurrences, Number(f.evidence[0]?.turn));
-    for (const j of s.judged) add(j.dimension, 1, j.turns[0]);
+    for (const f of s.findings) tally(found, f.dimension, f.occurrences, Number(f.evidence[0]?.turn));
+    for (const j of s.judged) {
+      tally(found, j.dimension, 1, j.turns[0]);
+      const key = j.id === undefined ? undefined : keyOf.get(j.id);
+      if (key !== undefined) tally(keys, key, 1, j.turns[0]);
+    }
     const span = spans.get(s.sessionId);
     const at = span?.firstTs ?? s.firstTs;
-    return { id: s.sessionId, project: span?.project ?? '', ...(at !== undefined ? { at } : {}), judged: (judge.ledger[s.sessionId] ?? 0) > 0, found };
+    return { id: s.sessionId, project: span?.project ?? '', ...(at !== undefined ? { at } : {}), judged: (ledger[s.sessionId] ?? 0) > 0, found, keys };
   });
-  const byModel = (dim: string): boolean => !data.standing.dimensions.some((d) => d.dimension === dim);
-  return fixStates(plans, stored?.applied ?? [], stored?.loaded ?? [], sessions, project, byModel)
-    .map((f) => ({ ...f, destination: destination(f), request: applyRequest([f]) }));
+}
+
+/** The findings' own fixes, one per fix id however many findings share it. */
+function ownFixes(archive: string, project: string): { plans: ApplyPlan[]; meta: Map<string, FixMeta>; refused: PaneFixOut[]; keyOf: Map<string, string> } {
+  const stored = readFindingFixes(archive);
+  const byFix = new Map<string, { fix: FindingFix; findingIds: string[] }>();
+  for (const [id, x] of Object.entries(stored?.byFinding ?? {})) {
+    const g = byFix.get(x.fixId) ?? { fix: x, findingIds: [] };
+    g.findingIds.push(id);
+    byFix.set(x.fixId, g);
+  }
+  const shared = new Map((stored?.shared ?? []).map((s) => [s.fix.fixId, s]));
+  for (const s of shared.values()) if (!byFix.has(s.fix.fixId)) byFix.set(s.fix.fixId, { fix: s.fix, findingIds: [] });
+
+  const plans: ApplyPlan[] = [];
+  const meta = new Map<string, FixMeta>();
+  const refused: PaneFixOut[] = [];
+  for (const [fixId, { fix, findingIds }] of byFix) {
+    const s = shared.get(fixId);
+    const projects = s?.projects ?? [fix.project];
+    const shown = fixDisplay(fix);
+    const m: FixMeta = {
+      findingIds,
+      ...(s !== undefined ? { shared: { findings: s.findings, sessions: s.sessions } } : {}),
+      kindLine: KIND_WORDS[fix.kind],
+      whereLine: whereLine(fix, shown.destination),
+      ...(fix.kind === 'agent' ? { shown: shown.body } : {}),
+    };
+    const plan = projects.includes(project) ? findingPlan(fix) : undefined;
+    if (plan !== undefined) {
+      plans.push(plan);
+      meta.set(fixId, m);
+    } else {
+      refused.push({ fixId, dimension: fix.dimension, target: fix.target, text: fix.text, key: fix.key, destination: shown.destination, request: '', ...m, refusal: applyRefusal(fix, projects) });
+    }
+  }
+  const keyOf = new Map(Object.entries(stored?.byFinding ?? {}).map(([id, x]) => [id, x.key]));
+  return { plans, meta, refused, keyOf };
 }
 
 /**

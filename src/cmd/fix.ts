@@ -6,12 +6,11 @@ import { readJudgeState } from '../judge/state.ts';
 import { parseTranscript } from '../parsers/claude-code.ts';
 import { readStanding } from '../standing.ts';
 import { applyPlan, compactionsFor, recommend, renderFix } from '../fix.ts';
-import { applyRequest, projectKey } from '../harness/claude-code.ts';
-import { fixDisplay } from '../harness/fix-display.ts';
+import { projectKey } from '../harness/claude-code.ts';
+import { APPLY_IN_PANE, applyRefusal, fixDisplay, whereLine } from '../harness/fix-display.ts';
 import { type Argv, configFromFlags, sessionForFix } from './common.ts';
 import { findingKey, findingPlan, fixesFor, KIND_WORDS, type FindingFix, type SharedFix } from '../finding-fix.ts';
 import type { JudgedFinding } from '../judge/state.ts';
-import { projectLabel } from '../read.ts';
 import { bold, cyan, dim, rule } from '../style.ts';
 import { plural, wrap } from '../format.ts';
 import { nextRung } from '../session-block.ts';
@@ -42,23 +41,14 @@ export function cmdFix(a: Argv): number {
   if (own !== undefined) {
     const here = own.shared?.projects.includes(own.fix.project) === true ? own.shared.projects : [own.fix.project];
     const plan = here.includes(projectKey(process.cwd())) ? findingPlan(own.fix) : undefined;
-    if (a.flags['apply'] === true) {
-      console.log(plan === undefined ? applyRefusal(own.fix, here) : `Apply this fix:\n\n${applyRequest([plan])}`);
-      return 0;
-    }
     console.log(renderFindingFix(own.fix, own.finding, own.shared));
-    console.log(plan !== undefined ? `  To apply it: /vibesenpai:apply\n` : `  ${dim(applyRefusal(own.fix, here))}\n`);
+    console.log(plan !== undefined ? `  ${APPLY_IN_PANE}\n` : `  ${dim(applyRefusal(own.fix, here))}\n`);
     return 0;
   }
   const r = recommend(s, judged, compactions);
   const plan = r === undefined ? undefined : applyPlan(r);
-  // `/vibesenpai:apply`: the developer typed it, so it is the yes; the marker in this output dates the fix.
-  if (a.flags['apply'] === true) {
-    console.log(plan === undefined ? 'nothing to apply: this recommendation has no change to make.' : `Apply this fix:\n\n${applyRequest([plan])}`);
-    return 0;
-  }
   console.log(renderFix(r, config.preset, config.mute, (s?.dismissed ?? 0) + (judgeState.dismissed ?? 0)));
-  if (plan !== undefined) console.log(`  To apply it: /vibesenpai:apply\n`);
+  if (plan !== undefined) console.log(`  ${APPLY_IN_PANE}\n`);
   return 0;
 }
 
@@ -76,12 +66,6 @@ function pickFindingFix(
   return f === undefined ? undefined : { fix: fixes.byFinding.get(findingKey(f)) as FindingFix, finding: f };
 }
 
-/** Why there is nothing to apply here: a printed-only hook, or a fix for another project. */
-function applyRefusal(x: FindingFix, projects: string[]): string {
-  return !x.applicable
-    ? 'Printed only: a Stop hook can hold a turn open up to 8 times in a row.'
-    : `This happened in ${projects.map(projectLabel).join(' and ')}. Apply it from a session there.`;
-}
 
 /** A finding's fix, rendered: what happened first, then the change. */
 function renderFindingFix(x: FindingFix, f: JudgedFinding | undefined, shared: SharedFix | undefined): string {
@@ -102,7 +86,7 @@ function renderFindingFix(x: FindingFix, f: JudgedFinding | undefined, shared: S
   if (x.kind === 'check') lines.push(`      ${x.source.from ?? 'The project instructions'} already says this, and it was broken anyway:`, '');
   for (const l of body.split('\n')) lines.push(`      ${l}`);
   lines.push('');
-  const where = x.kind === 'check' ? 'The agent shows you the test before adding it.' : `Added to ${destination}${x.paths === undefined ? '' : `, for ${x.paths.join(', ')}`}`;
+  const where = whereLine(x, destination);
   if (x.applicable) lines.push(`      ${dim(where)}`, '');
   lines.push(`  ${rule(68)}`, `  ${dim(nextRung('fix'))}`);
   return lines.join('\n');

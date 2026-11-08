@@ -27,7 +27,6 @@ Run it:
 
   Last read 2026-10-23 11:48.
 
-  Run /vibesenpai:fix for possible fixes
   Run /vibesenpai:report for more details
 ```
 
@@ -65,13 +64,13 @@ later see a `constraint_violation`, [this is why](/vibesenpai/findings/fixes/).
 ## When something does fire
 
 ```
-  ✗ edit_retry      4 edits refused, then retried    /vibesenpai:fix
+  ✗ edit_retry      4 edits refused, then retried
                     2× the text didn't match
                     2× the file wasn't read first
 ```
 
-Every finding is anchored to real turns. `/vibesenpai:fix` or `vibesenpai fix`
-gives you a recommendation — and the turn numbers let you open the
+Every finding is anchored to real turns. Its fix is under it in the pane,
+with Apply — and the turn numbers let you open the
 transcript and judge for yourself, which is the point. A finding is evidence,
 not a verdict.
 

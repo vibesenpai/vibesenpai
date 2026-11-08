@@ -116,9 +116,7 @@ export function cmdDismiss(a: Argv): number {
           : '  Hidden from insights, fix and new sessions.',
       ),
     );
-    console.log(
-      dim(`  Run /vibesenpai:dismiss undo ${clearing ? 'all' : [...short.values()].join(' ')} to restore`),
-    );
+    console.log(dim(clearing ? "  Restore all on the pane's Health tab brings them back." : '  Undo in the pane brings them back.'));
     return 0;
   } finally {
     try {
@@ -164,7 +162,8 @@ export function renderDismissed(db: Db, rows: DismissalRow[]): string {
  */
 export function refreshStanding(config: Config): void {
   try {
-    runAndWait('compute-standing.ts', ['--force'], {
+    // A dismissal changes no fix, so the finding fixes are not rebuilt here.
+    runAndWait('compute-standing.ts', ['--force', '--skip-fixes'], {
       env: {
         ...process.env,
         VIBESENPAI_ARCHIVE: config.archive,

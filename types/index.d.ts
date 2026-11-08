@@ -55,12 +55,28 @@ export type PaneWindow = { times: number; sessions: number };
 export type PaneFixState = {
   fixId: string;
   dimension: string;
-  target: 'session' | 'project-instructions' | 'project-hooks';
+  target: 'session' | 'project-instructions' | 'project-hooks' | 'project-permissions' | 'scoped-instructions' | 'project-check' | 'project-agent';
   text: string;
   /** Where it lands, as words: a file, or "this session only". */
   destination: string;
   /** The prompt Apply drafts, ending with the marker. */
   request: string;
+  /** What the fix is for (`action:git push`); also what Apply's request needs for scoped rules and checks. */
+  key?: string;
+  paths?: string[];
+  from?: string;
+  /** A finding's own fix (D67): the findings it was built from. Absent on a dimension's fix. */
+  findingIds?: string[];
+  /** A fix shared across sessions: how many findings and sessions it covers. */
+  shared?: { findings: number; sessions: number };
+  /** What kind of change, in words; absent on a dimension's fix, whose kind follows from `target`. */
+  kindLine?: string;
+  /** Where it lands, as a sentence. */
+  whereLine?: string;
+  /** What to show in place of `text`, where the change is not one line. */
+  shown?: string;
+  /** Why it has no Apply here: another project, or printed only. */
+  refusal?: string;
   applied?: { at: string; sessionId: string };
   inEffect?: boolean;
   before?: PaneWindow;

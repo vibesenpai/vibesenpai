@@ -145,11 +145,6 @@ export async function cmdInsights(a: Argv): Promise<number> {
   // Read live, so dismissals are filtered here, not by the standing pass.
   const shown = withoutDismissed(res.findings, readDismissed(config.archive)).findings;
 
-  // Offer `fix` only when there is something to act on.
-  const standing = readStanding(config.archive);
-  const haveHistory = standing !== undefined && standing.dimensions.length > 0;
-  const haveSomethingToFix = shown.length > 0 || haveHistory;
-
   // Precomputed by the detached pass; this command never judges or spends.
   const judgeState = readJudgeState(config.archive);
   const judgedFindings = findingsFor(judgeState, current.sessionId);
@@ -204,7 +199,6 @@ export async function cmdInsights(a: Argv): Promise<number> {
 
     // Next steps go last, as `Run X for Y` sentences like `nextRung`.
     const ways = [
-      ...(haveSomethingToFix ? ['Run /vibesenpai:fix for possible fixes'] : []),
       'Run /vibesenpai:report for more details',
     ];
     console.log('');

@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState } from '../types'
-import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, finishDay, fixKind, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
+import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, finishDay, fixKind, fixOrigin, loadsLater, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
 import { applyRequest } from '../src/harness/claude-code.ts'
 import { MARK_PNG, MARK_SVG } from './logo.ts'
 
@@ -172,20 +172,41 @@ async function apply($: EngineInterface, fixes: PaneFixState[]): Promise<void> {
     if (r.isFilled) {
       await update($, drafted, (d) => [...new Set([...d, ...ids])])
       await say('')
-    } else if (r.refusal === 'no_composer') {
-      await say('There is no prompt box here. Run /vibesenpai:apply instead.')
     } else {
-      // The pane may hold the keyboard after a click; the clipboard still gets the request to the prompt.
+      // No prompt box, or the pane holds the keyboard after a click: the clipboard still gets it there.
       const c = await $.ui.copy({ text })
       await say(c.isCopied
-        ? 'The prompt box would not take it, so it is on your clipboard. Paste it into your prompt and press Enter.'
-        : `The prompt box would not take it${r.refusal !== undefined ? ` (${r.refusal})` : ''}. Run /vibesenpai:apply instead.`)
+        ? `${r.refusal === 'no_composer' ? 'There is no prompt box here' : 'The prompt box would not take it'}, so it is on your clipboard. Paste it into your prompt and press Enter.`
+        : `${BY_HAND}\n${text}`)
     }
   } catch (err) {
-    await say(`Apply failed: ${err instanceof Error ? err.message : String(err)}. Run /vibesenpai:apply instead.`)
+    await say(`Apply failed: ${err instanceof Error ? err.message : String(err)}.`)
   }
   await update($, picked, () => [])
 }
+
+/** Said when neither the prompt box nor the clipboard took the request; the request follows it. */
+const BY_HAND = 'The prompt box and the clipboard both refused it. Copy this into your prompt:'
+
+/** Hides every finding; each still counts, and Restore all on Health brings them back. The count is the CLI's own. */
+async function hideAll($: EngineInterface): Promise<void> {
+  const r = await $.process.run(cli($, ['dismiss', '--all']), { env: ENV, timeoutMs: BULK_TIMEOUT_MS })
+  const n = /Cleared (\d+) finding/.exec(r.stdout)?.[1]
+  const what = n === undefined ? 'Findings hidden.' : `${n} finding${n === '1' ? '' : 's'} hidden.`
+  await update($, applied, (m) => ({ ...m, [BULK]: r.exitCode === 0 ? `${what} They still count. Restore all is on Health.` : 'Could not hide them.' }))
+  await load($)
+}
+
+async function restoreAll($: EngineInterface): Promise<void> {
+  const r = await $.process.run(cli($, ['dismiss', '--undo', 'all']), { env: ENV, timeoutMs: BULK_TIMEOUT_MS })
+  await update($, applied, (m) => ({ ...m, [BULK]: r.exitCode === 0 ? 'Every hidden finding is back.' : 'Could not restore them.' }))
+  await load($)
+}
+
+/** Where Hide all and Restore all say what they did, in the same map as Apply's messages. */
+const BULK = 'bulk'
+/** Both recompute the standing in the foreground. */
+const BULK_TIMEOUT_MS = 120_000
 
 /** Terminals that draw pictures (kitty's or iTerm2's protocol); tmux passes neither through. */
 function drawsPictures(program: string | undefined, term: string | undefined, tmux: string | undefined): boolean {
@@ -373,7 +394,10 @@ export const register: Register = on => {
 
     const answers = (await read($, answered)) as Record<string, Answer>
     const answerOf = (i: Item): Answer | undefined => (i.dismissId === undefined ? undefined : answers[i.dismissId] ?? data.labels?.[i.dismissId])
-    const fixFor = (i: Item) => data.fixes?.find((f) => f.dimension === i.dimension)
+    // A finding's own fix first (D67); its dimension's is the fallback.
+    const fixFor = (i: Item) =>
+      (i.dismissId !== undefined ? data.fixes?.find((f) => f.findingIds?.includes(i.dismissId as string)) : undefined)
+        ?? data.fixes?.find((f) => f.dimension === i.dimension && f.findingIds === undefined)
     // What an answer did, in place, with Undo. A finding marked a mistake keeps its fix.
     const answerResult = (i: Item, a: Answer) => {
       const fix = fixFor(i)
@@ -531,7 +555,21 @@ export const register: Register = on => {
 
     const draftedIds = (await read($, drafted)) as string[]
     const outcome = (await read($, applied)) as Record<string, string>
-    const outcomeLine = (f: PaneFixState) => outcome[f.fixId] !== undefined && outcome[f.fixId] !== '' && <Text color="suggestion">{outcome[f.fixId]}</Text>
+    // A message, or the request itself to copy by hand: its first line said, the rest drawn as a prompt.
+    const sayLines = (k: string, room: number) => {
+      const m = outcome[k]
+      if (m === undefined || m === '') return null
+      const [first, ...rest] = m.split('\n')
+      // Line by line, so the request keeps its line breaks when copied.
+      const bars = rest.flatMap((l) => (l.trim() === '' ? [''] : wrapLines(l, Math.max(16, room - 2))))
+      return (
+        <Box flexDirection="column">
+          <Text color="suggestion">{first}</Text>
+          {bars.map((l) => <Text><Text color="promptBorder">▎ </Text><Text italic mono color="suggestion">{l}</Text></Text>)}
+        </Box>
+      )
+    }
+    const outcomeLine = (f: PaneFixState) => sayLines(f.fixId, width - 10)
     const requested = (f: PaneFixState) => f.applied !== undefined && f.inEffect === false && <Text dimColor>Requested {day(f.applied.at)} · not in effect yet: rules load in a new session, or after /compact</Text>
     // Once pressed, a fix folds to one line saying how far it got: drafted, requested, applied.
     const fixDone = (f: PaneFixState): string | undefined =>
@@ -546,7 +584,7 @@ export const register: Register = on => {
         return (
           <Box flexDirection="column">
             <Text color="success">✓ {done}</Text>
-            {f.applied === undefined && f.target === 'project-instructions' && <Text dimColor>{LOADS}</Text>}
+            {f.applied === undefined && loadsLater(f) && <Text dimColor>{LOADS}</Text>}
             {/* Requested but never loaded may have been declined, so it can be asked for again. */}
             {f.applied !== undefined && f.inEffect === false && (
               tertiary(`apply:${scope}${f.fixId}`, 'Apply again', () => apply($, [f]))
@@ -557,9 +595,13 @@ export const register: Register = on => {
       return labelled('Fix', 'suggestion', [
         <Text dimColor>{fixKind(f)}</Text>,
         prompt(fixWords(f), width - 10),
-        <Text dimColor>{fixWhere(f)}</Text>,
-        <Box marginTop={1}>{primary(`apply:${scope}${f.fixId}`, 'Apply', () => apply($, [f]))}</Box>,
-        outcomeLine(f),
+        ...(f.refusal !== undefined
+          ? [<Text dimColor>{f.refusal}</Text>]
+          : [
+            <Text dimColor>{fixWhere(f)}</Text>,
+            <Box marginTop={1}>{primary(`apply:${scope}${f.fixId}`, 'Apply', () => apply($, [f]))}</Box>,
+            outcomeLine(f),
+          ]),
       ])
     }
 
@@ -620,7 +662,9 @@ export const register: Register = on => {
           )}
           <Box flexDirection="row" gap={1} marginTop={1}>
             <Button key="report" label="Open full report" onPress={async () => { await $.process.run(cli($, ['report', '--html', '--open']), { env: ENV, timeoutMs: 120_000 }) }} />
+            {v.blocks.length > 0 && <Box marginLeft={2}>{tertiary('hide-all', 'Hide all', () => hideAll($))}</Box>}
           </Box>
+          {active === 'findings' && sayLines(BULK, width)}
         </Box>
       )
     }
@@ -640,12 +684,12 @@ export const register: Register = on => {
                   <Text {...(isPicked ? { color: 'claude' } : {})}>{isPicked ? '[x]' : '[ ]'} </Text>
                 </Button>
                 <Box flexDirection="column" flexShrink={1}>
-                  <Text dimColor>For {words(x.dimension)}. {fixKind(x)}</Text>
+                  <Text dimColor>{fixOrigin(x)} {fixKind(x)}</Text>
                   {prompt(fixWords(x), width - 8)}
                   <Text dimColor>{fixWhere(x)}</Text>
                   {requested(x)}
                   {x.applied === undefined && draftedIds.includes(x.fixId) && <Text color="success">✓ Drafted in your prompt box. Press Enter to apply it.</Text>}
-                  {x.applied === undefined && draftedIds.includes(x.fixId) && x.target === 'project-instructions' && <Text dimColor>{LOADS}</Text>}
+                  {x.applied === undefined && draftedIds.includes(x.fixId) && loadsLater(x) && <Text dimColor>{LOADS}</Text>}
                   {outcomeLine(x)}
                 </Box>
               </Box>
@@ -691,7 +735,12 @@ export const register: Register = on => {
           {sp?.allTime !== undefined && sp.allTime.calls > 0 && line('Spent', spendText(sp.allTime), ...(sp.allTime.usdMicros !== undefined ? [costNote(subscribed ? 'subscription' : sp.billing)] : []))}
           {sp !== undefined && sp.older > 0 && line('Older', `${sp.older} past session${sp.older === 1 ? '' : 's'} not read`, 'vibesenpai judge --backlog reads them')}
           {sp !== undefined && line('Model reads', sp.enabled ? 'on · /vibesenpai:judge off stops them' : 'off · /vibesenpai:judge on')}
-          {line('Dismissed', `${data.dismissed ?? 0} finding${data.dismissed === 1 ? '' : 's'}`)}
+          <Box flexDirection="row">
+            <Box width={14} flexShrink={0}><Text dimColor>Dismissed</Text></Box>
+            <Text>{data.dismissed ?? 0} finding{data.dismissed === 1 ? '' : 's'}</Text>
+            {(data.dismissed ?? 0) > 0 && <Box marginLeft={2}>{tertiary('restore-all', 'Restore all', () => restoreAll($))}</Box>}
+          </Box>
+          {sayLines(BULK, width)}
         </Box>
       )
     }

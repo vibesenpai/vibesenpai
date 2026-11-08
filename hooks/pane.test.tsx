@@ -67,7 +67,7 @@ const PANE = {
   props: { title: 'vibesenpai', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
 } as const
 
-type Calls = { argv: string[][]; filled: string[]; draft?: string; refuse?: 'dialog' | 'no_composer'; copied?: string; mtime?: number; rateLimits?: { kind: string; percentUsed: number }[]; excerpt?: unknown }
+type Calls = { argv: string[][]; filled: string[]; draft?: string; refuse?: 'dialog' | 'no_composer'; copied?: string; copyFails?: boolean; mtime?: number; rateLimits?: { kind: string; percentUsed: number }[]; excerpt?: unknown }
 
 /** Run `/vibesenpai:insights`; the kit fills the fields a typed command carries. */
 const insights = ($: Parameters<TestBody>[0]) => $.command.run({ command: 'vibesenpai:insights' } as never)
@@ -86,12 +86,15 @@ function engine(on: Parameters<TestBody>[1], data: PaneData | null, calls: Calls
     return { isFilled: true }
   })
   on('ui.copy', (_, e) => {
+    if (calls.copyFails === true) return { value: { isCopied: false } }
     calls.copied = (e as { text: string }).text
     return { value: { isCopied: true } }
   })
   on('process.run', (_, e) => {
     const argv = (e as { argv: string[] }).argv
     calls.argv.push([...argv])
+    // `dismiss --all` prints its own count, as the CLI does.
+    if (argv.includes('dismiss') && argv.includes('--all')) return { value: { exitCode: 0, stdout: '  Cleared 3 findings.\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = argv.includes('excerpt') ? calls.excerpt ?? { kept: false } : data
     return { value: { exitCode: 0, stdout: out === null ? '' : JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -557,4 +560,79 @@ test('time words round a measured estimate and name the finishing day', () => {
   expect(finishDay(new Date(2026, 10, 3, 12).toISOString(), now)).toBe('tomorrow')
   expect(finishDay(new Date(2026, 10, 5, 12).toISOString(), now)).toBe('Thursday')
   expect(finishDay(new Date(2026, 10, 20, 12).toISOString(), now)).toBe('Nov 20')
+})
+
+/** A finding's own fix (D67): a permission for `judged-new`, applicable here unless `refusal` is set. */
+const ownFix = (refusal?: string): NonNullable<PaneData['fixes']>[number] => ({
+  fixId: 'a1b2c3', dimension: 'misread_intent', target: 'project-permissions', text: 'git push', key: 'action:git push',
+  destination: '.claude/settings.local.json', request: 'unused', findingIds: ['judged-new'],
+  kindLine: 'Claude Code asks you before this command runs, in every mode:', whereLine: 'Added to .claude/settings.local.json',
+  ...(refusal !== undefined ? { refusal } : {}),
+})
+
+test('a finding with its own fix shows that fix in place of its dimension\'s, and Apply drafts it', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, { ...DATA, fixes: [...(DATA.fixes ?? []), ownFix()] }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  expect(await ui.find({ type: 'Text', text: /asks you before this command runs/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apply:judged-new:16ae85' })).toBeUndefined()
+  await ui.press({ key: 'apply:judged-new:a1b2c3' })
+  expect(calls.filled.at(-1)).toMatch(/git push[\s\S]*\(vibesenpai fix a1b2c3\)$/)
+  await ui.press({ key: 'tab:fixes' })
+  expect(await ui.find({ type: 'Text', text: /For misread intent, from one finding\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a finding\'s fix from another project says why and offers no Apply, here or on the Fixes tab', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, { ...DATA, fixes: [...(DATA.fixes ?? []), ownFix('This happened in agentsensei. Apply it from a session there.')] }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  expect(await ui.find({ type: 'Text', text: /This happened in agentsensei\. Apply it from a session there\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apply:judged-new:a1b2c3' })).toBeUndefined()
+  await ui.press({ key: 'tab:fixes' })
+  expect(await ui.find({ type: 'Text', text: /from one finding/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+// A test hook's refusal reaches the plugin without its cause (the kit's contract), so `no_composer` is not reachable here.
+test('a refused Apply goes to the clipboard and never names a command', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], refuse: 'no_composer' }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'apply:16ae85' })
+  expect(calls.copied).toMatch(/\(vibesenpai fix 16ae85\)$/)
+  expect(await ui.find({ type: 'Text', text: /so it is on your clipboard/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /vibesenpai:apply/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('when the prompt box and the clipboard both refuse, the request is shown to copy by hand', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], refuse: 'dialog', copyFails: true }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'apply:16ae85' })
+  expect(await ui.find({ type: 'Text', text: /both refused it\. Copy this into your prompt:/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\(vibesenpai fix 16ae85\)/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Hide all hides every finding through the CLI, and Restore all on Health brings them back', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'hide-all' })
+  expect(calls.argv.some((a) => a.slice(-2).join(' ') === 'dismiss --all')).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /^3 findings hidden\. They still count\. Restore all is on Health\.$/ })).toBeDefined()
+  await ui.press({ key: 'tab:health' })
+  await ui.press({ key: 'restore-all' })
+  expect(calls.argv.some((a) => a.slice(-3).join(' ') === 'dismiss --undo all')).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /Every hidden finding is back\./ })).toBeDefined()
+  await ui.unmount()
 })

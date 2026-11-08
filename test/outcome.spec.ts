@@ -127,3 +127,15 @@ describe('who wrote a quote', () => {
     expect(quoteAuthor(long, 'the part past the cut', new Map([[1, 'A long prompt, cut short and the part past the cut.']]))).toBe('developer');
   });
 });
+
+describe('the sessions the pane counts outcomes over', () => {
+  it('counts a finding with its own fix under that fix key, and one without only under its dimension', async () => {
+    const { outcomeSessions } = await import('../src/cmd/report.ts');
+    const judged = (id: string, turn: number) => ({ id, at: '2026-10-20T00:00:00.000Z', dimension: 'constraint_violation', turns: [turn], why: '' });
+    const list = [{ sessionId: 's1', findings: [], judged: [judged('pushed', 4), judged('other', 9)] }] as never;
+    const [s] = outcomeSessions(list, new Map([['pushed', 'action:git push']]), new Map([['s1', { project: 'p', firstTs: '2026-10-20T00:00:00.000Z' }]]), { s1: 1 });
+    expect(s?.found).toEqual({ constraint_violation: { times: 2, turn: 4 } });
+    expect(s?.keys).toEqual({ 'action:git push': { times: 1, turn: 4 } });
+    expect(s).toMatchObject({ project: 'p', judged: true });
+  });
+});

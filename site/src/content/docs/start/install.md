@@ -29,7 +29,7 @@ Three commands:
 | | |
 |---|---|
 | `/vibesenpai:insights` | what happened in the session you are in |
-| `/vibesenpai:fix` | a recommendation, with the evidence |
+| `/vibesenpai:judge` | model reads on or off |
 | `/vibesenpai:report` | a self-contained HTML report of your history |
 
 And two hooks, which keep your history indexed in the background. Both are

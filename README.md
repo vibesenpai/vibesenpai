@@ -108,9 +108,9 @@ Claude Code needs it.
 You get three commands:
 
 ```
-/vibesenpai:insights              what happened in this session
-/vibesenpai:fix              a recommendation, with its evidence
-/vibesenpai:report  a self-contained HTML report
+/vibesenpai:insights    the pane: findings, their fixes, and Apply
+/vibesenpai:judge       model reads on or off
+/vibesenpai:report      a self-contained HTML report
 ```
 
 To stop it: `/plugin disable vibesenpai`.
@@ -147,7 +147,6 @@ Then, for the session you are in right now:
 
   Last read 2026-10-23 11:48.
 
-  Run /vibesenpai:fix for possible fixes
   Run /vibesenpai:report for more details
 ```
 
