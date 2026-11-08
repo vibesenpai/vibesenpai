@@ -100,7 +100,12 @@ export type PaneData = {
   spend?: PaneSpend;
   /** Findings set aside. */
   dismissed?: number;
+  /** How far the automatic reads have to go. */
+  progress?: PaneProgress;
 };
+
+/** `target`: sessions the automatic reads cover. `seconds`: today's share at the measured pace. `finishOn`: when the daily limit lets them finish. */
+export type PaneProgress = { target: number; seconds?: number; finishOn?: string };
 
 declare module 'claude-code' {
   interface PluginState {
@@ -121,6 +126,8 @@ declare module 'claude-code' {
       note: Shaped<string>;
       /** By item key, with how many messages either side were asked for. */
       excerpts: Shaped<Record<string, { around: number; excerpt?: PaneExcerpt }>>;
+      /** The animation's frame, ticking only while something is loading or reading. */
+      frame: Shaped<number>;
     };
   }
 }

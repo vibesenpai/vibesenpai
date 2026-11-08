@@ -196,6 +196,45 @@ Three rules keep it honest:
 Positive reinforcement comes from group F: the healthy dimensions are the reward signal, which is why
 they are credited rather than merely withheld.
 
+### A fix per finding
+
+*Built 2026-11-01. Decision: DECISIONS.md D67. Code: `src/finding-fix.ts`; the Claude Code half in
+`src/harness/claude-code.ts`.*
+
+A finding's fix is built from that finding: the developer's words, the command or path at its turns,
+and the session's project. The first rung its evidence supports wins.
+
+| Rung | When | Fix | Applies |
+|---|---|---|---|
+| permission | a Bash command at the cited turns whose verb the developer **forbade** ("don't push", "push without my consent") | `permissions.ask: ["Bash(git push *)"]` in `.claude/settings.local.json` | yes |
+| guard | a constraint or overreach finding with an Edit/Write outside the project, not a harness-owned path | `PreToolUse` hook refusing that one path, exit 2 | yes |
+| check | the expectation was a loaded instruction (lookback `instruction`), broken anyway | a request to turn that line into a test, shown before it is added | yes |
+| hook | `inaccurate_self_report` over a failure nothing later fixed | the Stop snippet | printed only |
+| scoped rule | an expectation set in an earlier turn, with ≤5 project files written before the finding | `.claude/rules/agentsensei/<id>.md` with `paths:` | yes |
+| rule | an expectation set in an earlier turn | a line in `.claude/rules/agentsensei.md` | yes |
+
+A fix shared by findings in ≥2 sessions (same command, path or instruction) is the dimension's fix.
+Questions answered with an edit (the prompt before ends in `?`, a write follows before the next
+prompt) in ≥2 sessions give a read-only `ask` subagent.
+
+**Measured, one machine, 63 judged findings (observed 2026-11-01):** 5 get their own fix (1
+permission, 2 checks, 1 rule, 1 printed hook), and the `ask` subagent covers 5 more across 4
+sessions. Matching a command to any word of the developer's quote gave 12 permission fixes, 11 of
+them junk (`grep spent`, `for`, `const need`); requiring a negated mention left the one real one,
+`git push`. Rules from the anchoring quote read as reactions ("Also clicking on Apply didn't do
+anything"), so a rule comes only from an earlier turn lookback verified.
+
+**Mechanisms, checked against code.claude.com on 2026-11-01:**
+- An `ask` rule prompts in every mode, `bypassPermissions` included, and applies when any part of a
+  chained command matches (`permissions`, `permission-modes`).
+- A command's `allowed-tools` pre-approves and does **not** restrict; a subagent's `tools:` does
+  (`skills`, `sub-agents`). So the read-only helper is a subagent.
+- `.claude/rules/` loads recursively; `paths:` globs are relative to the project and load the rule
+  when a matching file is read or written (`memory`).
+- A `PreToolUse` hook gets an absolute `tool_input.file_path`; exit 2 blocks that call and its
+  stderr is the reason (`hooks`). Stop hooks are capped at 8 consecutive continuations, reset by
+  any tool call.
+
 ### `ACCEPT` — the honest category
 
 Some things genuinely are not fixable by the user, and saying so is more useful than inventing advice.

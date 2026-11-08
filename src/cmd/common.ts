@@ -1,10 +1,11 @@
 /** What every command shares: parsed argv, resolved config, the chosen detectors. */
 
+import { readFileSync } from 'node:fs';
 import { dim } from '../style.ts';
 import { resolveConfig } from '../config.ts';
 import { readCatalog } from '../catalog.ts';
 import { parse } from '../parsers/index.ts';
-import { findSessionSource, readSession, sessionSizes } from '../read.ts';
+import { findSessionSource, projectOf, readSession, sessionSizes } from '../read.ts';
 import { readJudgeState } from '../judge/state.ts';
 import { pendingWork } from '../judge/schedule.ts';
 import { buildSkeletons, renderSkeleton } from '../skeleton.ts';
@@ -12,6 +13,10 @@ import { detectorsFor, unknownDimensions } from '../detect/index.ts';
 import type { Detector } from '../detect/index.ts';
 import type { Preset } from '../types.ts';
 import { duration } from '../format.ts';
+import { parseTranscript, sessionCwd, withFullText } from '../parsers/claude-code.ts';
+import { ownedByHarness } from '../harness/claude-code.ts';
+import { quoteAuthor } from '../gather.ts';
+import type { SessionForFix } from '../finding-fix.ts';
 
 export type Argv = { _: string[]; flags: Record<string, string | boolean | string[]> };
 
@@ -136,4 +141,19 @@ export function judgePendingLine(config: { archive: string; sources: string[] })
     `⌁ the judge still has ${pending} session(s) to read — about ${duration(seconds)}. ` +
       `Findings will appear here once it has.`,
   );
+}
+
+/** One session as a finding's fix needs it, read in place; undefined when its transcript is gone or unreadable. */
+export function sessionForFix(sources: string[], sessionId: string): SessionForFix | undefined {
+  const src = findSessionSource(sources, sessionId);
+  if (src === undefined) return undefined;
+  try {
+    const lines = readFileSync(src, 'utf8').split('\n');
+    const { result, fullText } = withFullText(() => parseTranscript(lines, sessionId));
+    const events = [...result.events].sort((a, b) => a.seq - b.seq);
+    const cwd = sessionCwd(lines);
+    return { events, project: projectOf(src), ownedByHarness, authorOf: (q) => quoteAuthor(events, q, fullText), ...(cwd !== undefined ? { cwd } : {}) };
+  } catch {
+    return undefined;
+  }
 }

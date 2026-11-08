@@ -9,9 +9,12 @@ import { approx } from './cost.ts';
 import { describeCoverage, segmentByDepth } from './range.ts';
 import { REBUILDS_SHOWN, firstSentence, largestRebuilds, leadSegments, rebuildFact } from './render.ts';
 import { alsoText, human, isoDay, localStamp, plural, shortenPath } from './format.ts';
+import { projectLabel } from './read.ts';
 import type { Rebuild } from './stats.ts';
 import type { Asked, AskedRow, FindingView, JudgedView, ReportData, SessionView } from './gather.ts';
 import type { Recommendation } from './fix.ts';
+import { KIND_WORDS, type FindingFix, type SharedFix } from './finding-fix.ts';
+import { fixDisplay } from './harness/claude-code.ts';
 import { createHash } from 'node:crypto';
 import { BANNER_JPEG, BANNER_SIZE, MARK_FAVICON, MARK_SVG } from './brand.ts';
 
@@ -131,6 +134,8 @@ details>div{padding:0 1rem 1rem}
 .then{display:flex;flex-wrap:wrap;gap:.25rem .6rem;align-items:baseline}
 .rec{background:var(--inset);border:1px solid var(--line);border-radius:6px;padding:.75rem .9rem;margin:.25rem 0 .75rem}
 .rec-head{margin:0 0 .5rem;display:flex;align-items:center;gap:.5rem}
+.fix{margin-top:1rem}
+.fix .m{margin:.35rem 0}
 .rec-head .lbl{font:600 .7rem var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--accent)}
 .why{font-size:.88rem;margin:.5rem 0 0}
 blockquote{margin:.5rem 0;padding:.4rem .75rem;border-left:2px solid var(--line);color:var(--mute);font:italic .84rem var(--mono)}
@@ -233,7 +238,7 @@ function judgedInstance(j: JudgedView, s: SessionView): string {
   const quote = q === '' || repeats ? '' : `<blockquote>“${esc(q)}”</blockquote>`;
   return raw(`<details><summary>${askedLine(j.asked, s)}</summary><div>
 ${turns}${quote}${j.established === undefined ? '' : `<p class="m"><b>Established:</b> ${esc(firstSentence(j.established, 240))}</p>`}<p class="why">${esc(firstSentence(j.why, 240))}</p>
-</div></details>`);
+${j.fix === undefined ? '' : fixBlock(j.fix)}</div></details>`);
 }
 
 // Sections
@@ -259,6 +264,30 @@ function term(label: string, text: string, prompt = false): string {
   )}</span><button type="button" class="copy" hidden>copy</button></div><pre>${
     prompt ? '<span class="glyph" aria-hidden="true">❯</span>' : ''
   }<code>${esc(text)}</code></pre></div>`;
+}
+
+/**
+ * A fix built from one finding, or shared by several: what it does, the text to copy, where it lands.
+ * Problem first: it closes the finding or dimension it belongs to.
+ */
+function fixBlock(x: FindingFix, shared?: SharedFix): string {
+  const { destination, body } = fixDisplay(x);
+  const scope = x.paths === undefined ? '' : ` · for ${x.paths.join(', ')}`;
+  const projects = (shared?.projects ?? [x.project]).map(projectLabel).join(' and ');
+  const where = !x.applicable
+    ? 'Printed only: a Stop hook can hold a turn open up to 8 times in a row.'
+    : x.kind === 'check'
+      ? `The agent shows you the test before adding it, in ${projects}.`
+      : `Added to ${destination} in ${projects}${scope}`;
+  const lead =
+    shared !== undefined
+      ? `<p class="m">For ${esc(plural(shared.findings, 'finding'))} in ${esc(plural(shared.sessions, 'session'))}${x.kind === 'agent' ? ' where a question got an edit' : ''}.</p>`
+      : x.kind === 'check'
+        ? `<p class="m">${esc(x.source.from ?? 'The project instructions')} already says this, and it was broken anyway.</p>`
+        : '';
+  return `<div class="rec fix"><p class="rec-head"><span class="lbl">fix</span></p>${lead}<p class="m">${esc(KIND_WORDS[x.kind])}</p>
+${term(x.kind === 'check' ? 'the rule · the agent proposes a test for it' : destination, body)}
+<p class="note">${esc(where)}</p></div>`;
 }
 
 /** A dimension's recommendation, as `fix` words it, shown after that dimension's evidence. */
@@ -348,7 +377,7 @@ function findingsSection(d: ReportData, f: Facts): string {
         inst.length,
         sessions,
         inst.map((i) => judgedInstance(i.j, i.s)).join(''),
-      )}${recBlock(d.recommendations[dim])}</div></details>`,
+      )}${d.shared?.[dim] !== undefined ? fixBlock(d.shared[dim].fix, d.shared[dim]) : recBlock(d.recommendations[dim])}</div></details>`,
     });
   }
 

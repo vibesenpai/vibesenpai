@@ -7,13 +7,13 @@ import { join } from 'node:path';
 import { lookupSession, MIN_ID_PREFIX, type SessionLookup, sessionSizes } from '../read.ts';
 import { gatherReport, type ReportData } from '../gather.ts';
 import { findingsFor, readJudgeState } from '../judge/state.ts';
-import { pendingWork, progressLine } from '../judge/schedule.ts';
+import { estimateQueueSeconds, pendingWork, progressLine } from '../judge/schedule.ts';
 import { JUDGE_STALE_MS, jobsHealth } from '../jobs.ts';
 import { renderHtml } from '../html.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from '../range.ts';
 import { leadSegments } from '../render.ts';
-import { currentRun, measuredCallMs, openStore, readFixApplied, readLabels, readRuleLoaded, readSpend, sessionSpans, spendSince, withStore, type Spend } from '../store.ts';
-import { todayLeft, waitingOnRequest } from '../judge/limits.ts';
+import { currentRun, measuredCallMs, measuredMsPerToken, openStore, sessionCosts, readFixApplied, readLabels, readRuleLoaded, readSpend, sessionSpans, spendSince, withStore, type Spend } from '../store.ts';
+import { batchCost, catchUpFrom, eligible, todayLeft, waitingOnRequest } from '../judge/limits.ts';
 import { applyPlan, type ApplyPlan } from '../fix.ts';
 import { fixStates, type FixState, type OutcomeSession } from '../outcome.ts';
 import { applyRequest, destination, projectKey } from '../harness/claude-code.ts';
@@ -83,7 +83,7 @@ export async function cmdReport(a: Argv): Promise<number> {
     const w = pendingWork(judgeState, sizes);
     const labels = Object.fromEntries((withStore(config.archive, readLabels) ?? []).map((l) => [l.key, l.verdict]));
     const fixes = fixesFor(data, judgeState, config.archive, projectKey(process.cwd()));
-    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), dismissed: judgeState.dismissed ?? 0 };
+    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), progress: progressFor(judgeState, config.archive, sizes), dismissed: judgeState.dismissed ?? 0 };
     process.stdout.write(`${JSON.stringify(out)}\n`);
     return 0;
   }
@@ -296,6 +296,36 @@ function fixesFor(data: ReportData, judge: JudgeState, archive: string, project:
   const byModel = (dim: string): boolean => !data.standing.dimensions.some((d) => d.dimension === dim);
   return fixStates(plans, stored?.applied ?? [], stored?.loaded ?? [], sessions, project, byModel)
     .map((f) => ({ ...f, destination: destination(f), request: applyRequest([f]) }));
+}
+
+/**
+ * How far the automatic reads have to go: the sessions they will read, how long today's share takes at
+ * this machine's measured pace (absent until two runs are timed), and the day the daily limit lets them finish.
+ */
+function progressFor(
+  state: JudgeState,
+  archive: string,
+  sizes: { id: string; sizeBytes: number; mtimeMs: number }[],
+): { target: number; seconds?: number; finishOn?: string } {
+  const queue = eligible(state, sizes, catchUpFrom(archive, state, sizes, false)).filter((s) => (state.ledger[s.id] ?? 0) === 0);
+  const target = sizes.length - waitingOnRequest(archive, state, sizes);
+  const measured = withStore(archive, (db) => ({ costs: sessionCosts(db), msPerToken: measuredMsPerToken(db) }));
+  if (queue.length === 0 || measured === undefined) return { target };
+  const tokens = queue.reduce((n, s) => n + (measured.costs.get(s.id) ?? 0), 0);
+  const batches = Math.ceil(tokens / state.settings.maxBatchTokens);
+  const need = tokens + batches * batchCost(0);
+  const left = todayLeft(archive, state.settings.dailyTokens) ?? state.settings.dailyTokens;
+  const share = need <= left ? 1 : left / need;
+  const days = need <= left ? 0 : Math.ceil((need - left) / state.settings.dailyTokens);
+  const finish = new Date();
+  finish.setDate(finish.getDate() + days);
+  return {
+    target,
+    ...(measured.msPerToken !== undefined && tokens > 0
+      ? { seconds: Math.round(share * estimateQueueSeconds({ unread: queue.length, queueTokens: tokens, msPerToken: measured.msPerToken, budget: state.settings.maxBatchTokens, concurrency: state.settings.concurrency })) }
+      : {}),
+    ...(days > 0 ? { finishOn: finish.toISOString() } : {}),
+  };
 }
 
 /** What the judge spent, and the limits on what it may spend next, for the pane's Health tab. */

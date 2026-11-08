@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState } from '../types'
-import { BLOCK_SHOWN, blockCount, clip, clock, costNote, fixKind, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
+import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, finishDay, fixKind, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
 import { applyRequest } from '../src/harness/claude-code.ts'
 import { MARK_PNG, MARK_SVG } from './logo.ts'
 
@@ -26,6 +26,7 @@ const drafted = atom({ plugin: 'agentsensei', key: 'drafted' } as const, [], { s
 const pictures = atom({ plugin: 'agentsensei', key: 'pictures' } as const, false, { shape: 'pictures-1' })
 const note = atom({ plugin: 'agentsensei', key: 'note' } as const, '', { shape: 'note-1' })
 const excerpts = atom({ plugin: 'agentsensei', key: 'excerpts' } as const, {}, { shape: 'excerpts-1' })
+const frame = atom({ plugin: 'agentsensei', key: 'frame' } as const, 0, { shape: 'frame-1' })
 
 /** When the person last looked: what "new" is measured from, kept across sessions. */
 const SEEN_KEY = 'lastSeen'
@@ -62,6 +63,7 @@ async function load($: EngineInterface): Promise<void> {
     return
   }
   await update($, snapshot, () => data)
+  animate($, readingNow(data))
   await update($, loadedAt, () => new Date().toISOString())
   const fp = await fingerprint($, data.archive)
   await update($, stamp, () => fp)
@@ -193,6 +195,32 @@ function drawsPictures(program: string | undefined, term: string | undefined, tm
 
 /** How often an open pane checks whether a background pass wrote something new. Three file stats, no CLI. */
 const AUTO_REFRESH_MS = 30_000
+const FRAME_MS = 120
+
+let animator: { cancel: () => void } | undefined
+/** When the first read began, for the elapsed time on the first-open screen. */
+let loadStarted = 0
+
+/** The model reads are running now. */
+function readingNow(data: PaneData): boolean {
+  return data.health.some((h) => h.job === 'judge' && h.state === 'running')
+}
+
+/** Ticks the spinner and the bar's glint, only while there is something to watch. */
+function animate($: EngineInterface, on: boolean): void {
+  try {
+    if (on && animator === undefined) {
+      animator = $.clock.every(FRAME_MS, async () => {
+        try { await update($, frame, (n) => n + 1) } catch { /* the next tick redraws */ }
+      })
+    } else if (!on && animator !== undefined) {
+      animator.cancel()
+      animator = undefined
+    }
+  } catch {
+    // No clock: the spinner holds still; everything else works.
+  }
+}
 
 let ticker: { cancel: () => void } | undefined
 
@@ -224,6 +252,8 @@ async function show($: EngineInterface): Promise<boolean> {
   const previous = (await $.store.get(SEEN_KEY)) as string | undefined
   await update($, since, () => previous ?? '')
   await $.store.set(SEEN_KEY, new Date().toISOString())
+  loadStarted = Date.now()
+  if ((await read($, snapshot)) === null) animate($, true)
   await load($)
   autoRefresh($)
   return true
@@ -246,8 +276,20 @@ export const register: Register = on => {
     const { Box, Text, Button } = els
     const data = (await read($, snapshot)) as PaneData | null
     const message = (await read($, note)) as string
+    const tick = (await read($, frame)) as number
+    const spin = SPINNER[tick % SPINNER.length]
     if (data === null) {
-      return <Box flexDirection="column"><Text dimColor>{message === '' ? 'Reading your history…' : message}</Text></Box>
+      // The first open: the mark, a spinner with the time so far, and what happens next.
+      const secs = Math.max(0, Math.round((Date.now() - loadStarted) / 1000))
+      return (
+        <Box flexDirection="column" alignItems="center" paddingY={2} gap={1}>
+          <Text weight="bold" color="claude">agentsensei</Text>
+          {message === ''
+            ? <Text><Text color="claude">{spin}</Text> Reading your history <Text dimColor>· {secs}s</Text></Text>
+            : <Text>{message}</Text>}
+          <Text dimColor>The free checks come first. Model reads begin when this turn ends.</Text>
+        </Box>
+      )
     }
 
     const width = Math.max(30, (e.props as { bodyColumns?: number }).bodyColumns ?? 60)
@@ -280,6 +322,47 @@ export const register: Register = on => {
         ))}
       </Box>
     )
+    // The model reads' progress: a card above the findings until the first model finding, then a line in the header.
+    const progress = data.progress
+    const reading = readingNow(data)
+    const target = progress?.target ?? data.total
+    const behind = (data.spend?.enabled ?? true) && data.read < target
+    const modelFound = data.sessions.some((x) => x.judged.length > 0)
+    const bar = (cells: number) => barRuns(data.read, target, cells, tick, reading).map((r) => (
+      <Text {...(r.tone === 'done' ? { color: 'claude' } : r.tone === 'glint' ? { color: 'text', weight: 'bold' as const } : { color: 'subtle' })}>{r.text}</Text>
+    ))
+    const limitReached = data.spend?.today !== undefined && data.spend.today.tokens >= data.spend.today.limit
+    const readsLine = reading
+      ? `reading now · ${progress?.seconds !== undefined ? aboutTime(progress.seconds) : 'measuring the pace'}`
+      : data.read === 0 ? 'Begins when this turn ends.'
+        : limitReached ? "Today's limit is reached; it continues tomorrow."
+          : 'Continues in the background when a turn ends.'
+    const readsCard = () => (
+      <Box flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1}>
+        <Box flexDirection="row" gap={2}>
+          <Text weight="bold">Model reads</Text>
+          <Text>{bar(Math.max(10, Math.min(32, width - 34)))}</Text>
+          <Text dimColor>{data.read} of {target}</Text>
+        </Box>
+        <Text>{reading && <Text color="claude">{spin} </Text>}<Text dimColor>{readsLine}</Text></Text>
+        {progress?.finishOn !== undefined && data.spend?.today !== undefined && (
+          <Text dimColor>At {human(data.spend.today.limit)} tokens a day, the rest finish {finishDay(progress.finishOn, now)}.</Text>
+        )}
+      </Box>
+    )
+    const showCard = behind && !modelFound
+
+    // Three weights of button. Primary is solid and there is at most one per section: the action to take.
+    // Secondary is the surface's bracketed button, for a choice. Tertiary is a dim link.
+    const primary = (key: string, label: string, onPress: () => void, hotkey?: string) => (
+      <Button key={key} plain label={label} {...(hotkey !== undefined ? { hotkey } : {})} onPress={onPress}>
+        <Text backgroundColor="claude" color="inverseText" weight="bold"> {label} </Text>
+        {hotkey !== undefined && <Text dimColor> {hotkey}</Text>}
+      </Button>
+    )
+    const tertiary = (key: string, label: string, onPress: () => void) => (
+      <Button key={key} plain label={label} onPress={onPress}><Text dimColor underline>{label}</Text></Button>
+    )
     // A label column, so a wrapped value keeps its indent.
     const labelled = (label: string, color: string | undefined, body: unknown) => (
       <Box flexDirection="row">
@@ -299,7 +382,7 @@ export const register: Register = on => {
           <Text color="success">✓ {SAID[a]}</Text>
           {a === 'mistake' && fix !== undefined && <Box marginTop={1}>{fixSection(fix, `${i.key}:`)}</Box>}
           <Box marginTop={1}>
-            <Button key={`undo:${i.key}`} plain label="Undo" onPress={() => undo($, i, a)}><Text dimColor underline>Undo</Text></Button>
+            {tertiary(`undo:${i.key}`, 'Undo', () => undo($, i, a))}
           </Box>
         </Box>
       )
@@ -358,7 +441,7 @@ export const register: Register = on => {
           ))}
           <Box flexDirection="row" gap={2} marginTop={full ? 0 : 1}>
             {full && (x.excerpt.moreBefore || x.excerpt.moreAfter) && (
-              <Button key={`more:${i.key}`} plain label="More around this" onPress={() => fetchExcerpt($, i, x.around + AROUND)}><Text dimColor underline>More around this</Text></Button>
+              tertiary(`more:${i.key}`, 'More around this', () => fetchExcerpt($, i, x.around + AROUND))
             )}
             <Button key={key} plain label={full ? 'Hide conversation' : 'Show conversation'} onPress={() => toggle($, key)}>
               <Text dimColor underline>{full ? 'Hide conversation' : 'Show conversation ▸'}</Text>
@@ -405,7 +488,7 @@ export const register: Register = on => {
                   <Button key={`suggestion:${i.key}`} label="Not the agent's fault" onPress={() => labelAs($, i, 'suggestion')} />
                 )}
                 <Box marginLeft={2}>
-                  <Button key={`dismiss:${i.key}`} plain label="Hide" onPress={() => dismiss($, i)}><Text dimColor underline>Hide</Text></Button>
+                  {tertiary(`dismiss:${i.key}`, 'Hide', () => dismiss($, i))}
                 </Box>
               </Box>
             </Box>
@@ -466,7 +549,7 @@ export const register: Register = on => {
             {f.applied === undefined && f.target === 'project-instructions' && <Text dimColor>{LOADS}</Text>}
             {/* Requested but never loaded may have been declined, so it can be asked for again. */}
             {f.applied !== undefined && f.inEffect === false && (
-              <Button key={`apply:${scope}${f.fixId}`} plain label="Apply again" onPress={() => apply($, [f])}><Text dimColor underline>Apply again</Text></Button>
+              tertiary(`apply:${scope}${f.fixId}`, 'Apply again', () => apply($, [f]))
             )}
           </Box>
         )
@@ -475,7 +558,7 @@ export const register: Register = on => {
         <Text dimColor>{fixKind(f)}</Text>,
         prompt(fixWords(f), width - 10),
         <Text dimColor>{fixWhere(f)}</Text>,
-        <Box marginTop={1}><Button key={`apply:${scope}${f.fixId}`} variant="primary" label="Apply" onPress={() => apply($, [f])} /></Box>,
+        <Box marginTop={1}>{primary(`apply:${scope}${f.fixId}`, 'Apply', () => apply($, [f]))}</Box>,
         outcomeLine(f),
       ])
     }
@@ -484,6 +567,7 @@ export const register: Register = on => {
       const v = view(data, seen === '' ? undefined : seen)
       return (
         <Box flexDirection="column" gap={1}>
+          {showCard && readsCard()}
           {v.newItems.length > 0 && (
             <Box flexDirection="column">
               <Text weight="bold">New since you last looked</Text>
@@ -568,7 +652,7 @@ export const register: Register = on => {
           })}
           {f.waiting.length > 0 && (chosen.length === 0
             ? <Text dimColor>  Select fixes, then apply them as one request.</Text>
-            : <Box paddingLeft={2}><Button key="apply-picked" variant="primary" label={chosen.length === 1 ? 'Apply' : `Apply ${chosen.length}`} onPress={() => apply($, chosen)} /></Box>)}
+            : <Box paddingLeft={2}>{primary('apply-picked', chosen.length === 1 ? 'Apply' : `Apply ${chosen.length}`, () => apply($, chosen), 'a')}</Box>)}
 
           <Text weight="bold">Applied</Text>
           {f.applied.length === 0 && <Text dimColor>None yet. A fix counts as applied once its request is seen in a session.</Text>}
@@ -628,14 +712,16 @@ export const register: Register = on => {
           <Box flexDirection="column" flexGrow={1}>
             <Box flexDirection="row" justifyContent="space-between" gap={2}>
               <Text weight="bold" color="claude">agentsensei</Text>
-              <Text dimColor>{data.read}/{data.total} sessions read</Text>
+              {behind && !showCard
+                ? <Text>{reading && <Text color="claude">{spin} </Text>}{bar(12)}<Text dimColor> {data.read}/{target}</Text></Text>
+                : <Text dimColor>{data.read}/{data.total} sessions read</Text>}
             </Box>
             <Box flexDirection="row" justifyContent="space-between" gap={2}>
               <Box flexShrink={1}><Text dimColor>Find out why your agents failed you.</Text></Box>
               {/* Refresh sits on the time it updates, the way a feed's timestamp does. */}
               <Box flexDirection="row" flexShrink={0} gap={1}>
                 <Text dimColor>{refreshing ? 'refreshing…' : `updated ${mins === 0 ? 'just now' : `${mins}m ago`}`}</Text>
-                <Button key="refresh-top" plain label="↻ Refresh" onPress={() => refresh($)}><Text color="suggestion">↻</Text></Button>
+                <Button key="refresh-top" plain label="↻ Refresh" hotkey="r" onPress={() => refresh($)}><Text color="suggestion">↻</Text></Button>
               </Box>
             </Box>
           </Box>

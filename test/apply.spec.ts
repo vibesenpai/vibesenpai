@@ -1,7 +1,8 @@
 /** Applying a fix: the request the agent is handed, and the marker that dates it in the transcript. */
 
 import { describe, expect, it } from 'vitest';
-import { applyRequest, POINTER, RULES_FILE } from '../src/harness/claude-code.ts';
+import { execFileSync } from 'node:child_process';
+import { applyRequest, destination, guardHook, POINTER, RULES_FILE, snippetFor } from '../src/harness/claude-code.ts';
 import { fixIdsIn } from '../src/fix-marker.ts';
 import { parseTranscript } from '../src/parsers/claude-code.ts';
 import { countDenominators } from '../src/detect/index.ts';
@@ -29,6 +30,68 @@ describe('the request the agent is handed', () => {
 
   it('asks nothing of CLAUDE.md for a session-only fix', () => {
     expect(applyRequest([session])).not.toContain('CLAUDE.md');
+  });
+});
+
+describe('a finding\'s own fix, per target', () => {
+  const plan = (o: Partial<ApplyPlan> & Pick<ApplyPlan, 'target' | 'text'>): ApplyPlan => ({ fixId: 'abc123', dimension: 'constraint_violation', ...o });
+
+  it('a permission rule goes in project-local settings, in the dialog\'s own form', () => {
+    const p = plan({ target: 'project-permissions', text: 'git push' });
+    expect(destination(p)).toBe('.claude/settings.local.json');
+    expect(applyRequest([p])).toContain('add "Bash(git push *)" to permissions.ask');
+    expect(JSON.parse(snippetFor(p) as string)).toEqual({ permissions: { ask: ['Bash(git push *)'] } });
+  });
+
+  it('a scoped rule is its own file, with the paths it loads for', () => {
+    const p = plan({ target: 'scoped-instructions', text: '- Standing instruction from the developer: "x"', paths: ['hooks/pane.tsx'] });
+    expect(destination(p)).toBe('.claude/rules/agentsensei/abc123.md');
+    expect(snippetFor(p)).toBe('---\npaths:\n  - "hooks/pane.tsx"\n---\n\n- Standing instruction from the developer: "x"');
+    expect(applyRequest([p])).not.toContain('CLAUDE.md');
+  });
+
+  it('a broken instruction asks for a check, shown before it is added', () => {
+    const r = applyRequest([plan({ target: 'project-check', text: 'Never write the user\'s config.', from: 'CLAUDE.md' })]);
+    expect(r).toContain('CLAUDE.md already says "Never write the user\'s config.", and it was broken anyway.');
+    expect(r).toContain('before adding it');
+  });
+
+  it('the read-only subagent restricts its tools', () => {
+    const p = plan({ target: 'project-agent', text: 'ask' });
+    expect(destination(p)).toBe('.claude/agents/ask.md');
+    expect(snippetFor(p)).toContain('tools: Read, Grep, Glob');
+  });
+
+  it('every request still ends with its marker', () => {
+    for (const target of ['project-permissions', 'project-hooks', 'scoped-instructions', 'project-check', 'project-agent'] as const) {
+      expect(fixIdsIn(applyRequest([plan({ target, text: 'git push' })]))).toEqual(['abc123']);
+    }
+  });
+});
+
+describe('the guard hook, run as Claude Code runs it', () => {
+  const command = (path: string): string =>
+    ((guardHook(path) as { hooks: { PreToolUse: { hooks: { command: string }[] }[] } }).hooks.PreToolUse[0]?.hooks[0]?.command) as string;
+  const run = (path: string, input: object): number => {
+    try {
+      execFileSync('sh', ['-c', command(path)], { input: JSON.stringify(input), env: { ...process.env, HOME: '/home/me' }, stdio: ['pipe', 'ignore', 'ignore'], timeout: 5000 });
+      return 0;
+    } catch (e) {
+      return (e as { status: number }).status;
+    }
+  };
+
+  it('blocks an edit of exactly that path with exit 2', () => {
+    expect(run('~/.claude.json', { tool_name: 'Edit', tool_input: { file_path: '/home/me/.claude.json' } })).toBe(2);
+  });
+
+  it('lets every other path through, including one that merely starts the same', () => {
+    expect(run('~/.claude.json', { tool_name: 'Edit', tool_input: { file_path: '/home/me/repo/a.ts' } })).toBe(0);
+    expect(run('~/.claude.json', { tool_name: 'Edit', tool_input: { file_path: '/home/me/.claude.json.bak' } })).toBe(0);
+  });
+
+  it('exits 0 on empty or unreadable input: a broken guard must not block', () => {
+    expect(run('~/.claude.json', {})).toBe(0);
   });
 });
 

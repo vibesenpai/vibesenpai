@@ -5,7 +5,9 @@
 
 import { basename } from 'node:path';
 import { parse } from './parsers/index.ts';
-import { withFullText } from './parsers/claude-code.ts';
+import { sessionCwd, withFullText } from './parsers/claude-code.ts';
+import { ownedByHarness } from './harness/claude-code.ts';
+import { fixForFinding, questionThenEdit, sharedFrom, type FindingFix, type SharedFix } from './finding-fix.ts';
 import { discoverTranscripts, projectLabel, projectOf, readSession } from './read.ts';
 import { countDenominators, runDetectors, type Denominators, type Detector } from './detect/index.ts';
 import { costFor, type Cost } from './cost.ts';
@@ -63,6 +65,8 @@ export type JudgedView = {
   established?: string;
   /** When the first cited turn was written. */
   turnAt?: string;
+  /** This finding's own fix, when its evidence supports one (src/finding-fix.ts). */
+  fix?: FindingFix;
 };
 
 /** The prompt a cited turn answered: redacted `textSummary`, cut so it still survives `redact`. */
@@ -95,6 +99,8 @@ export type ReportData = {
   standing: Standing;
   /** One recommendation per dimension found, from the same `recommend` that `fix` uses. */
   recommendations: Record<string, Recommendation>;
+  /** The fix shared by findings in ≥2 sessions, per dimension; it outranks the recommendation there. */
+  shared: Record<string, SharedFix>;
 };
 
 type GatherOptions = {
@@ -194,6 +200,8 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
   const acc = newStandingAccumulator();
   let unreadable = 0;
   const allJudged: JudgedFinding[] = [];
+  const allFixes: FindingFix[] = [];
+  const questions: { finding: JudgedFinding; project: string }[] = [];
   const compactions: Compactions = new Map();
 
   for (const source of discoverTranscripts(opts.sources)) {
@@ -203,9 +211,11 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
     let parsed;
     // Untruncated text, held in memory only, to find who wrote a quote.
     let fullText = new Map<number, string>();
+    let cwd: string | undefined;
     try {
       const read = readSession({ source, sessionId, mode: 'live' });
       ({ result: parsed, fullText } = withFullText(() => parse(source, read.text, sessionId)));
+      if ((opts.judgedFor?.(sessionId) ?? []).length > 0) cwd = sessionCwd(read.text.split('\n'));
     } catch {
       // Counted so the report cannot quietly analyse fewer sessions than it claims.
       unreadable++;
@@ -267,6 +277,9 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
       const asked = first === undefined ? undefined : askedBefore(prompts, first);
       const by = j.quote === undefined ? undefined : quoteAuthor(events, j.quote, fullText);
       const turnAt = first === undefined ? undefined : tsOf.get(first);
+      const fix = fixForFinding(j, { events, project, ownedByHarness, ...(cwd !== undefined ? { cwd } : {}), ...(by !== undefined ? { author: by } : {}) });
+      if (fix !== undefined) allFixes.push(fix);
+      if (questionThenEdit(j, events)) questions.push({ finding: j, project });
       return {
         ...(j.id !== undefined ? { id: j.id } : {}),
         at: j.at,
@@ -279,6 +292,7 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
         ...(asked !== undefined ? { asked } : {}),
         ...(SHOW_ESTABLISHED && j.established !== undefined ? { established: establishedLine(j.established) } : {}),
         ...(turnAt !== undefined ? { turnAt } : {}),
+        ...(fix !== undefined ? { fix } : {}),
       };
     });
 
@@ -326,6 +340,7 @@ export async function gatherReport(opts: GatherOptions): Promise<ReportData> {
     unreadable,
     standing,
     recommendations: recommendationsFor(standing, sessions, allJudged, compactions),
+    shared: Object.fromEntries(sharedFrom(allFixes, questions).reverse().map((x) => [x.fix.dimension, x])),
   };
 }
 

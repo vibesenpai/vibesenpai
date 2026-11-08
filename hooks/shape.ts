@@ -257,3 +257,46 @@ export function wrapLines(text: string, max: number): string[] {
   if (line !== '') out.push(line)
   return out
 }
+
+/** Braille dots, one frame per tick. */
+export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+export type BarRun = { text: string; tone: 'done' | 'glint' | 'rest' }
+
+/**
+ * A progress bar in heavy rules, `━━━━╸━━━`, as runs of one tone each. While `moving`, a short glint
+ * sweeps the done part, one cell per frame. The fill comes from real counts only.
+ */
+export function barRuns(done: number, total: number, cells: number, frame: number, moving: boolean): BarRun[] {
+  const exact = total <= 0 ? 0 : Math.min(1, done / total) * cells
+  const full = Math.floor(exact)
+  const half = exact - full >= 0.5 && full < cells
+  const tones: BarRun['tone'][] = Array.from({ length: cells }, (_, i) => (i < full || (i === full && half) ? 'done' : 'rest'))
+  if (moving && full > 0) {
+    const at = (frame % (full + 6)) - 3
+    for (let i = at; i < at + 3; i++) if (i >= 0 && i < full) tones[i] = 'glint'
+  }
+  const glyph = (i: number): string => (i === full && half ? '╸' : '━')
+  const runs: BarRun[] = []
+  tones.forEach((tone, i) => {
+    const last = runs[runs.length - 1]
+    if (last !== undefined && last.tone === tone) last.text += glyph(i)
+    else runs.push({ tone, text: glyph(i) })
+  })
+  return runs
+}
+
+/** `about 3 min`, from a measured estimate. */
+export function aboutTime(seconds: number): string {
+  if (seconds < 90) return 'about a minute'
+  if (seconds < 90 * 60) return `about ${Math.round(seconds / 60)} min`
+  return `about ${Math.round(seconds / 3600)} h`
+}
+
+/** `Tuesday` within the week, else `Nov 9`. */
+export function finishDay(iso: string, now: Date): string {
+  const d = new Date(iso)
+  const days = Math.round((d.getTime() - now.getTime()) / 86_400_000)
+  if (days <= 1) return 'tomorrow'
+  return days < 7 ? d.toLocaleDateString('en-US', { weekday: 'long' }) : shortDay(iso)
+}

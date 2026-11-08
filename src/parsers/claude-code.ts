@@ -758,6 +758,20 @@ export function parseTranscript(lines: Iterable<string>, fallbackSessionId = '')
   return { events, unknown, malformed, skipped, abandoned };
 }
 
+/** The session's working directory, from the first record naming one; redacted like event paths. */
+export function sessionCwd(lines: Iterable<string>): string | undefined {
+  for (const line of lines) {
+    if (!line.includes('"cwd"')) continue;
+    try {
+      const cwd = (JSON.parse(line) as RawRecord).cwd;
+      if (typeof cwd === 'string' && cwd !== '') return cleanPath(cwd);
+    } catch {
+      // A malformed line names nothing; keep looking.
+    }
+  }
+  return undefined;
+}
+
 /** Convenience wrapper for a whole file's contents. */
 export function parseTranscriptText(text: string, fallbackSessionId = ''): ParseOutput {
   return parseTranscript(text.split('\n'), fallbackSessionId);

@@ -78,6 +78,22 @@ describe('one fix in one project', () => {
   it('is not applied in a project where its marker was never seen', () => {
     expect(fixStates([plan], applied, [], sessions, 'q', () => true)[0]?.applied).toBeUndefined();
   });
+
+  it('counts a keyed fix by its own constraint, not every finding in its dimension', () => {
+    const push: ApplyPlan = { fixId: 'f00d00', dimension: 'overreach', target: 'project-permissions', text: 'git push', key: 'action:git push' };
+    const marked = [{ key: 'f00d00', project: 'p', sessionId: 'apply', at: '2026-10-10T12:00:00.000Z' }];
+    const keyed = sessions.map((x) => (x.id === 'b1' ? { ...x, keys: { 'action:git push': { times: 1, turn: 3 } } } : x));
+    const [f] = fixStates([push], marked, [], keyed, 'p', () => true);
+    expect(f?.counts).toBe('same-fix');
+    expect(f?.before).toEqual({ times: 1, sessions: 3 });
+    expect(f?.since).toEqual({ times: 0, sessions: 3 });
+    expect(f?.cameBack).toBeUndefined();
+  });
+
+  it('counts a quote-keyed fix by its dimension, and says so', () => {
+    const words: ApplyPlan = { ...plan, key: 'quote:abc' };
+    expect(fixStates([words], applied, loadedAt, sessions, 'p', () => true)[0]).toMatchObject({ counts: 'same-kind', since: { times: 1, sessions: 3 } });
+  });
 });
 
 describe('the store keeps the earliest sighting per project', () => {

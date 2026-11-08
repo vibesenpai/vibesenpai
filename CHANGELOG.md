@@ -11,6 +11,11 @@ Pre-alpha. Nothing has been published to npm yet.
 
 ### Added
 
+- **A fix for each finding, built from its evidence** (D67). A command the developer forbade becomes
+  a `permissions.ask` rule, a write outside the project a guard on that path, a broken CLAUDE.md
+  line a request for a test, an earlier instruction a rule scoped to the files it was broken in.
+  Questions answered with edits across sessions give a read-only `ask` subagent. Shown in `fix`, the
+  HTML report and the pane; outcomes count the fix's own constraint.
 - **`edit_retry`** — the first fully-measured detector. Fires on 380 of 1,139
   real sessions (33.4%), 927 instances, every one `certain`, **0 false
   positives** hand-verified.

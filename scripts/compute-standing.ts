@@ -18,6 +18,8 @@ import {
   type Db, type FixSighting, type SessionCostRow,
 } from '../src/store.ts';
 import { knownRules } from '../src/fix.ts';
+import { findingRules } from '../src/finding-fix.ts';
+import { readJudgeState } from '../src/judge/state.ts';
 import { sightingsIn } from '../src/outcome.ts';
 import { withFullText } from '../src/parsers/claude-code.ts';
 import { renderExtract } from '../src/judge/prompt.ts';
@@ -38,7 +40,14 @@ async function main(): Promise<Outcome> {
     const costs: SessionCostRow[] = [];
     const applied: FixSighting[] = [];
     const loaded: FixSighting[] = [];
-    const rules = knownRules();
+    // A finding's own rules too; an unreadable judge store just means only ours are looked for.
+    const rules = [...knownRules(), ...(() => {
+      try {
+        return findingRules(readJudgeState(config.archive).findings);
+      } catch {
+        return [];
+      }
+    })()];
     let unreadable = 0;
     for (const f of discoverTranscripts(config.sources)) {
       try {

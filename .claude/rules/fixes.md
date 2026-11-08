@@ -18,3 +18,9 @@
   The denominator follows the method: judged sessions for model dimensions.
 - Hook fixes have no Apply until each Stop-hook snippet is bounded and tested: an `exit 2` hook with
   an unfilled placeholder traps every turn.
+- A judged finding's own fix comes first (`src/finding-fix.ts`, D67); the dimension's fix is the
+  fallback. Its key is what it is for (`action:git push`, `path:…`, `instr:<hash>`, `quote:<hash>`)
+  and its outcome counts that key; a `quote:` key counts the dimension and says "same kind".
+- Targets: `project-permissions`, `project-hooks` (a PreToolUse guard; a Stop hook stays printed),
+  `scoped-instructions`, `project-check`, `project-agent`. A fix from another project is shown with no
+  Apply: it would land in the wrong repo.

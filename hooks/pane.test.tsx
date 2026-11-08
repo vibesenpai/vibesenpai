@@ -2,6 +2,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import type { PaneData } from '../types'
+import { aboutTime, barRuns, finishDay } from './shape.ts'
 
 const NOW = new Date().toISOString()
 const EARLIER = '2026-10-01T10:00:00.000Z'
@@ -107,7 +108,7 @@ test('opens on the command, reads the analysis, and shows new findings first', a
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect(await ui.find({ type: 'Text', text: /2\/3 sessions read/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /2\/3/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /New since you last looked/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /│ Findings │/ })).toBeDefined()
     // How a finding was flagged is never shown.
@@ -148,7 +149,8 @@ test('Apply drafts the request into an empty prompt box, with the marker, and ne
   engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Button', key: 'apply:16ae85' }))?.props['variant']).toBe('primary')
+  // The one solid button: the action to take.
+  expect(JSON.stringify(await ui.find({ type: 'Button', key: 'apply:16ae85' }))).toMatch(/"backgroundColor":"claude"/)
   const tree = JSON.stringify(await ui.find({ type: 'Box' }))
   expect(tree).toMatch(/"label":"Apply"/)
   expect(tree).not.toMatch(/"label":"Copy/)
@@ -482,7 +484,8 @@ test('the header carries the status on the right and a Refresh that re-reads wit
   engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^2\/3 sessions read$/ })).toBeDefined()
+  // Reads still going and a model finding already in: the header carries the bar.
+  expect(await ui.find({ type: 'Text', text: /━+ 2\/3$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^updated / })).toBeDefined()
   await ui.press({ key: 'refresh-top' })
   expect(calls.argv.filter((a) => a.includes('--json'))).toHaveLength(2)
@@ -501,4 +504,57 @@ test('an open pane re-reads by itself when a background pass writes, and not oth
   calls.mtime = 2
   await clock.advance(30_000)
   expect(reads()).toBe(2)
+})
+
+test('before the first model finding, a card above the findings shows the reads with a real bar', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  const sessions = DATA.sessions.map((x) => ({ ...x, judged: [] }))
+  engine(on, { ...DATA, sessions, read: 0, total: 3, progress: { target: 3 } }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^Model reads$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^0 of 3$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Begins when this turn ends\.$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('while the judge runs, the card says so with the measured time and the day the limit lets it finish', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  const sessions = DATA.sessions.map((x) => ({ ...x, judged: [] }))
+  const finishOn = new Date(Date.now() + 3 * 86_400_000).toISOString()
+  engine(on, { ...DATA, sessions, read: 1, total: 3, health: [{ job: 'judge', state: 'running' }], progress: { target: 3, seconds: 180, finishOn } }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^reading now · about 3 min$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /the rest finish \w+day\.$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+const barText = (runs: { text: string }[]): string => runs.map((r) => r.text).join('')
+
+test('the bar fills from the count, with a half cell at the edge', () => {
+  expect(barRuns(0, 4, 8, 0, false)).toEqual([{ tone: 'rest', text: '━━━━━━━━' }])
+  expect(barRuns(2, 4, 8, 0, false)).toEqual([{ tone: 'done', text: '━━━━' }, { tone: 'rest', text: '━━━━' }])
+  expect(barText(barRuns(9, 16, 8, 0, false))).toBe('━━━━╸━━━')
+  expect(barRuns(4, 4, 8, 0, false)).toEqual([{ tone: 'done', text: '━━━━━━━━' }])
+})
+
+test('the glint sweeps the done part only while moving, never past the fill', () => {
+  expect(barRuns(2, 4, 8, 4, false).some((r) => r.tone === 'glint')).toBe(false)
+  for (let f = 0; f < 20; f++) {
+    const runs = barRuns(2, 4, 8, f, true)
+    expect(barText(runs)).toBe('━━━━━━━━')
+    expect(runs.filter((r) => r.tone === 'rest').map((r) => r.text).join('')).toBe('━━━━')
+  }
+  expect(barRuns(2, 4, 8, 4, true).some((r) => r.tone === 'glint')).toBe(true)
+})
+
+test('time words round a measured estimate and name the finishing day', () => {
+  expect(aboutTime(40)).toBe('about a minute')
+  expect(aboutTime(180)).toBe('about 3 min')
+  expect(aboutTime(3 * 3600)).toBe('about 3 h')
+  const now = new Date(2026, 10, 2, 12)
+  expect(finishDay(new Date(2026, 10, 3, 12).toISOString(), now)).toBe('tomorrow')
+  expect(finishDay(new Date(2026, 10, 5, 12).toISOString(), now)).toBe('Thursday')
+  expect(finishDay(new Date(2026, 10, 20, 12).toISOString(), now)).toBe('Nov 20')
 })

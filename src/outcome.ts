@@ -47,12 +47,16 @@ export type OutcomeSession = {
   judged: boolean;
   /** Occurrences per dimension, and the first cited turn of each. */
   found: Record<string, { times: number; turn?: number }>;
+  /** Occurrences per finding-fix key (`action:git push`), so a keyed fix counts its own constraint. */
+  keys?: Record<string, { times: number; turn?: number }>;
 };
 
 export type Window = { times: number; sessions: number };
 
 export type FixState = ApplyPlan & {
   applied?: { at: string; sessionId: string };
+  /** What the windows count: the fix's own constraint, or only its dimension (a `quote:` key cannot be matched). */
+  counts?: 'same-fix' | 'same-kind';
   /** The rule was seen loaded after it was requested. False: requested, never loaded, so no counts yet. */
   inEffect?: boolean;
   before?: Window;
@@ -78,22 +82,25 @@ export function fixStates(
     const a = applied.filter((x) => x.key === p.fixId && x.project === project).sort((x, y) => x.at.localeCompare(y.at))[0];
     if (a === undefined) return p;
     // A rule counts from when it was first seen loaded: a request the developer declined never took effect.
-    const rule = p.target === 'project-instructions';
+    const rule = p.target === 'project-instructions' || p.target === 'scoped-instructions';
     const load = loaded.filter((l) => l.key === ruleHash(p.text) && l.project === project && l.at >= a.at).sort((x, y) => x.at.localeCompare(y.at))[0];
     if (rule && load === undefined) return { ...p, applied: { at: a.at, sessionId: a.sessionId }, inEffect: false };
     const from = load?.at ?? a.at;
     const pool = here.filter((s) => !byModel(p.dimension) || s.judged);
-    const count = (ss: OutcomeSession[]): Window => ({ times: ss.reduce((n, s) => n + (s.found[p.dimension]?.times ?? 0), 0), sessions: ss.length });
+    const keyed = p.key !== undefined && !p.key.startsWith('quote:');
+    const hit = (s: OutcomeSession): { times: number; turn?: number } | undefined => (keyed ? s.keys?.[p.key as string] : s.found[p.dimension]);
+    const count = (ss: OutcomeSession[]): Window => ({ times: ss.reduce((n, s) => n + (hit(s)?.times ?? 0), 0), sessions: ss.length });
     // The applying session, and a session the rule first loaded into mid-way, are part before and part after.
     const loadedMidway = load !== undefined && (here.find((s) => s.id === load.sessionId)?.at ?? load.at) < load.at;
     const mixed = new Set([a.sessionId, ...(loadedMidway ? [load.sessionId] : [])]);
     const others = pool.filter((s) => !mixed.has(s.id));
     const after = others.filter((s) => (s.at as string) >= from);
-    const back = after.find((s) => (s.found[p.dimension]?.times ?? 0) > 0);
-    const turn = back?.found[p.dimension]?.turn;
+    const back = after.find((s) => (hit(s)?.times ?? 0) > 0);
+    const turn = back === undefined ? undefined : hit(back)?.turn;
     return {
       ...p,
       applied: { at: a.at, sessionId: a.sessionId },
+      ...(p.key !== undefined ? { counts: keyed ? ('same-fix' as const) : ('same-kind' as const) } : {}),
       ...(rule ? { inEffect: true } : {}),
       before: count(others.filter((s) => !after.includes(s))),
       since: count(after),

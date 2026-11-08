@@ -431,9 +431,27 @@ export function compactionsFor(
 export const QUOTE_MAX = 200;
 
 /** Where a fix lands: harness-neutral. Each harness's adapter names the file. */
-export type ApplyTarget = 'session' | 'project-instructions' | 'project-hooks';
+export type ApplyTarget =
+  | 'session'
+  | 'project-instructions'
+  | 'project-hooks'
+  | 'project-permissions'
+  | 'scoped-instructions'
+  | 'project-check'
+  | 'project-agent';
 
-export type ApplyPlan = { fixId: string; dimension: string; target: ApplyTarget; text: string };
+export type ApplyPlan = {
+  fixId: string;
+  dimension: string;
+  target: ApplyTarget;
+  text: string;
+  /** Project-relative files a scoped rule loads for. */
+  paths?: string[];
+  /** The words a check enforces were loaded from this file. */
+  from?: string;
+  /** A finding's own fix: what it is for (`action:git push`), so its outcome counts that constraint. */
+  key?: string;
+};
 
 /**
  * The change one recommendation makes, or undefined when there is nothing to apply. A standing rule
@@ -445,6 +463,11 @@ export function applyPlan(r: Recommendation): ApplyPlan | undefined {
   if (pick === undefined) return undefined;
   const [target, text] = pick;
   return { fixId: fixIdOf(target, r.dimension, r.key ?? r.dimension), dimension: r.dimension, target, text };
+}
+
+/** The Stop hook that runs the check instead of trusting the claim; printed, never applied. */
+export function stopHookSnippet(): string {
+  return (BY_DIMENSION['inaccurate_self_report'] as DimensionFix).config?.snippet ?? '';
 }
 
 /** Every standing rule a fix can add, for spotting one loaded in a later session. */
