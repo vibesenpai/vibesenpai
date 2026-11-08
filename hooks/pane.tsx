@@ -575,6 +575,7 @@ export const register: Register = on => {
             </Box>
           )}
           {v.blocks.length === 0 && <Text dimColor>Nothing flagged in {data.read} sessions read.</Text>}
+          {v.blocks.length > 0 && <Text weight="bold">What went wrong, by kind</Text>}
           {v.blocks.map((b) => {
             // The first block starts open; every block, the first included, toggles.
             const first = b === v.blocks[0]

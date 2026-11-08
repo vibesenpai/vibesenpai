@@ -14,7 +14,7 @@ import type { Rebuild } from './stats.ts';
 import type { Asked, AskedRow, FindingView, JudgedView, ReportData, SessionView } from './gather.ts';
 import type { Recommendation } from './fix.ts';
 import { KIND_WORDS, type FindingFix, type SharedFix } from './finding-fix.ts';
-import { fixDisplay } from './harness/claude-code.ts';
+import { fixDisplay } from './harness/fix-display.ts';
 import { createHash } from 'node:crypto';
 import { BANNER_JPEG, BANNER_SIZE, MARK_FAVICON, MARK_SVG } from './brand.ts';
 

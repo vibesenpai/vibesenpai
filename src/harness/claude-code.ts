@@ -1,7 +1,6 @@
 /** Claude Code's half of applying a fix: where each target lives, and the request the agent is asked to carry out. */
 
-import { stopHookSnippet, type ApplyPlan } from '../fix.ts';
-import { findingPlan, type FindingFix } from '../finding-fix.ts';
+import type { ApplyPlan } from '../fix.ts';
 import { fixMarker } from '../fix-marker.ts';
 
 /** Ours alone: the user's CLAUDE.md only ever gains one pointer line to it. */
@@ -19,7 +18,7 @@ export function ownedByHarness(path: string): boolean {
 }
 
 /** Project-local settings: "You, in this one project only" (code.claude.com/docs/en/settings, checked 2026-11-01). */
-const LOCAL_SETTINGS = '.claude/settings.local.json';
+export const LOCAL_SETTINGS = '.claude/settings.local.json';
 /** A finding's scoped rule: rules load recursively, and `paths:` scopes one to matching files. */
 const scopedFile = (fixId: string): string => `.claude/rules/vibesenpai/${fixId}.md`;
 const AGENT_FILE = '.claude/agents/ask.md';
@@ -135,11 +134,4 @@ export function applyRequest(plans: ApplyPlan[]): string {
   if (session.length > 0) parts.push(...(parts.length > 0 ? [''] : []), ...session);
   parts.push(fixMarker(plans.map((p) => p.fixId)));
   return parts.join('\n');
-}
-
-/** A finding's fix as a surface shows it: where it lands, and the text to read or copy. */
-export function fixDisplay(x: FindingFix): { destination: string; body: string } {
-  const p = findingPlan(x);
-  if (p === undefined) return { destination: LOCAL_SETTINGS, body: stopHookSnippet() };
-  return { destination: destination(p), body: p.target === 'project-check' ? p.text : snippetFor(p) ?? p.text };
 }
