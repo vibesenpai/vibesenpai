@@ -1,0 +1,81 @@
+name: Release
+
+# A tag v<version> builds the plugin zip, attaches it to a GitHub release, then points
+# marketplace.json at it. DECISIONS.md D69.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Tag matches plugin.json and package.json
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          plugin=$(node -p "require('./.claude-plugin/plugin.json').version")
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$plugin" ] || [ "$tag" != "$pkg" ]; then
+            echo "tag $tag, plugin.json $plugin, package.json $pkg: they must match" >&2
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+      # The hash is taken from the bytes uploaded, never rebuilt.
+      - name: Build zip and hash it
+        id: zip
+        run: |
+          zip=$(bash scripts/build-release.sh "$GITHUB_SHA" "${{ steps.version.outputs.version }}" dist)
+          echo "path=$zip" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$zip")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "${{ steps.zip.outputs.path }}" \
+            --title "vibesenpai ${{ steps.version.outputs.version }}" \
+            --notes "See CHANGELOG.md. sha256: ${{ steps.zip.outputs.sha256 }}"
+
+      # Only after the zip exists. If this step fails, marketplace.json keeps its previous source.
+      - name: Point marketplace.json at the zip
+        env:
+          URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ steps.zip.outputs.name }}
+          SHA256: ${{ steps.zip.outputs.sha256 }}
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          node -e '
+            const fs = require("node:fs");
+            const file = ".claude-plugin/marketplace.json";
+            const m = JSON.parse(fs.readFileSync(file, "utf8"));
+            const entry = m.plugins.find((p) => p.name === "vibesenpai");
+            entry.source = { source: "archive", url: process.env.URL, sha256: process.env.SHA256 };
+            fs.writeFileSync(file, JSON.stringify(m, null, 2) + "\n");
+          '
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add .claude-plugin/marketplace.json
+          git commit -m "Release ${GITHUB_REF_NAME}: marketplace.json points at its zip"
+          git push origin main

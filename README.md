@@ -98,7 +98,7 @@ through your own harness it is no longer strictly true of us either —
 
 ```
 /plugin marketplace add vibesenpai/vibesenpai
-/plugin install vibesenpai
+/plugin install vibesenpai@vibesenpai
 ```
 
 That is the whole thing. No npm, no clone, nothing to bootstrap — this ships
@@ -114,6 +114,10 @@ You get three commands:
 ```
 
 To stop it: `/plugin disable vibesenpai`.
+
+To update to a new release: `/plugin`, then **Installed**, vibesenpai, **Update now**; or
+`claude plugin update vibesenpai@vibesenpai` from a terminal. Updates are not automatic for
+marketplaces outside Anthropic's own unless you turn auto-update on under **Marketplaces**.
 
 > **Not published yet.** The marketplace entry is built and the plugin runs from
 > a clone, but it has not been exercised through a real `/plugin install`. Until

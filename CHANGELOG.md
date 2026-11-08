@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Pre-alpha. Nothing has been published to npm yet.
+Pre-alpha. Nothing has been released yet. Releases ship as a zip on a tagged GitHub release (D69); npm is not used.
 
 ### Changed
 

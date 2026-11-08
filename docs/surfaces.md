@@ -24,7 +24,7 @@ Verified against a real multi-harness plugin on this machine
 ```
 # Primary — in-harness. This is the product's front door.
 /plugin marketplace add vibesenpai/vibesenpai
-/plugin install vibesenpai
+/plugin install vibesenpai@vibesenpai
       → Claude Code registers the commands and hooks itself. We write nothing.
       → the plugin bundles the analyzer, so npm is never involved.
 

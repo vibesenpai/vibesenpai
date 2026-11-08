@@ -37,7 +37,7 @@ marketplace — which is the single biggest discovery lever available without be
 
 ```
 /plugin marketplace add vibesenpai/vibesenpai
-/plugin install vibesenpai
+/plugin install vibesenpai@vibesenpai
 ```
 
 **Tier 3 is cheap and worth doing all of it** — these are PRs or form submissions, not negotiations:
@@ -219,6 +219,64 @@ Considered and dropped: `kaigan` (too close in sound to the author's earlier pro
 (`src/fix-marker.ts`), and `agentsensei-judge` transcripts are still skipped as our own
 (`src/read.ts`). The rules file moved to `.claude/rules/vibesenpai.md` with its text unchanged, so
 outcome tracking (which hashes the text) carries over.
+
+### Releases and install counts (2026-11-08)
+
+**The question.** How many people install vibesenpai, with no telemetry. Checked against the
+Claude Code docs (`plugins/measure`, `loading`, `host-marketplace`, `marketplace-reference`,
+`install`, `troubleshooting`) on 2026-11-08.
+
+**What Claude Code offers an author: nothing (observed).** *"Claude Code doesn't report a plugin's
+usage back to its author."* Organisation admins get OpenTelemetry events and an Analytics API, with
+non-official plugin names redacted. Public counts come from `stats/plugin-installs.json` on the
+`stats` branch of `anthropics/claude-plugins-official`; fetched on 2026-11-08, it listed 324
+plugins, every one `@claude-plugins-official`. The feature request for author counts
+([anthropics/claude-code#46163](https://github.com/anthropics/claude-code/issues/46163)) was closed
+by a bot for inactivity, with no maintainer reply.
+
+**Options considered.**
+
+| Option | Counts | Rejected because |
+|---|---|---|
+| A ping from the plugin | anything | telemetry; the product does not phone home |
+| `marketplace.json` served from our own URL | adds and every refresh | not installs: also fetched on update and on install-by-name; our domain becomes a supply-chain point |
+| GitHub clone traffic | unique cloners | 14-day window; mixes refreshes, updates and CI |
+| **Release zip, `archive` source** | **zip downloads** | chosen |
+
+**How it works.** A tag `v<version>` runs `.github/workflows/release.yml`: tests, a check that the
+tag matches `plugin.json` and `package.json`, `scripts/build-release.sh` (the runtime files one
+directory down; `marketplace.json` stays out because it holds the zip's hash), a release with the
+zip attached, and only then a commit pointing the `marketplace.json` entry at the zip with its
+`sha256`. If that last step fails, the entry keeps its previous source. The hash is taken from the
+uploaded bytes, never from a rebuild.
+
+**What a download means (observed in the docs, unless marked).**
+
+| Event | Downloads the zip |
+|---|---|
+| First install | yes: *"downloads a fresh copy of its files"* |
+| Installing again on the same machine | no: *"already installed … exits 0"*, unless the cache is gone |
+| Marketplace refresh | no: that clones the repo for `marketplace.json` |
+| User updates to a new version | yes: *"a new copy only when the plugin's computed version differs"* |
+| Background auto-update | off by default: *"off for every other marketplace"* |
+| Update check with no new version | **open**: the manifest's `version` wins, and the manifest is inside the zip |
+
+So the count is **first installs plus manual upgrades**, per release. GitHub does not deduplicate.
+
+**Open items.**
+- Whether an update check downloads the zip to read `plugin.json`. Observable after the first
+  release: run `claude plugin update vibesenpai@vibesenpai` with no new version, then read the
+  download count.
+- What a client older than v2.1.224 (when `archive` arrived) does with the entry. The marketplace
+  format has no minimum-version field.
+- The repo, `vibesenpai/vibesenpai`, is private (404 to the public on 2026-11-08). The install line and the release URL work for others only once it is public.
+
+**Reading the count.**
+
+```
+gh api repos/vibesenpai/vibesenpai/releases \
+  --jq '.[] | "\(.tag_name)  \([.assets[].download_count] | add)"'
+```
 
 ---
 

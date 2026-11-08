@@ -5,12 +5,16 @@ description: One command in Claude Code. There is nothing else to set up.
 
 ```
 /plugin marketplace add vibesenpai/vibesenpai
-/plugin install vibesenpai
+/plugin install vibesenpai@vibesenpai
 ```
 
 That is the whole thing. No npm, no clone, nothing to bootstrap — vibesenpai
 ships with **zero runtime dependencies**, and Node is already on your machine
 because Claude Code requires it.
+
+To update to a new release: `/plugin`, then **Installed**, vibesenpai, **Update now**; or
+`claude plugin update vibesenpai@vibesenpai` from a terminal. Updates are not automatic for
+marketplaces outside Anthropic's own unless you turn auto-update on under **Marketplaces**.
 
 :::caution[Not published yet]
 The marketplace entry is built and the plugin runs from a clone, but it has not
