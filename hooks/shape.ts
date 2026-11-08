@@ -25,7 +25,7 @@ export type Item = {
   written: number
   reasons: string[]
   rows: PaneRow[]
-  /** What `agentsensei dismiss` takes. */
+  /** What `vibesenpai dismiss` takes. */
   dismissId?: string
   /** When the first cited turn was written. */
   turnAt?: string

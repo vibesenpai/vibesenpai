@@ -3,7 +3,7 @@
 ## Reporting
 
 Please report security issues privately via
-[GitHub Security Advisories](https://github.com/crozzfire/agentsensei/security/advisories/new)
+[GitHub Security Advisories](https://github.com/vibesenpai/vibesenpai/security/advisories/new)
 rather than a public issue.
 
 Include what you ran, what happened, and what you expected. If it involves data
@@ -14,8 +14,8 @@ leaving the machine, say which version and whether the judge was enabled.
 | | |
 |---|---|
 | **reads** | `~/.claude/projects/**`, in place — never modified, never copied |
-| **writes** | `~/.local/share/agentsensei`, mode 0600 |
-| **writes, with consent** | `~/.claude/settings.json` via `agentsensei install`, which prints the change, requires `--apply`, and takes a backup |
+| **writes** | `~/.local/share/vibesenpai`, mode 0600 |
+| **writes, with consent** | `~/.claude/settings.json` via `vibesenpai install`, which prints the change, requires `--apply`, and takes a backup |
 | **sends** | nothing, unless the judge is explicitly enabled |
 
 ## The judge, which is the part that matters
@@ -37,7 +37,7 @@ result". The second is weaker, and this project got that distinction wrong once.
 ## Kill switch
 
 ```bash
-AGENTSENSEI_DISABLE=1
+VIBESENPAI_DISABLE=1
 ```
 
 Checked on the first line of every entry point, including the installed hooks.
@@ -45,7 +45,7 @@ Nothing reads, nothing runs, nothing sends.
 
 ## Known limits
 
-A `permissions.deny` rule suggested by `agentsensei fix` is **not a security
+A `permissions.deny` rule suggested by `vibesenpai fix` is **not a security
 boundary**, and the tool says so when it suggests one. Claude Code's own
 documentation says the same. A rule written for `pnpm add` does not match
 `npx pnpm add` or `sh -c 'pnpm add'`.

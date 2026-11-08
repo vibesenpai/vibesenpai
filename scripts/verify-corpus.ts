@@ -11,7 +11,7 @@ import { buildSkeletons, renderSkeleton } from '../src/skeleton.ts';
 import { runDetectors, detectorsFor, countDenominators } from '../src/detect/index.ts';
 import type { Event } from '../src/types.ts';
 
-const root = process.env.AGENTSENSEI_CORPUS ?? '/tmp/agentsensei-corpus';
+const root = process.env.VIBESENPAI_CORPUS ?? '/tmp/vibesenpai-corpus';
 const manifest = JSON.parse(
   readFileSync(join(import.meta.dirname, 'corpus.json'), 'utf8'),
 ) as { baseline: Record<string, number> };

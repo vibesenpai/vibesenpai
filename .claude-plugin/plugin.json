@@ -1,11 +1,11 @@
 {
-  "name": "agentsensei",
+  "name": "vibesenpai",
   "version": "0.1.0",
-  "description": "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.",
+  "description": "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.",
   "author": {
-    "name": "agentsensei contributors"
+    "name": "vibesenpai contributors"
   },
-  "homepage": "https://github.com/crozzfire/agentsensei#readme",
+  "homepage": "https://github.com/vibesenpai/vibesenpai#readme",
   "license": "MIT",
   "keywords": [
     "observability",
@@ -13,6 +13,6 @@
     "developer-tools",
     "agent-evaluation"
   ],
-  "repository": "https://github.com/crozzfire/agentsensei",
+  "repository": "https://github.com/vibesenpai/vibesenpai",
   "types": "./types/index.d.ts"
 }

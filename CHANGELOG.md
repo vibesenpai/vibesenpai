@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pre-alpha. Nothing has been published to npm yet.
 
+### Changed
+
+- **Renamed from agentsensei to vibesenpai** (D68). Commands are `/vibesenpai:*`, environment
+  variables `VIBESENPAI_*`, the data folder `~/.local/share/vibesenpai`, the rules file
+  `.claude/rules/vibesenpai.md`. Fix markers and judge folders under the old name are still
+  recognised. The pitch: *Discover how your agents failed you.*
+
 ### Added
 
 - **A fix for each finding, built from its evidence** (D67). A command the developer forbade becomes

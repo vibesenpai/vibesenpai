@@ -4,11 +4,11 @@
 
 `fix` makes one recommendation and then forgets it: nothing is stored, the user's "yes" exists only
 inside the transcript, and nothing ever checks whether the dimension moved. That is the exact gap
-`docs/artifacts.md:180` charges vibe-log with. The market research (`reports/agentsensei competitors
+`docs/artifacts.md:180` charges vibe-log with. The market research (`reports/vibesenpai competitors
 and B2B path.md`) sharpens why it matters:
 - The patterns we recommend (plan mode, spec-first) have almost **no controlled outcome evidence**.
 - Only Larridin and Opaline close the loop, and both centralise transcripts and score sessions.
-- So agentsensei has to produce the evidence itself, from the user's own sessions, as `N → M`.
+- So vibesenpai has to produce the evidence itself, from the user's own sessions, as `N → M`.
 - It is also phase 0 of any B2B story ("did our enablement work?").
 
 The data must start accruing before any graph can show anything. Transcripts expire at the harness
@@ -156,7 +156,7 @@ Two layers, both drawn from the same persisted tables, so both extend past the h
 
 ### Surfaces
 
-- **`/agentsensei:report` (HTML, `src/html.ts` + `src/gather.ts`):**
+- **`/vibesenpai:report` (HTML, `src/html.ts` + `src/gather.ts`):**
   - **Findings section:** each dimension's existing `<details>` gains an inline trend chart (a small
     inline SVG, one unit per axis) under its headline. If a recommendation for that dimension was
     shown, its "Did it work?" panel follows directly below. The finding, its history and its outcome
@@ -169,9 +169,9 @@ Two layers, both drawn from the same persisted tables, so both extend past the h
     on disk. The current-window figures remain live.
   - Rendering: server-side inline SVG, no JS, CSP-safe (`test/html.test.ts`), existing tokens and
     dark mode, readable at phone width.
-- **`agentsensei trends`** (`cli.ts:175` stops listing it as unimplemented): the same series as a
+- **`vibesenpai trends`** (`cli.ts:175` stops listing it as unimplemented): the same series as a
   plain-text weekly table, then the "Did it work?" blocks. No bars, matching `render.ts`.
-- **`/agentsensei:insights` / `standing`:** one delta per dimension in words ("edit_retry 9 → 4 per
+- **`/vibesenpai:insights` / `standing`:** one delta per dimension in words ("edit_retry 9 → 4 per
   100 edits since last window"), no chart.
 
 ### Mockups (approved before wiring; built first as a standalone preview page)
@@ -204,7 +204,7 @@ misread_intent · judged sessions · flagged by a model            past 30 days
  Adoption             plan step in 2 of 11 sessions before Oct 12, 7 of 13 after
 ```
 
-- **`/agentsensei:fix`**: the evidence line above. `commands/fix.md` is unchanged.
+- **`/vibesenpai:fix`**: the evidence line above. `commands/fix.md` is unchanged.
 - **Session-start line: nothing in this slice.** Judge-based findings can't be ambient. A rule-based
   artifact can add a single fact line later (no imperative, rate-limited, D57-scoped).
 

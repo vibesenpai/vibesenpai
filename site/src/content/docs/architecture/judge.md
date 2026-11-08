@@ -91,7 +91,7 @@ permanently.
 
 The model is called through your own `claude` CLI, in a child process with:
 
-- `AGENTSENSEI_DISABLE=1`, so it cannot recursively analyse itself
+- `VIBESENPAI_DISABLE=1`, so it cannot recursively analyse itself
 - a dedicated working directory that transcript discovery filters out
 - `--allowed-tools ''` — it reads and answers, it cannot act
 

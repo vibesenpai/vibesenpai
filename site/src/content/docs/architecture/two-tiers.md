@@ -57,7 +57,7 @@ expensive proof: `inaccurate_self_report` was first built as a rule and died at
 **0 true positives against 5 false.** The same dimension works as a judge
 dimension. Same target, different tier, opposite outcome.
 
-[How the judge works →](/agentsensei/architecture/judge/)
+[How the judge works →](/vibesenpai/architecture/judge/)
 
 ## Two kinds of claim, one display
 

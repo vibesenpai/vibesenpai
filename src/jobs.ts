@@ -1,5 +1,5 @@
 /**
- * agentsensei's background jobs, described for the supervisor (`src/supervise/`).
+ * vibesenpai's background jobs, described for the supervisor (`src/supervise/`).
  * Any harness adapter calls `supervise(jobsFor(config, …), …)`; none of this knows which harness it is.
  */
 

@@ -419,7 +419,7 @@ describe('the drill-down', () => {
 
   it('wears its name, its mark and its favicon', () => {
     const html = renderHtml(data());
-    expect(html).toMatch(/<header class="hero">[\s\S]*<svg[\s\S]*<span>agentsensei<\/span>/);
+    expect(html).toMatch(/<header class="hero">[\s\S]*<svg[\s\S]*<span>vibesenpai<\/span>/);
     expect(html).toContain('<link rel="icon" href="data:image/svg+xml,');
     expect(html).toContain('<img src="data:image/jpeg;base64,');
   });

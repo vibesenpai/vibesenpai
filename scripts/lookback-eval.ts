@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Does lookback keep real mistakes and drop suggestions? Re-judges a slice around each finding the person
- * labelled (`agentsensei label`), once without lookback and once with, and scores both against the labels.
+ * labelled (`vibesenpai label`), once without lookback and once with, and scores both against the labels.
  * `--all` takes every judge finding instead, labelled or not, and lists what lookback keeps and drops,
  * for reading. Both runs label the same extracted episodes, so a difference is the gate's, not extraction noise. Writes nothing to the store. Spends model calls: prints the estimate, sends only with --apply.
  *

@@ -7,7 +7,7 @@ labels: bug
 **What you ran**
 
 ```
-agentsensei …
+vibesenpai …
 ```
 
 **What happened**
@@ -18,7 +18,7 @@ agentsensei …
 
 **Environment**
 
-- `agentsensei --version`:
+- `vibesenpai --version`:
 - `node --version`:
 - OS:
-- Judge enabled? (`agentsensei judge --status`)
+- Judge enabled? (`vibesenpai judge --status`)

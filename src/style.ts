@@ -1,11 +1,11 @@
 /**
  * Terminal styling. Colour follows `isTTY` (output relayed through the model must carry no escapes);
- * `NO_COLOR` disables it, `AGENTSENSEI_COLOR=1|0` forces it. Widths are measured on the plain text.
+ * `NO_COLOR` disables it, `VIBESENPAI_COLOR=1|0` forces it. Widths are measured on the plain text.
  */
 
 /** Set once at import: a flag read per-call would make output depend on order. */
 const ON = ((): boolean => {
-  const force = process.env['AGENTSENSEI_COLOR'];
+  const force = process.env['VIBESENPAI_COLOR'];
   if (force === '1') return true;
   if (force === '0') return false;
   if (process.env['NO_COLOR'] !== undefined) return false;

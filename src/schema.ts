@@ -21,13 +21,13 @@ type SchemaVersion<K extends SchemaName> = (typeof SCHEMA)[K];
 
 /** Stamped onto every persisted envelope, so a file found on its own is self-describing. */
 export type Versioned<K extends SchemaName> = {
-  readonly tool: 'agentsensei';
+  readonly tool: 'vibesenpai';
   readonly schema: K;
   readonly v: SchemaVersion<K>;
 };
 
 export function stamp<K extends SchemaName>(schema: K): Versioned<K> {
-  return { tool: 'agentsensei', schema, v: SCHEMA[schema] };
+  return { tool: 'vibesenpai', schema, v: SCHEMA[schema] };
 }
 
 type VersionCheck =

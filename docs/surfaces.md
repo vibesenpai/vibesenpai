@@ -23,13 +23,13 @@ Verified against a real multi-harness plugin on this machine
 
 ```
 # Primary — in-harness. This is the product's front door.
-/plugin marketplace add crozzfire/agentsensei
-/plugin install agentsensei
+/plugin marketplace add vibesenpai/vibesenpai
+/plugin install vibesenpai
       → Claude Code registers the commands and hooks itself. We write nothing.
       → the plugin bundles the analyzer, so npm is never involved.
 
 # Secondary — CLI, for CI / scripting / pre-install trial
-npm i -g agentsensei && agentsensei install
+npm i -g vibesenpai && vibesenpai install
       → does by hand what /plugin install does natively; asks before each write.
       → the command is `install`, not `init`; `init` was never built.
 ```
@@ -40,7 +40,7 @@ plugin *is* a config write.** The distinction that matters:
 - **Forbidden:** changing harness settings as a *side effect* of doing something else — e.g. `report`
   quietly raising `cleanupPeriodDays` because it would help us.
 - **Fine:** changing them when that *is* the request, visibly and reversibly — `init`, with a printed
-  diff, a per-harness prompt, `--print-only` to copy-paste it yourself, and `agentsensei uninstall`
+  diff, a per-harness prompt, `--print-only` to copy-paste it yourself, and `vibesenpai uninstall`
   that removes exactly what was added.
 
 The primary path sidesteps the question entirely: the harness's own marketplace mechanism writes the
@@ -50,14 +50,14 @@ npm install.
 
 **The one thing a plugin cannot do for itself is the statusline** — verified against all 26 official
 plugins, none ship one, because `statusLine` is a `settings.json` field rather than a plugin
-capability. So the ambient surface needs a consented write, and `/agentsensei:setup` is where that is
+capability. So the ambient surface needs a consented write, and `/vibesenpai:setup` is where that is
 asked.
 
 ### Built via settings.json, not the plugin manifest — 2026-10-19
 
 The layout below is still the distribution plan, but **the ambient layer that
 actually ships today installs into `~/.claude/settings.json`** via
-`agentsensei install`, not through `hooks/hooks.json` and `${extensionPath}`.
+`vibesenpai install`, not through `hooks/hooks.json` and `${extensionPath}`.
 There is no plugin manifest yet.
 
 Why: the goal was to see findings on a real machine, and a settings merge needs
@@ -66,7 +66,7 @@ route adds a build and a publish before anything can be judged.
 
 What that costs, stated so it is not rediscovered: the commands carry
 **absolute paths to this checkout**, so moving or renaming the repo breaks them
-until `agentsensei install --apply` is re-run. The plugin layout exists partly
+until `vibesenpai install --apply` is re-run. The plugin layout exists partly
 to avoid exactly that, which is the argument for doing it before anyone else
 installs this.
 
@@ -81,13 +81,13 @@ round-trip property verified against a copy of the real file.
 manifest rather than a refactor:
 
 ```
-agentsensei/
+vibesenpai/
   package.json                 # the npm CLI
   .claude-plugin/plugin.json   # v1 — + userConfig for store path etc.
   hooks/
     hooks.json                 # Claude Code   — ${extensionPath}
   scripts/                     # ONE set of entrypoints, harness-agnostic by design
-  commands/                    # /agentsensei:insights|why|fix|report  (+ optional bare /sensei)
+  commands/                    # /vibesenpai:insights|why|fix|report  (+ optional bare /sensei)
 
   # later, verified as mostly-manifest work:
   # .codex-plugin/plugin.json  + hooks/codex-hooks.json   — ${PLUGIN_ROOT}, statusMessage
@@ -126,8 +126,8 @@ Findings then wait in the store. The first moment you actually see them is which
 | Where | When |
 |---|---|
 | Statusline, next session | the next time you open the harness in that project |
-| `/sensei:now` or `agentsensei report` | whenever you ask |
-| Weekly digest + `agentsensei fix` | the aggregate view, where one concrete change is proposed |
+| `/sensei:now` or `vibesenpai report` | whenever you ask |
+| Weekly digest + `vibesenpai fix` | the aggregate view, where one concrete change is proposed |
 | Dashboard | M3 onward |
 | Desktop notification | only if explicitly opted in, session-end only |
 
@@ -157,8 +157,8 @@ in a README:
 5. **Never write to the harness's own files.** We read `~/.claude/projects` and never open it for
    writing. The transcript is the user's record, not our scratch space.
 6. **Circuit breaker.** If the detached analyzer fails N times in a row, the hook self-disables and
-   records why. `agentsensei doctor` reports it. Degrading to silence beats degrading to noise.
-7. **A kill switch that always works:** `AGENTSENSEI_DISABLE=1` short-circuits every hook on the
+   records why. `vibesenpai doctor` reports it. Degrading to silence beats degrading to noise.
+7. **A kill switch that always works:** `VIBESENPAI_DISABLE=1` short-circuits every hook on the
    first line, before any logic runs — so recovery never requires uninstalling or editing JSON.
 8. **Tested adversarially:** the M6 suite runs hooks with a corrupt catalog, a full disk, a missing
    binary, a killed analyzer mid-write, and a read-only data dir. Pass condition is that the session
@@ -214,7 +214,7 @@ that governs guards.
 Default session-start output stays terse, ~3 lines, and is skippable with one config flag:
 
 ```
-  agentsensei · last 7d: 14 sessions · 72% of edits verified · 3 loops unresolved
+  vibesenpai · last 7d: 14 sessions · 72% of edits verified · 3 loops unresolved
   ⌁ pnpm constraint violated 7×
 
   Run /sensei:now to view more details.
@@ -335,7 +335,7 @@ relative to the `Stop` boundary — cheap to test with a stub statusline script 
 Ranking just below "a broken analyzer must never break a session", and enforced the same way — in
 code, not in a README.
 
-> **Nothing `agentsensei` surfaces during a session may interrupt, distract, or delay the user. It
+> **Nothing `vibesenpai` surfaces during a session may interrupt, distract, or delay the user. It
 > never touches their prompt. The worst acceptable outcome is that a nudge goes unnoticed.**
 
 **The key move is choosing a channel that structurally cannot interrupt, rather than trying to time
@@ -382,7 +382,7 @@ as a footer**, in the multi-line surfaces where there is room for it — the ses
 `report` output:
 
 ```
-  agentsensei · last 7d: 14 sessions · 72% of edits verified · 3 loops unresolved
+  vibesenpai · last 7d: 14 sessions · 72% of edits verified · 3 loops unresolved
   ⌁ pnpm constraint violated 7×
   ⌁ 3 edits unverified · +2 more
 
@@ -412,7 +412,7 @@ disables live surfacing entirely, leaving `/sensei:now` and `report`. For many u
 right setting, and the tool loses nothing essential — the value proposition does not depend on
 nudging anyone.
 
-### `/agentsensei:insights` and `/agentsensei:fix` — slash commands, without a plugin
+### `/vibesenpai:insights` and `/vibesenpai:fix` — slash commands, without a plugin
 
 Custom commands live in `.claude/commands/`, and `` !`cmd` `` in the body runs a
 shell command and injects its output, gated by `allowed-tools` in the
@@ -422,8 +422,8 @@ frontmatter — verified in Anthropic's own `commit-commands`.
 `commit-commands:commit` are plugin commands, but the harness namespaces nested
 user commands the same way: *"Restored namespacing in command names based on
 subdirectories … `.claude/commands/frontend/component.md` is now
-`/frontend:component`"*. So `commands/agentsensei/now.md` is `/agentsensei:insights`,
-written by `agentsensei install` and removed by `uninstall` — **no plugin
+`/frontend:component`"*. So `commands/vibesenpai/now.md` is `/vibesenpai:insights`,
+written by `vibesenpai install` and removed by `uninstall` — **no plugin
 packaging**, which is what makes it affordable before M3.
 
 `uninstall` removes the directory with `rmdirSync`, which refuses a non-empty
@@ -439,22 +439,22 @@ breaks it until re-install.
 ### Command surface
 
 ```
-  agentsensei init                    detect harnesses, install plugins (asks first)
-  agentsensei insights                     report on the current / most recent session
-  agentsensei report --last 7d        retrospective; --since/--until/--project
-  agentsensei trends --weekly         improvement over time
-  agentsensei explain <id>            the evidence: exact turns, verbatim
-  agentsensei dismiss <id> --wrong    "this was TDD, not rework" → feeds the gold set
-  agentsensei fix                     the ONE next action + tier + evidence + baseline
-  agentsensei fix --guard <name>      generate the hook for it (printed, consent required)
-  agentsensei claude-md               audit CLAUDE.md: ceremonial / ineffective / working
-  agentsensei goal <dimension>        set a target; tracks baseline → delta
-  agentsensei dashboard               localhost UI
-  agentsensei scan                    read new transcript data (copies nothing)
-  agentsensei doctor                  harnesses, backends, paths, retention warning
-  agentsensei config                  resolved values + which layer set each
-  agentsensei eval                    three-tier scoreboard
-  agentsensei uninstall               remove exactly what init added
+  vibesenpai init                    detect harnesses, install plugins (asks first)
+  vibesenpai insights                     report on the current / most recent session
+  vibesenpai report --last 7d        retrospective; --since/--until/--project
+  vibesenpai trends --weekly         improvement over time
+  vibesenpai explain <id>            the evidence: exact turns, verbatim
+  vibesenpai dismiss <id> --wrong    "this was TDD, not rework" → feeds the gold set
+  vibesenpai fix                     the ONE next action + tier + evidence + baseline
+  vibesenpai fix --guard <name>      generate the hook for it (printed, consent required)
+  vibesenpai claude-md               audit CLAUDE.md: ceremonial / ineffective / working
+  vibesenpai goal <dimension>        set a target; tracks baseline → delta
+  vibesenpai dashboard               localhost UI
+  vibesenpai scan                    read new transcript data (copies nothing)
+  vibesenpai doctor                  harnesses, backends, paths, retention warning
+  vibesenpai config                  resolved values + which layer set each
+  vibesenpai eval                    three-tier scoreboard
+  vibesenpai uninstall               remove exactly what init added
 ```
 
 ### In-session slash commands
@@ -469,7 +469,7 @@ Earlier drafts of this document wrote `/sensei`, which was simply wrong.
 
 Two consequences, and the audience decides them:
 
-- **The plugin is named `agentsensei`, not `sensei`** — giving `/agentsensei:insights`. Shipping to
+- **The plugin is named `vibesenpai`, not `sensei`** — giving `/vibesenpai:insights`. Shipping to
   strangers means the plugin namespace is shared with everything else they install, and a generic
   `sensei` invites collision. The npm package and plugin name match, which also avoids explaining a
   discrepancy in the README.
@@ -477,14 +477,14 @@ Two consequences, and the audience decides them:
   `~/.claude/commands/sensei.md`, which *is* un-namespaced. Offered, never assumed, printed before
   writing, and removed by `uninstall` — the same consent rule as every other config write.
 
-The plugin ships these (shown with the shortcut installed; otherwise `/agentsensei:*`):
+The plugin ships these (shown with the shortcut installed; otherwise `/vibesenpai:*`):
 
 ```
-/sensei:now              report on the current session        → agentsensei insights
-/sensei:why <id>         the evidence, verbatim turns         → agentsensei explain <id>
-/sensei:report [7d|30d]  retrospective over recent history    → agentsensei report --last
-/sensei:fix              the one next action + evidence       → agentsensei fix
-/sensei:dismiss <id>     "that was TDD, not rework"           → agentsensei dismiss --wrong
+/sensei:now              report on the current session        → vibesenpai insights
+/sensei:why <id>         the evidence, verbatim turns         → vibesenpai explain <id>
+/sensei:report [7d|30d]  retrospective over recent history    → vibesenpai report --last
+/sensei:fix              the one next action + evidence       → vibesenpai fix
+/sensei:dismiss <id>     "that was TDD, not rework"           → vibesenpai dismiss --wrong
 ```
 
 Each is a thin `commands/*.md` that runs the bundled CLI with `--json` and presents the result. This
@@ -525,7 +525,7 @@ billing with the same evidentiary standard — they come second, not last.
 And every finding carries a **running delta**, so the report is a scoreboard rather than a snapshot:
 
 ```
-agentsensei · past 10 sessions
+vibesenpai · past 10 sessions
 
   COSTING YOU
   constraint_decay     "use pnpm, never npm"        ×2    ↓20% since last   ↓50% all time
@@ -616,10 +616,10 @@ class of bug entirely, and a rollup cache is added only if measurement shows the
   recognises.
 - **`since last`** — the immediately preceding window of the *same size*: sessions 11–20 for a
   10-session view. Equal-sized windows, or the comparison is meaningless.
-- **`all time`** — everything catalogued. Which, honestly, begins when `agentsensei` was installed, so the
+- **`all time`** — everything catalogued. Which, honestly, begins when `vibesenpai` was installed, so the
   output says so (`all time (since Oct 9)`) rather than implying it knows about anything earlier.
 
-`agentsensei report --last 7d` switches the window to days; the deltas follow the same rules with days
+`vibesenpai report --last 7d` switches the window to days; the deltas follow the same rules with days
 as the unit.
 ---
 
@@ -628,15 +628,15 @@ as the unit.
 These are different products sharing a detector core, and a flat command list
 (`scan`/`report`/`dashboard`) hides that. Separating them changes what M1 must support.
 
-### A. Live — `agentsensei insights`
+### A. Live — `vibesenpai insights`
 
-Run it mid-session, in another terminal or via `!agentsensei insights`, and get a report on the session you are
+Run it mid-session, in another terminal or via `!vibesenpai insights`, and get a report on the session you are
 in right now. This is the habit loop: feedback while it can still change the session's outcome.
 
 ```
-$ agentsensei insights
+$ vibesenpai insights
 
-agentsensei · current session · 47 turns, 2h14m
+vibesenpai · current session · 47 turns, 2h14m
 
   constraint_decay     turns 31, 44             high
   └─ "use pnpm not npm" restated after 13 turns
@@ -667,15 +667,15 @@ agentsensei · current session · 47 turns, 2h14m
    This split is a schema-level flag on every detector (`requiresOutcome: boolean`), decided in M1 so
    M2's detectors declare it as they are written.
 
-### B. Async — `agentsensei report`
+### B. Async — `vibesenpai report`
 
 Retrospective across history, with date and project filters:
 
 ```
-agentsensei report --last 7d
-agentsensei report --since 2026-09-01 --until 2026-10-01
-agentsensei report --project ode --last 30d
-agentsensei trends --weekly            # improvement over time
+vibesenpai report --last 7d
+vibesenpai report --since 2026-09-01 --until 2026-10-01
+vibesenpai report --project ode --last 30d
+vibesenpai trends --weekly            # improvement over time
 ```
 
 **This surface has two depths, because of the data loss** — and it is worth stating in the CLI output
@@ -692,7 +692,7 @@ instructions across sessions. So the async surface returns real value on day one
 surviving transcripts, and `report` labels which depth each period came from instead of implying
 uniform coverage.
 
-`agentsensei dashboard` (M3) is the visual form of this surface; `now` stays terminal-only.
+`vibesenpai dashboard` (M3) is the visual form of this surface; `now` stays terminal-only.
 
 **Milestone effect:** the detector core (M2) gates both, so the ordering holds. But the CLI shape,
 the live/catalogued reader parameter, and the `requiresOutcome` flag move into **M1** — they are cheap

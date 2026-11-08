@@ -1,5 +1,5 @@
 ---
-description: What agentsensei found — this session and your history
+description: What vibesenpai found — this session and your history
 allowed-tools: Bash(node:*)
 ---
 

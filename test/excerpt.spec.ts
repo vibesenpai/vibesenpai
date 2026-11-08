@@ -16,7 +16,7 @@ const events = [
   ev(4, 'tool_result', { textSummary: 'ok' }),
   ev(5, 'tool_use', { toolName: 'Bash', command: 'npm test\nand more' }),
   ev(6, 'tool_result', { textSummary: 'boom', isError: true }),
-  ev(7, 'user_prompt', { textSummary: 'I want it to be /agentsensei:fix' }),
+  ev(7, 'user_prompt', { textSummary: 'I want it to be /vibesenpai:fix' }),
   ev(8, 'assistant_msg', { textSummary: 'Done.' }),
   ev(9, 'user_prompt', { textSummary: 'thanks' }),
   ev(10, 'assistant_msg', { textSummary: 'Welcome.' }),
@@ -41,7 +41,7 @@ describe('an excerpt', () => {
 
   it('reads the full text where the parser kept it, and redacts what it returns', () => {
     const token = 'ghp_AbCdEf1234567890AbCdEf1234567890';
-    const x = excerptOf(events, new Map([[7, `I want it to be /agentsensei:fix, and here is ${token}`]]), [7], 0);
+    const x = excerptOf(events, new Map([[7, `I want it to be /vibesenpai:fix, and here is ${token}`]]), [7], 0);
     if (!x.kept) throw new Error('kept');
     const text = x.parts[0]![0]!.text;
     expect(text).toMatch(/here is/);

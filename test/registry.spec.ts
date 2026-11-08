@@ -124,7 +124,7 @@ describe('provenance reporting', () => {
   it('parses a file from OUR OWN archive, where the path carries no hint', () => {
     // With no path hint, detection has only record shape; strictness would refuse valid files.
     const b = j({ type: 'user', uuid: 'a', parentUuid: null, version: '2.1.296', message: { content: 'hi' } });
-    const r = parse('/home/u/.local/share/agentsensei/sessions/abc.jsonl', b);
+    const r = parse('/home/u/.local/share/vibesenpai/sessions/abc.jsonl', b);
     expect(r.provenance.harness).toBe('claude-code');
     expect(r.provenance.match).toBe('exact');
     expect(r.events).toHaveLength(1);

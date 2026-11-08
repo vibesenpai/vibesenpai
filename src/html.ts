@@ -212,7 +212,7 @@ function ruleInstance(f: FindingView, s: SessionView): string {
     .join('');
   const more =
     f.hidden > 0
-      ? `<p class="note">… ${esc(plural(f.hidden, 'more cited turn'))} — <code>agentsensei skeleton ${esc(
+      ? `<p class="note">… ${esc(plural(f.hidden, 'more cited turn'))} — <code>vibesenpai skeleton ${esc(
           shortId(s.sessionId),
         )}</code></p>`
       : '';
@@ -553,7 +553,7 @@ function coverageSection(d: ReportData): string {
 <div class="panel">${bar}${describeCoverage(segments)
     .map((l) => `<p class="note m">${esc(l.trim())}</p>`)
     .join('')}${unreadable}
-<p class="note">history beyond the harness's retention is not kept — agentsensei stores no transcript copies</p></div>`);
+<p class="note">history beyond the harness's retention is not kept — vibesenpai stores no transcript copies</p></div>`);
 }
 
 // The page
@@ -602,13 +602,13 @@ export function renderHtml(d: ReportData): string {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${CSP}">
-<title>agentsensei report</title>
+<title>vibesenpai report</title>
 <link rel="icon" href="${MARK_FAVICON}">
 <style>${STYLE}</style></head>
 <body><main>
 <header class="hero">
 <img src="${BANNER_JPEG}" alt="" width="${BANNER_SIZE.width}" height="${BANNER_SIZE.height}">
-<div class="hero-text"><p class="brand">${MARK_SVG}<span>agentsensei</span></p><p class="pitch">Find out why your agents failed you.</p></div>
+<div class="hero-text"><p class="brand">${MARK_SVG}<span>vibesenpai</span></p><p class="pitch">Discover how your agents failed you.</p></div>
 </header>
 <h1>${raw(lead)}</h1>
 <p class="sub m">${esc(plural(d.sessions.length, 'session'))} · ${esc(span)} · ${esc(plural(f.projects, 'project'))}</p>
@@ -620,7 +620,7 @@ ${sessionsSection(d)}
 ${coverageSection(d)}
 <footer>
 <p class="about"><b>About these numbers.</b> Most findings are an AI model’s reading of your sessions and can be wrong — check the quoted turn before acting on one. The rest come from the harness’s own refusals. Discarded-token figures are estimated from your transcripts and are lower bounds; cache figures are the harness’s own counts.</p>
-<span class="foot-mark">${MARK_SVG}</span><strong>agentsensei</strong> ·
+<span class="foot-mark">${MARK_SVG}</span><strong>vibesenpai</strong> ·
 generated ${esc(localStamp(d.generatedAt))} ·
 preset ${esc(d.preset)}${d.muted.length > 0 ? ` · muted ${esc(d.muted.join(', '))}` : ''}
 </footer>

@@ -8,7 +8,7 @@ import { resolveConfig } from '../src/config.ts';
 import { superviseAll } from '../src/jobs.ts';
 
 try {
-  if (process.env['AGENTSENSEI_DISABLE'] !== '1') superviseAll(resolveConfig().config, { judge: true, limits: true });
+  if (process.env['VIBESENPAI_DISABLE'] !== '1') superviseAll(resolveConfig().config, { judge: true, limits: true });
 } catch {
   // Silent: a hook must exit 0 and must not surface outside session start.
 }

@@ -5,7 +5,7 @@ import { findingPlan, type FindingFix } from '../finding-fix.ts';
 import { fixMarker } from '../fix-marker.ts';
 
 /** Ours alone: the user's CLAUDE.md only ever gains one pointer line to it. */
-export const RULES_FILE = '.claude/rules/agentsensei.md';
+export const RULES_FILE = '.claude/rules/vibesenpai.md';
 export const POINTER = `- Rules learned from your own sessions: ${RULES_FILE}`;
 
 /** The project key Claude Code files a working directory's transcripts under. */
@@ -21,7 +21,7 @@ export function ownedByHarness(path: string): boolean {
 /** Project-local settings: "You, in this one project only" (code.claude.com/docs/en/settings, checked 2026-11-01). */
 const LOCAL_SETTINGS = '.claude/settings.local.json';
 /** A finding's scoped rule: rules load recursively, and `paths:` scopes one to matching files. */
-const scopedFile = (fixId: string): string => `.claude/rules/agentsensei/${fixId}.md`;
+const scopedFile = (fixId: string): string => `.claude/rules/vibesenpai/${fixId}.md`;
 const AGENT_FILE = '.claude/agents/ask.md';
 
 /** The permission entry for a command head, in the form Claude Code's own dialog writes. */
@@ -33,7 +33,7 @@ export const askRule = (head: string): string => `Bash(${head} *)`;
  */
 export function guardHook(path: string): object {
   const abs = path.startsWith('~/') ? `$HOME/${path.slice(2)}` : path;
-  const say = `agentsensei guard: ${path} is outside this project. Ask the developer before changing it.`;
+  const say = `vibesenpai guard: ${path} is outside this project. Ask the developer before changing it.`;
   return {
     hooks: {
       PreToolUse: [{

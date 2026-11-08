@@ -1,7 +1,7 @@
 # Contributing
 
 ```bash
-git clone https://github.com/crozzfire/agentsensei && cd agentsensei
+git clone https://github.com/vibesenpai/vibesenpai && cd vibesenpai
 npm install
 npm test                 # the whole suite, no network
 npm run cli -- now       # run it against your own sessions

@@ -39,22 +39,22 @@ function parseArgv(argv: string[]): Argv {
   return out;
 }
 
-const USAGE = `agentsensei — find out why your agents failed you
+const USAGE = `vibesenpai — discover how your agents failed you
 
 Usage
-  agentsensei insights          the session you are in, read live
-  agentsensei report            retrospective over a date range
-  agentsensei fix               a recommendation, with its evidence
-  agentsensei dismiss           set findings aside: --list, <id>… [--wrong], --all, --undo
-  agentsensei label <id> <v>    mark a finding: mistake | suggestion | wrong (--list for all)
-  agentsensei excerpt <session> the conversation around --turns <a,b>, as JSON (--around n)
-  agentsensei standing          what your history says
-  agentsensei judge             the model pass: --status, --backlog, --enable, --disable
-  agentsensei doctor            harnesses, paths, parser coverage
-  agentsensei config            resolved values and which layer set each
-  agentsensei scan              read new transcript data (copies nothing)
-  agentsensei skeleton <id>     print a session's windows as evidence
-  agentsensei tick              heal and run due background jobs (--judge to include the model pass)
+  vibesenpai insights          the session you are in, read live
+  vibesenpai report            retrospective over a date range
+  vibesenpai fix               a recommendation, with its evidence
+  vibesenpai dismiss           set findings aside: --list, <id>… [--wrong], --all, --undo
+  vibesenpai label <id> <v>    mark a finding: mistake | suggestion | wrong (--list for all)
+  vibesenpai excerpt <session> the conversation around --turns <a,b>, as JSON (--around n)
+  vibesenpai standing          what your history says
+  vibesenpai judge             the model pass: --status, --backlog, --enable, --disable
+  vibesenpai doctor            harnesses, paths, parser coverage
+  vibesenpai config            resolved values and which layer set each
+  vibesenpai scan              read new transcript data (copies nothing)
+  vibesenpai skeleton <id>     print a session's windows as evidence
+  vibesenpai tick              heal and run due background jobs (--judge to include the model pass)
 
 Options
   --source <path>    transcript source (repeatable)

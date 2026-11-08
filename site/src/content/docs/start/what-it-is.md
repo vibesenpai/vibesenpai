@@ -1,9 +1,9 @@
 ---
 title: What it is
-description: Find out why your agents failed you — and an honest account of what this does and does not do.
+description: Discover how your agents failed you — and an honest account of what this does and does not do.
 ---
 
-`agentsensei` reads the transcripts your coding agent already writes, finds the
+`vibesenpai` reads the transcripts your coding agent already writes, finds the
 turns where effort was wasted, and tells you what that cost in tokens.
 
 ```
@@ -24,13 +24,13 @@ place, and copies nothing.
 
 Three things, in order of how much you will use them:
 
-**`agentsensei insights`** — what happened in the session you are in. Findings with
+**`vibesenpai insights`** — what happened in the session you are in. Findings with
 the turns they came from, plus what the session cost in tokens and how that
 compares to the corpus median.
 
-**`agentsensei report`** — the same across your history.
+**`vibesenpai report`** — the same across your history.
 
-**`agentsensei fix`** — a recommendation, with the evidence for it. Or a
+**`vibesenpai fix`** — a recommendation, with the evidence for it. Or a
 plain statement that no fix exists, which is a real answer here rather than a
 shrug.
 
@@ -48,7 +48,7 @@ habit you have to build.
 problems has handed you nothing to do.
 
 **Not finished.** Two rule detectors ship. The judge ships and is measured
-honestly on [its own page](/agentsensei/work/measuring/) — including the one
+honestly on [its own page](/vibesenpai/work/measuring/) — including the one
 dimension that does not work.
 
 ## Who it is for

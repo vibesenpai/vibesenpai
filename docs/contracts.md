@@ -135,7 +135,7 @@ U  it's still broken                      [correction]
 
 | What | Where | Why it is safe to keep |
 |---|---|---|
-| **Catalog** — offsets, hashes, versions, source paths | `$XDG_DATA_HOME/agentsensei` | bookkeeping only, no content. 4 KB where copying was 10.4 MB |
+| **Catalog** — offsets, hashes, versions, source paths | `$XDG_DATA_HOME/vibesenpai` | bookkeeping only, no content. 4 KB where copying was 10.4 MB |
 | **Findings** — redacted, no file contents | same store, SQLite | the running score needs the history |
 | **Skeletons for windows that produced a finding** | same store | redacted **at construction** — no file contents, no absolute paths, no identifiers. ~10% of raw size |
 | **Raw transcripts** | **never stored** | a transcript can contain a leaked token; duplicating it would make the breach ours |

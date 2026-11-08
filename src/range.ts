@@ -191,7 +191,7 @@ export function describeCoverage(segments: RangeSegment[]): string[] {
         out.push(`  ${period}  (${span})  no transcripts cover this period`);
         break;
       case 'unscanned':
-        out.push(`  ${period}  (${span})  not scanned yet — run \`agentsensei scan\``);
+        out.push(`  ${period}  (${span})  not scanned yet — run \`vibesenpai scan\``);
         break;
     }
   }

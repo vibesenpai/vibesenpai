@@ -61,7 +61,7 @@ export function readSession(opts: ReadSessionOptions): SessionRead {
 
   if (mode === 'catalogued' && opts.catalogOffset === undefined) {
     throw new Error(
-      `${sessionId} is not in the catalog — run \`agentsensei scan\` first, ` +
+      `${sessionId} is not in the catalog — run \`vibesenpai scan\` first, ` +
         `or use --live to read the source directly`,
     );
   }
@@ -165,10 +165,10 @@ export function discoverTranscripts(sources: string[]): string[] {
 }
 
 /** The judge child's working directory name, so its transcripts are recognisable. */
-export const JUDGE_CWD_MARKER = 'agentsensei-judge';
+export const JUDGE_CWD_MARKER = 'vibesenpai-judge';
 
-/** Path fragments of our own judge transcripts; `as-judge-` covers probes that predate the marker. */
-const OUR_CWD_FRAGMENTS = [JUDGE_CWD_MARKER, 'as-judge-'];
+/** Path fragments of our own judge transcripts; `agentsensei-judge` is the old name, `as-judge-` older probes. */
+const OUR_CWD_FRAGMENTS = [JUDGE_CWD_MARKER, 'agentsensei-judge', 'as-judge-'];
 
 /**
  * Is this transcript one our own judge produced? The `claude -p` child writes a real session
@@ -213,7 +213,7 @@ export function resolveCurrentSession(
   }
 
   // Fall through if neither variable is set; never invent an id.
-  const fromEnv = env['AGENTSENSEI_SESSION_ID'] ?? env['CLAUDE_SESSION_ID'];
+  const fromEnv = env['VIBESENPAI_SESSION_ID'] ?? env['CLAUDE_SESSION_ID'];
   if (fromEnv !== undefined && fromEnv !== '') {
     const source = findSessionSource(sources, fromEnv);
     if (source !== undefined) return { sessionId: fromEnv, source, via: 'env' };

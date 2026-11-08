@@ -65,7 +65,7 @@ export function reportBlock(
   fresh = 0,
 ): string {
   const failing = healthLines(jobs);
-  if (s === undefined) return failing.length === 0 ? '' : `\nagentsensei\n${failing.map((l) => `  ${l}`).join('\n')}`;
+  if (s === undefined) return failing.length === 0 ? '' : `\nvibesenpai\n${failing.map((l) => `  ${l}`).join('\n')}`;
 
   // Names itself, since it appears in a session the user did not invoke it in. The token figure
   // is the rule tier's only: judge findings carry no price.
@@ -79,7 +79,7 @@ export function reportBlock(
         ? ` · ${ruleCount + judgedTotal} finding${ruleCount + judgedTotal === 1 ? '' : 's'}`
         : '';
   const head =
-    `agentsensei · your last ${s.sessions} session${s.sessions === 1 ? '' : 's'}${headline}`;
+    `vibesenpai · your last ${s.sessions} session${s.sessions === 1 ? '' : 's'}${headline}`;
   const lines: string[] = [];
   if (fresh > 0) lines.push(`  ${fresh} new finding${fresh === 1 ? '' : 's'} since your last session`);
 
@@ -133,13 +133,13 @@ export function reportBlock(
 export function nextRung(from: 'block' | 'insights' | 'report' | 'fix'): string {
   switch (from) {
     case 'block':
-      return 'Run /agentsensei:insights for the exact turns';
+      return 'Run /vibesenpai:insights for the exact turns';
     case 'insights':
-      return 'Run /agentsensei:report for more details';
+      return 'Run /vibesenpai:report for more details';
     case 'report':
-      return 'Run /agentsensei:fix for possible fixes';
+      return 'Run /vibesenpai:fix for possible fixes';
     case 'fix':
-      return 'Run /agentsensei:report for more details';
+      return 'Run /vibesenpai:report for more details';
   }
 }
 
@@ -170,14 +170,14 @@ export function disclosure(settings: { dailyTokens: number; catchUp: number }, e
   const api = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX'].some((k) => (env[k] ?? '') !== '');
   return [
     '',
-    'agentsensei is on. Starting when this turn ends, it reads your sessions in the background',
+    'vibesenpai is on. Starting when this turn ends, it reads your sessions in the background',
     `with Claude Haiku ${api ? 'on your API key' : 'on your plan or API key'}: up to ${settings.catchUp} recent past sessions first,`,
     `then each new one, about 60k tokens a session and at most ${human(settings.dailyTokens)} tokens a day.`,
     'Nothing has been spent yet.',
     '',
-    '  /agentsensei:insights         what it has found',
-    '  /agentsensei:judge off        stop the model reads; the free checks keep running',
-    '  /plugin disable agentsensei   stop everything',
+    '  /vibesenpai:insights         what it has found',
+    '  /vibesenpai:judge off        stop the model reads; the free checks keep running',
+    '  /plugin disable vibesenpai   stop everything',
     '',
   ].join('\n');
 }

@@ -1,7 +1,7 @@
 {
-  "name": "agentsensei",
+  "name": "vibesenpai",
   "version": "0.1.0",
-  "description": "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.",
+  "description": "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -28,12 +28,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/crozzfire/agentsensei.git"
+    "url": "git+https://github.com/vibesenpai/vibesenpai.git"
   },
   "bugs": {
-    "url": "https://github.com/crozzfire/agentsensei/issues"
+    "url": "https://github.com/vibesenpai/vibesenpai/issues"
   },
-  "homepage": "https://github.com/crozzfire/agentsensei#readme",
+  "homepage": "https://github.com/vibesenpai/vibesenpai#readme",
   "keywords": [
     "claude-code",
     "ai-agent",

@@ -5,7 +5,7 @@ description: Claude Code already ships a session analyzer. Here is what survives
 
 **Claude Code already has `/insights`.** It is free, first-party, already
 installed, and it does something close to this. Any honest page about
-agentsensei has to start there.
+vibesenpai has to start there.
 
 ## `/insights`
 
@@ -30,7 +30,7 @@ here quotes the turn it came from, so you can open the transcript and disagree.
 That is the difference between a report and evidence.
 
 **It publishes no accuracy figure.** Neither does anyone else in this space. We
-publish [165 of 232](/agentsensei/work/measuring/) and call it *silver
+publish [165 of 232](/vibesenpai/work/measuring/) and call it *silver
 agreement* rather than precision, because the labels we agree with were
 themselves model-produced.
 
@@ -51,7 +51,7 @@ the field, and the honest thing is to say which:
 **"Fully local" is not a differentiator.** vibe-log is local-first too; its
 cloud sync is opt-in. This is table stakes in this ecosystem, not an edge — and
 since the judge runs through your own harness, [it is no longer even strictly
-true of us](/agentsensei/start/sends-and-costs/).
+true of us](/vibesenpai/start/sends-and-costs/).
 
 **"Cross-harness" is not a differentiator.** The history viewer covers eleven
 harnesses. We cover **one**, and the parser registry that is supposed to make

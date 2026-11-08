@@ -6,7 +6,7 @@
  *
  * Needs `misalignments.json` from the replication package:
  *   git clone --depth 1 https://github.com/ND-SaNDwichLAB/coding-agent-misalignment
- * and the SWE-chat transcripts, via `AGENTSENSEI_GOLD_SESSIONS`.
+ * and the SWE-chat transcripts, via `VIBESENPAI_GOLD_SESSIONS`.
  *
  * Measures recall only: findings the paper did not record are "unmatched", not false
  * positives, since the gold set is not known to be complete. Batched because invocation
@@ -22,7 +22,7 @@ import { callModel, wouldLeak } from '../src/judge/model.ts';
 import { loadGold, loadNegatives, locateSessions, locateTurns, score, type JudgeOutput } from './gold.ts';
 import type { Event } from '../src/types.ts';
 
-const GOLD_JSON = process.env['AGENTSENSEI_GOLD'] ?? '/tmp/cam-check/misalignments.json';
+const GOLD_JSON = process.env['VIBESENPAI_GOLD'] ?? '/tmp/cam-check/misalignments.json';
 
 /** The commit this ran against, and whether the tree was dirty. */
 function provenance(): { commit: string; dirty: boolean } {
@@ -34,7 +34,7 @@ function provenance(): { commit: string; dirty: boolean } {
     return { commit: 'unknown', dirty: false };
   }
 }
-const SESSION_DIRS = (process.env['AGENTSENSEI_GOLD_SESSIONS'] ?? '').split(',').filter(Boolean);
+const SESSION_DIRS = (process.env['VIBESENPAI_GOLD_SESSIONS'] ?? '').split(',').filter(Boolean);
 const BATCH_TOKENS = 55_000;
 
 /** One model call, accumulating spend. Dollars appear here only; the product reports tokens. */
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   const estimateOnly = process.argv.includes('--estimate');
   let files: Map<string, string>;
   if (negativesMode) {
-    const mapping = process.env['AGENTSENSEI_GOLD_MAPPING'] ?? '/tmp/cam-check/data/core/session_mapping.json';
+    const mapping = process.env['VIBESENPAI_GOLD_MAPPING'] ?? '/tmp/cam-check/data/core/session_mapping.json';
     const negative = loadNegatives(mapping, episodes);
     files = locateSessions(
       [...negative].map((sessionSha) => ({ sessionSha }) as never),
@@ -196,7 +196,7 @@ async function main(): Promise<void> {
   }
 
   // Persisted so scoring can be re-run without paying for the model again.
-  const cache = process.env['AGENTSENSEI_GOLD_CACHE'];
+  const cache = process.env['VIBESENPAI_GOLD_CACHE'];
   if (cache !== undefined) {
     writeFileSync(cache, JSON.stringify({
       // The commit and dirty flag, so results from different code are never compared as variance.

@@ -38,7 +38,7 @@ export function cmdLabel(a: Argv): number {
       return 0;
     }
     if (id === undefined || !VERDICTS.includes(verdict as Verdict)) {
-      console.error('usage: agentsensei label <id> mistake|suggestion|wrong');
+      console.error('usage: vibesenpai label <id> mistake|suggestion|wrong');
       return 1;
     }
     // Resolve among every finding, dismissed or not: labelling one that is already hidden is allowed.

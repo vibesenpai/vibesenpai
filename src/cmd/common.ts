@@ -88,7 +88,7 @@ export function printSkeletons(
   const explicitLive = a.flags['live'] === true;
   if (!explicitLive && offset === undefined && !allowLiveFallback) {
     throw new Error(
-      `${sessionId} is not in the catalog yet — run \`agentsensei scan\`, ` +
+      `${sessionId} is not in the catalog yet — run \`vibesenpai scan\`, ` +
         `or pass --live to read the source as it is on disk now`,
     );
   }

@@ -24,5 +24,5 @@ relentlessly negative about someone's work rather than about its results.
 
 Maintainers may edit, lock, or remove contributions, and may block accounts.
 Report concerns privately through
-[GitHub Security Advisories](https://github.com/crozzfire/agentsensei/security/advisories/new)
+[GitHub Security Advisories](https://github.com/vibesenpai/vibesenpai/security/advisories/new)
 if a public issue would be inappropriate.

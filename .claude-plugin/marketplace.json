@@ -1,21 +1,21 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "agentsensei",
-  "description": "The agentsensei plugin for Claude Code.",
+  "name": "vibesenpai",
+  "description": "The vibesenpai plugin for Claude Code.",
   "owner": {
-    "name": "agentsensei contributors",
-    "url": "https://github.com/crozzfire/agentsensei"
+    "name": "vibesenpai contributors",
+    "url": "https://github.com/vibesenpai/vibesenpai"
   },
   "plugins": [
     {
-      "name": "agentsensei",
-      "description": "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.",
+      "name": "vibesenpai",
+      "description": "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.",
       "author": {
-        "name": "agentsensei contributors"
+        "name": "vibesenpai contributors"
       },
       "category": "Productivity",
       "source": "./",
-      "homepage": "https://github.com/crozzfire/agentsensei#readme"
+      "homepage": "https://github.com/vibesenpai/vibesenpai#readme"
     }
   ]
 }

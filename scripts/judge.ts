@@ -87,7 +87,7 @@ async function drain(holds: () => boolean, limits: boolean): Promise<Outcome> {
   return { status: 'ok' };
 }
 
-if (process.env['AGENTSENSEI_DISABLE'] !== '1') {
+if (process.env['VIBESENPAI_DISABLE'] !== '1') {
   try {
     const { archive } = resolveConfig().config;
     await runJob('judge', archive, { deadlineMs: JUDGE_DEADLINE_MS, clean }, (ctx) => drain(ctx.holds, limited()));

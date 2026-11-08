@@ -118,11 +118,11 @@ describe('the README describes the tool that exists', () => {
       .map((f) => readFileSync(f, 'utf8'))
       .join('\n');
     const claimed = new Set(
-      [...text.matchAll(/(?:agentsensei|\/agentsensei:)[ \t]+([a-z][a-z-]*)/g)].map(
+      [...text.matchAll(/(?:vibesenpai|\/vibesenpai:)[ \t]+([a-z][a-z-]*)/g)].map(
         (m) => m[1] as string,
       ),
     );
-    // Words that follow "agentsensei" in prose rather than as a command.
+    // Words that follow "vibesenpai" in prose rather than as a command.
     const prose = new Set(['is', 'does', 'reads', 'finds', 'runs', 'and', 'to', 'the', 'a', 'in', 'on', 'for', 'as', 'at', 'from', 'with', 'you', 'your', 'it', 'its', 'can', 'will', 'has', 'have', 'was', 'were', 'needs', 'copies', 'writes', 'never', 'only', 'also', 'how', 'what', 'why', 'generate-report', 'looks', 'pipeline', 'itself']);
     // The installer was deleted (D64) and the docs still describe it; drop this when the docs are rewritten.
     const awaitingDocsPass = new Set(['install', 'uninstall']);
@@ -168,7 +168,7 @@ describe('the one command that sends data off the machine is discoverable', () =
     // The only command that sends session content to a model must be visible in --help.
     const usage = readFileSync('src/cli.ts', 'utf8');
     const block = /^Usage$([\s\S]*?)^$/m.exec(usage)?.[1] ?? usage;
-    expect(block).toMatch(/agentsensei judge/);
+    expect(block).toMatch(/vibesenpai judge/);
   });
 
   it('does not advertise the statusline, which was removed', () => {
@@ -187,7 +187,7 @@ describe('the plugin is the only front door', () => {
       expect(
         text,
         `${file} still sends a user to npm; the plugin is the install`,
-      ).not.toMatch(/npm i(?:nstall)? -g agentsensei/);
+      ).not.toMatch(/npm i(?:nstall)? -g vibesenpai/);
     }
   });
 
@@ -200,12 +200,12 @@ describe('the plugin is the only front door', () => {
     // The binary is not on a plugin user's PATH.
     const readme = readFileSync('README.md', 'utf8');
     const intro = readme.slice(0, readme.indexOf('## Contributing'));
-    expect(intro).toContain('/agentsensei:insights');
+    expect(intro).toContain('/vibesenpai:insights');
   });
 
   it('names a way to turn it off', () => {
     // The judge is on from installation, so the off switch must be findable.
-    expect(readFileSync('README.md', 'utf8')).toContain('/plugin disable agentsensei');
+    expect(readFileSync('README.md', 'utf8')).toContain('/plugin disable vibesenpai');
   });
 
   it('no user-facing surface still calls the judge opt-in', () => {
@@ -231,7 +231,7 @@ describe('the plugin is the only front door', () => {
       expect(
         readFileSync(file, 'utf8'),
         `${file} tells a user to run the binary directly`,
-      ).not.toMatch(/^\s*agentsensei (now|fix|report|scan|standing|judge)\b/m);
+      ).not.toMatch(/^\s*vibesenpai (now|fix|report|scan|standing|judge)\b/m);
     }
   });
 
@@ -306,7 +306,7 @@ describe('documented output samples match the shape the code produces', () => {
 
   it('`judge --status` still prints the lines the docs show', () => {
     const archive = mkdtempSync(join(tmpdir(), 'as-docshape-'));
-    const env = { ...process.env, AGENTSENSEI_ARCHIVE: archive, NO_COLOR: '1' };
+    const env = { ...process.env, VIBESENPAI_ARCHIVE: archive, NO_COLOR: '1' };
     const run = (...args: string[]): string =>
       execFileSync(process.execPath, ['--experimental-strip-types', 'src/cli.ts', ...args], {
         encoding: 'utf8',
@@ -341,7 +341,7 @@ describe('documented output samples match the shape the code produces', () => {
 describe('one pitch, not five', () => {
   // One description of the tool across every manifest, the site and the README.
   const PITCH =
-    "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.";
+    "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.";
 
   it('is identical in every manifest', () => {
     const json = (p: string) => JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
@@ -463,9 +463,9 @@ describe('every surface ends by naming the next one', () => {
   it('names only commands the plugin actually ships', () => {
     const shipped = readdirSync('commands').map((f) => f.replace(/\.md$/, ''));
     for (const r of rungs) {
-      const m = /\/agentsensei:(\w+)/.exec(nextRung(r));
+      const m = /\/vibesenpai:(\w+)/.exec(nextRung(r));
       expect(m, `${r} names no command`).not.toBeNull();
-      expect(shipped, `${r} points at /agentsensei:${m?.[1]}, which is not shipped`).toContain(
+      expect(shipped, `${r} points at /vibesenpai:${m?.[1]}, which is not shipped`).toContain(
         m?.[1] ?? '',
       );
     }
@@ -474,7 +474,7 @@ describe('every surface ends by naming the next one', () => {
   it('never points a surface at itself', () => {
     for (const r of rungs) {
       if (r === 'block') continue;
-      expect(nextRung(r), `${r} points at itself`).not.toContain(`/agentsensei:${r}`);
+      expect(nextRung(r), `${r} points at itself`).not.toContain(`/vibesenpai:${r}`);
     }
   });
 });

@@ -7,7 +7,7 @@ Ten detectors were built here, measured against real sessions, and deleted.
 This page exists because a tool that tells you what your agent got wrong should
 be able to say what it got wrong itself.
 
-The full record is in [`GRAVEYARD.md`](https://github.com/crozzfire/agentsensei/blob/main/GRAVEYARD.md).
+The full record is in [`GRAVEYARD.md`](https://github.com/vibesenpai/vibesenpai/blob/main/GRAVEYARD.md).
 These are the ones worth reading.
 
 ## `stale_read` — 100% explained by something innocent
@@ -43,7 +43,7 @@ Built on structure — look for a success claim near a failed tool result — it
 produced **zero true positives and five false positives**. Every one of the five
 was an agent honestly describing partial progress.
 
-It works now, and it is one of the better dimensions, because [the judge](/agentsensei/architecture/judge/)
+It works now, and it is one of the better dimensions, because [the judge](/vibesenpai/architecture/judge/)
 reads what was actually said instead of pattern-matching around it. Same
 dimension, different tier, opposite outcome.
 

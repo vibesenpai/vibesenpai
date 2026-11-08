@@ -1,4 +1,4 @@
-// The insights pane, against a stubbed engine and a stubbed `agentsensei report --json`.
+// The insights pane, against a stubbed engine and a stubbed `vibesenpai report --json`.
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import type { PaneData } from '../types'
@@ -16,15 +16,15 @@ const DATA: PaneData = {
     misread_intent: { dimension: 'misread_intent', prompt: 'For the rest of this session: before acting on anything ambiguous, state the request.' },
   },
   fixes: [
-    { fixId: '16ae85', dimension: 'misread_intent', target: 'project-instructions', text: '- Before acting on anything ambiguous, state the request.', destination: '.claude/rules/agentsensei.md', request: 'unused' },
-    { fixId: '298aaf', dimension: 'edit_retry', target: 'project-instructions', text: '- Re-read right before editing.', destination: '.claude/rules/agentsensei.md', request: 'unused' },
+    { fixId: '16ae85', dimension: 'misread_intent', target: 'project-instructions', text: '- Before acting on anything ambiguous, state the request.', destination: '.claude/rules/vibesenpai.md', request: 'unused' },
+    { fixId: '298aaf', dimension: 'edit_retry', target: 'project-instructions', text: '- Re-read right before editing.', destination: '.claude/rules/vibesenpai.md', request: 'unused' },
     {
-      fixId: 'dea0d0', dimension: 'overreach', target: 'project-instructions', text: '- Do only what was asked.', destination: '.claude/rules/agentsensei.md', request: 'unused',
+      fixId: 'dea0d0', dimension: 'overreach', target: 'project-instructions', text: '- Do only what was asked.', destination: '.claude/rules/vibesenpai.md', request: 'unused',
       applied: { at: '2026-10-21T10:00:00.000Z', sessionId: 'aaaaaaaa-1111' }, inEffect: true,
       before: { times: 4, sessions: 9 }, since: { times: 1, sessions: 4 }, cameBack: { sessionId: '9b0e44d1-xxxx', turn: 88 },
     },
     {
-      fixId: '3704ae', dimension: 'inaccurate_self_report', target: 'project-instructions', text: '- Quote the output.', destination: '.claude/rules/agentsensei.md', request: 'unused',
+      fixId: '3704ae', dimension: 'inaccurate_self_report', target: 'project-instructions', text: '- Quote the output.', destination: '.claude/rules/vibesenpai.md', request: 'unused',
       applied: { at: '2026-10-22T10:00:00.000Z', sessionId: 'aaaaaaaa-1111' }, inEffect: false,
     },
   ],
@@ -53,7 +53,7 @@ const DATA: PaneData = {
       ],
       judged: [
         { id: 'judged-old', at: EARLIER, dimension: 'misread_intent', turns: [4], why: 'Read the question as a request.', quote: 'are we planning trends?' },
-        { id: 'judged-new', at: NOW, dimension: 'misread_intent', secondaryDimensions: ['overreach'], turns: [9], why: 'Kept the plain name.', quote: 'I want it to be /agentsensei:fix', quoteBy: 'developer', asked: { seq: 8, text: 'rename the command' }, established: 'turn 3 — “call it /agentsensei:fix”' },
+        { id: 'judged-new', at: NOW, dimension: 'misread_intent', secondaryDimensions: ['overreach'], turns: [9], why: 'Kept the plain name.', quote: 'I want it to be /vibesenpai:fix', quoteBy: 'developer', asked: { seq: 8, text: 'rename the command' }, established: 'turn 3 — “call it /vibesenpai:fix”' },
       ],
       stats: { rebuilds: { count: 1, tokens: 120_000, events: [{ seq: 30, tokens: 120_000, cached: 140_000, gapMinutes: 75 }] } },
     },
@@ -61,16 +61,16 @@ const DATA: PaneData = {
 }
 
 const PANE = {
-  plugin: 'agentsensei',
+  plugin: 'vibesenpai',
   component: 'Pane',
   requestId: 'insights',
-  props: { title: 'agentsensei', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
+  props: { title: 'vibesenpai', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
 } as const
 
 type Calls = { argv: string[][]; filled: string[]; draft?: string; refuse?: 'dialog' | 'no_composer'; copied?: string; mtime?: number; rateLimits?: { kind: string; percentUsed: number }[]; excerpt?: unknown }
 
-/** Run `/agentsensei:insights`; the kit fills the fields a typed command carries. */
-const insights = ($: Parameters<TestBody>[0]) => $.command.run({ command: 'agentsensei:insights' } as never)
+/** Run `/vibesenpai:insights`; the kit fills the fields a typed command carries. */
+const insights = ($: Parameters<TestBody>[0]) => $.command.run({ command: 'vibesenpai:insights' } as never)
 
 /** The engine beneath the plugin: a placed pane, a store that last saw us in the past, and our CLI answering. */
 function engine(on: Parameters<TestBody>[1], data: PaneData | null, calls: Calls, isPlaced = true, termProgram?: string): void {
@@ -137,7 +137,7 @@ test('a finding expands to its turns and reason, and Dismiss calls the CLI with 
   expect(await ui.find({ type: 'Text', text: /rename the command/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Why: / })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Kept the plain name/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /call it \/agentsensei:fix/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /call it \/vibesenpai:fix/ })).toBeDefined()
 
   await ui.press({ key: 'dismiss:judged-new' })
   expect(calls.argv.some((a) => a.includes('dismiss') && a.includes('judged-new'))).toBe(true)
@@ -156,11 +156,11 @@ test('Apply drafts the request into an empty prompt box, with the marker, and ne
   expect(tree).not.toMatch(/"label":"Copy/)
   // The fix says what kind of change it is and where it lands, not just its words.
   expect(await ui.find({ type: 'Text', text: /A rule the agent reads in every session of this project:/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Added to \.claude\/rules\/agentsensei\.md/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Added to \.claude\/rules\/vibesenpai\.md/ })).toBeDefined()
   await ui.press({ key: 'apply:16ae85' })
   expect(calls.filled).toHaveLength(1)
-  expect(calls.filled[0]).toMatch(/Add this line to \.claude\/rules\/agentsensei\.md/)
-  expect(calls.filled[0]).toMatch(/\(agentsensei fix 16ae85\)$/)
+  expect(calls.filled[0]).toMatch(/Add this line to \.claude\/rules\/vibesenpai\.md/)
+  expect(calls.filled[0]).toMatch(/\(vibesenpai fix 16ae85\)$/)
   // The pressed fix folds to one line, and its Apply goes away.
   expect(await ui.find({ type: 'Text', text: /^✓ Fix drafted in your prompt box\. Press Enter to apply it\.$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Rules load when a session starts, so it takes effect in your next session, or after \/compact\.$/ })).toBeDefined()
@@ -193,7 +193,7 @@ test('the Fixes tab applies several as one request, and says how an applied one 
   expect((await ui.find({ type: 'Button', key: 'apply-picked' }))?.props['label']).toBe('Apply 2')
   await ui.press({ key: 'apply-picked' })
   expect(calls.filled[0]).toMatch(/these lines/)
-  expect(calls.filled[0]).toMatch(/\(agentsensei fix 16ae85, 298aaf\)$/)
+  expect(calls.filled[0]).toMatch(/\(vibesenpai fix 16ae85, 298aaf\)$/)
   expect(await ui.find({ type: 'Text', text: /Applied Oct 21/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /4 times in 9 sessions/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1 time in 4 sessions/ })).toBeDefined()
@@ -232,7 +232,7 @@ test('the Health tab states the jobs, what was read and what was spent', async (
   await ui.unmount()
 })
 
-test('on a subscription, Health says the dollars are not a bill, and shows nothing of the plan beyond agentsensei', async ($, on) => {
+test('on a subscription, Health says the dollars are not a bill, and shows nothing of the plan beyond vibesenpai', async ($, on) => {
   const calls: Calls = { argv: [], filled: [], rateLimits: [{ kind: 'five_hour', percentUsed: 34 }, { kind: 'seven_day', percentUsed: 12.4 }] }
   engine(on, { ...DATA, spend: { ...DATA.spend!, today: { tokens: 2_000_000, limit: 2_000_000 } } }, calls)
   await insights($)
@@ -350,10 +350,10 @@ test('wears the mark: a picture where the terminal draws one, the SVG on the des
   await insights($)
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Image' }))?.props['columns']).toBe(10)
-  expect(await ui.find({ type: 'Text', text: /^agentsensei$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^vibesenpai$/ })).toBeDefined()
   await ui.unmount()
   ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(String((await ui.find({ type: 'Svg' }))?.props['source'] ?? '')).toMatch(/aria-label="agentsensei"/)
+  expect(String((await ui.find({ type: 'Svg' }))?.props['source'] ?? '')).toMatch(/aria-label="vibesenpai"/)
   await ui.unmount()
 })
 
@@ -363,7 +363,7 @@ test('draws no picture in a terminal that cannot show one', async ($, on) => {
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Image' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /^agentsensei$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^vibesenpai$/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -373,7 +373,7 @@ test('when the prompt box refuses, Apply puts the request on the clipboard and s
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'apply:16ae85' })
-  expect(calls.copied).toMatch(/\(agentsensei fix 16ae85\)$/)
+  expect(calls.copied).toMatch(/\(vibesenpai fix 16ae85\)$/)
   expect(await ui.find({ type: 'Text', text: /on your clipboard\. Paste it into your prompt and press Enter\./ })).toBeDefined()
   await ui.unmount()
 })
@@ -385,7 +385,7 @@ test('an unanswered finding shows its dimension\'s fix above the answers, and an
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'item:new:judged-new' })
   await ui.press({ key: 'apply:judged-new:16ae85' })
-  expect(calls.filled.at(-1)).toMatch(/\(agentsensei fix 16ae85\)$/)
+  expect(calls.filled.at(-1)).toMatch(/\(vibesenpai fix 16ae85\)$/)
   await ui.press({ key: 'wrong:judged-new' })
   expect(await ui.find({ type: 'Button', key: 'apply:judged-new:16ae85' })).toBeUndefined()
   await ui.unmount()
@@ -428,7 +428,7 @@ const EXCERPT = {
   parts: [[
     { role: 'developer', at: '2026-10-29T21:12:00.000Z', cited: false, text: 'rename the command', tools: [] },
     { role: 'agent', at: '2026-10-29T21:13:00.000Z', cited: false, text: 'Renamed it to /fix.', tools: ['Edit commands/fix.md', 'Bash npm test · failed'] },
-    { role: 'developer', at: '2026-10-29T21:14:00.000Z', cited: true, text: 'I want it to be /agentsensei:fix', tools: [] },
+    { role: 'developer', at: '2026-10-29T21:14:00.000Z', cited: true, text: 'I want it to be /vibesenpai:fix', tools: [] },
   ]],
 }
 

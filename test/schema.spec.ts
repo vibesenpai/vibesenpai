@@ -4,7 +4,7 @@ import { SCHEMA, checkVersion, stamp } from '../src/schema.ts';
 describe('schema versioning', () => {
   it('stamps a self-describing envelope', () => {
     expect(stamp('skeleton')).toEqual({
-      tool: 'agentsensei',
+      tool: 'vibesenpai',
       schema: 'skeleton',
       v: SCHEMA.skeleton,
     });

@@ -46,18 +46,18 @@ export function cmdFix(a: Argv): number {
       return 0;
     }
     console.log(renderFindingFix(own.fix, own.finding, own.shared));
-    console.log(plan !== undefined ? `  To apply it: /agentsensei:apply\n` : `  ${dim(applyRefusal(own.fix, here))}\n`);
+    console.log(plan !== undefined ? `  To apply it: /vibesenpai:apply\n` : `  ${dim(applyRefusal(own.fix, here))}\n`);
     return 0;
   }
   const r = recommend(s, judged, compactions);
   const plan = r === undefined ? undefined : applyPlan(r);
-  // `/agentsensei:apply`: the developer typed it, so it is the yes; the marker in this output dates the fix.
+  // `/vibesenpai:apply`: the developer typed it, so it is the yes; the marker in this output dates the fix.
   if (a.flags['apply'] === true) {
     console.log(plan === undefined ? 'nothing to apply: this recommendation has no change to make.' : `Apply this fix:\n\n${applyRequest([plan])}`);
     return 0;
   }
   console.log(renderFix(r, config.preset, config.mute, (s?.dismissed ?? 0) + (judgeState.dismissed ?? 0)));
-  if (plan !== undefined) console.log(`  To apply it: /agentsensei:apply\n`);
+  if (plan !== undefined) console.log(`  To apply it: /vibesenpai:apply\n`);
   return 0;
 }
 

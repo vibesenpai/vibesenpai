@@ -6,7 +6,7 @@ description: There is no single pipeline — four entry paths share one spine, a
 The shape of this tool is easier to hold once you know two things that a
 straight-line diagram would get wrong.
 
-![The agentsensei pipeline](../../../diagrams/pipeline.svg)
+![The vibesenpai pipeline](../../../diagrams/pipeline.svg)
 
 **It is not one pipeline.** Four commands read transcripts, and they differ in
 how bytes get off disk, not in what happens afterwards. `now` reads one live
@@ -24,9 +24,9 @@ re-derived from the source every time.
 | | |
 |---|---|
 | **read** | byte ranges, in place. Never opens a source for writing |
-| **parse** | JSONL → events, in **file order**. [Why not the tree →](/agentsensei/architecture/reading/) |
+| **parse** | JSONL → events, in **file order**. [Why not the tree →](/vibesenpai/architecture/reading/) |
 | **redact** | here, at construction — not before display, not before sending |
-| **detect** | structure only. [The compiler enforces it →](/agentsensei/architecture/two-tiers/) |
+| **detect** | structure only. [The compiler enforces it →](/vibesenpai/architecture/two-tiers/) |
 | **findings** | identity, dedup, and the count that makes a finding stable |
 
 ## Two deliberate omissions
@@ -41,9 +41,9 @@ appear as *context* beside findings, never as findings.
 
 ## Where to go next
 
-- **[Phases of a run](/agentsensei/architecture/phases/)** — when each part
+- **[Phases of a run](/vibesenpai/architecture/phases/)** — when each part
   fires, and why nothing slow happens in a hook
-- **[Reading a transcript](/agentsensei/architecture/reading/)** — the no-copy
+- **[Reading a transcript](/vibesenpai/architecture/reading/)** — the no-copy
   rule, and the tree-walk that would have been a silent bug
-- **[The two tiers](/agentsensei/architecture/two-tiers/)** — rules and the
+- **[The two tiers](/vibesenpai/architecture/two-tiers/)** — rules and the
   judge, and why one of them cannot read text

@@ -3,5 +3,5 @@
  * import time, and render tests assert exact columns. Colour is covered by `test/style.spec.ts`.
  */
 
-delete process.env['AGENTSENSEI_COLOR'];
+delete process.env['VIBESENPAI_COLOR'];
 process.env['NO_COLOR'] = '1';

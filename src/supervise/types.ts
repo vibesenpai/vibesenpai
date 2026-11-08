@@ -41,4 +41,4 @@ export type JobRecord = {
 export type Outcome = { status: 'ok' } | { status: 'failed'; kind: FailureKind; reason: string };
 
 /** The env var that hands a lease token from the spawner to the worker. */
-export const LEASE_ENV = 'AGENTSENSEI_LEASE';
+export const LEASE_ENV = 'VIBESENPAI_LEASE';

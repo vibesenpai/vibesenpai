@@ -24,7 +24,7 @@ describe('the request the agent is handed', () => {
     const r = applyRequest([rule, other, session]);
     expect(r).toContain('these lines');
     expect(r).toContain('For the rest of this session: state your reading.');
-    expect(r.match(/\(agentsensei fix/g)).toHaveLength(1);
+    expect(r.match(/\(vibesenpai fix/g)).toHaveLength(1);
     expect(fixIdsIn(r)).toEqual(['a1b2c3', '0f9e8d', '777777']);
   });
 
@@ -45,7 +45,7 @@ describe('a finding\'s own fix, per target', () => {
 
   it('a scoped rule is its own file, with the paths it loads for', () => {
     const p = plan({ target: 'scoped-instructions', text: '- Standing instruction from the developer: "x"', paths: ['hooks/pane.tsx'] });
-    expect(destination(p)).toBe('.claude/rules/agentsensei/abc123.md');
+    expect(destination(p)).toBe('.claude/rules/vibesenpai/abc123.md');
     expect(snippetFor(p)).toBe('---\npaths:\n  - "hooks/pane.tsx"\n---\n\n- Standing instruction from the developer: "x"');
     expect(applyRequest([p])).not.toContain('CLAUDE.md');
   });
@@ -118,7 +118,7 @@ describe('the marker in a transcript', () => {
 
 describe('applying through a command the developer typed', () => {
   it('dates the fix from the command\'s output, and only for a command the developer ran', () => {
-    const echo = '<command-message>agentsensei:apply</command-message>\n<command-name>/agentsensei:apply</command-name>';
+    const echo = '<command-message>vibesenpai:apply</command-message>\n<command-name>/vibesenpai:apply</command-name>';
     const body = `Apply this fix:\n\n${applyRequest([rule])}`;
     const lines = [
       rec(1, { type: 'user', message: { role: 'user', content: echo } }),

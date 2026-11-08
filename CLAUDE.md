@@ -1,14 +1,14 @@
-# agentsensei — project conventions
+# vibesenpai — project conventions
 
 Read [DECISIONS.md](DECISIONS.md) before proposing an architectural change: most decisions here were
 reached by discarding a more obvious answer, and the reasoning is linked from each one.
 Area-specific rules load from `.claude/rules/` when you touch those files.
 
-- Rules learned from your own sessions: .claude/rules/agentsensei.md
+- Rules learned from your own sessions: .claude/rules/vibesenpai.md
 
 ## The thesis, which breaks ties in design arguments
 
-**A sensei teaches the developer. It does not drive the agent, and it does not hand out scores.**
+**vibesenpai shows the developer what happened. It does not drive the agent, and it does not hand out scores.**
 Every finding points at specific turns. Nothing is reported as a number without evidence behind it.
 
 Two outputs, never a third: **evidence** and **something applicable** (a prompt, a guard, or a rule
@@ -34,7 +34,7 @@ Outranks correctness of findings.
 - **Never open the harness's own files for writing.** We read `~/.claude/projects`.
 - Background jobs heal at the next hook: a dead or hung pass is reclaimed, failures back off and
   retry, and repeated *paid* failures hold the judge. See `.claude/rules/hooks.md`.
-- `AGENTSENSEI_DISABLE=1` short-circuits every hook on line one.
+- `VIBESENPAI_DISABLE=1` short-circuits every hook on line one.
 
 ## Principle One: the live surface must never interrupt
 
@@ -94,7 +94,7 @@ Full terms: `.claude/rules/judge.md`. The two that must never slip:
 
 - **Redacted at construction, asserted before every call:** `redact(packet) === packet` or the send
   aborts (`wouldLeak`).
-- **The child is isolated:** `AGENTSENSEI_DISABLE=1` and a working directory our own discovery skips.
+- **The child is isolated:** `VIBESENPAI_DISABLE=1` and a working directory our own discovery skips.
   It is spent only by the `Stop` hook; no command spends, except `judge --backlog --apply`.
 
 ## Code

@@ -28,13 +28,13 @@ const base = (over: Partial<Standing> = {}): Standing => ({
 
 describe('report — the real standing from this machine', () => {
   it('produces the agreed block', () => {
-    const out = reportBlock(base(), '/agentsensei for the exact turns');
-    expect(out).toContain('agentsensei · your last 4 sessions');
+    const out = reportBlock(base(), '/vibesenpai for the exact turns');
+    expect(out).toContain('vibesenpai · your last 4 sessions');
     expect(out).toContain('4 edits were rejected and retried, across 3 files');
     expect(out).toContain('most often rosy-seeking-feather.md');
     expect(out).toContain("the text didn't match");
     expect(out).toContain("the file wasn't read first");
-    expect(out).toContain('/agentsensei for the exact turns');
+    expect(out).toContain('/vibesenpai for the exact turns');
   });
 
   it('starts on its own line, so it does not run on from the harness prefix', () => {
@@ -49,7 +49,7 @@ describe('report — the real standing from this machine', () => {
 
   it('keeps every line narrow enough not to wrap', () => {
     // ~70 columns are available in a real terminal.
-    const lines = reportBlock(base(), '/agentsensei for the exact turns').split('\n');
+    const lines = reportBlock(base(), '/vibesenpai for the exact turns').split('\n');
     expect(Math.max(...lines.map((l) => l.length))).toBeLessThanOrEqual(70);
   });
 

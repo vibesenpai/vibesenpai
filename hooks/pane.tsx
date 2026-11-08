@@ -1,5 +1,5 @@
 // The insights pane: findings, the fixes for them, and job health, in three tabs beside the chat.
-// Opens only when asked (`/agentsensei:insights`); never on its own (CLAUDE.md, Principle One).
+// Opens only when asked (`/vibesenpai:insights`); never on its own (CLAUDE.md, Principle One).
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
@@ -11,22 +11,22 @@ import { MARK_PNG, MARK_SVG } from './logo.ts'
 
 const PANE = 'insights'
 
-const snapshot = atom({ plugin: 'agentsensei', key: 'snapshot' } as const, null, { shape: 'report-json-1' })
-const loadedAt = atom({ plugin: 'agentsensei', key: 'loadedAt' } as const, '', { shape: 'iso-1' })
-const stamp = atom({ plugin: 'agentsensei', key: 'stamp' } as const, '', { shape: 'stamp-1' })
-const since = atom({ plugin: 'agentsensei', key: 'since' } as const, '', { shape: 'iso-1' })
-const tab = atom({ plugin: 'agentsensei', key: 'tab' } as const, 'findings', { shape: 'tab-1' })
-const picked = atom({ plugin: 'agentsensei', key: 'picked' } as const, [], { shape: 'picked-1' })
-const open = atom({ plugin: 'agentsensei', key: 'open' } as const, [], { shape: 'open-1' })
-const ticked = atom({ plugin: 'agentsensei', key: 'ticked' } as const, 0, { shape: 'ticked-1' })
-const busy = atom({ plugin: 'agentsensei', key: 'busy' } as const, false, { shape: 'busy-1' })
-const answered = atom({ plugin: 'agentsensei', key: 'answered' } as const, {}, { shape: 'answered-1' })
-const applied = atom({ plugin: 'agentsensei', key: 'applied' } as const, {}, { shape: 'applied-1' })
-const drafted = atom({ plugin: 'agentsensei', key: 'drafted' } as const, [], { shape: 'drafted-1' })
-const pictures = atom({ plugin: 'agentsensei', key: 'pictures' } as const, false, { shape: 'pictures-1' })
-const note = atom({ plugin: 'agentsensei', key: 'note' } as const, '', { shape: 'note-1' })
-const excerpts = atom({ plugin: 'agentsensei', key: 'excerpts' } as const, {}, { shape: 'excerpts-1' })
-const frame = atom({ plugin: 'agentsensei', key: 'frame' } as const, 0, { shape: 'frame-1' })
+const snapshot = atom({ plugin: 'vibesenpai', key: 'snapshot' } as const, null, { shape: 'report-json-1' })
+const loadedAt = atom({ plugin: 'vibesenpai', key: 'loadedAt' } as const, '', { shape: 'iso-1' })
+const stamp = atom({ plugin: 'vibesenpai', key: 'stamp' } as const, '', { shape: 'stamp-1' })
+const since = atom({ plugin: 'vibesenpai', key: 'since' } as const, '', { shape: 'iso-1' })
+const tab = atom({ plugin: 'vibesenpai', key: 'tab' } as const, 'findings', { shape: 'tab-1' })
+const picked = atom({ plugin: 'vibesenpai', key: 'picked' } as const, [], { shape: 'picked-1' })
+const open = atom({ plugin: 'vibesenpai', key: 'open' } as const, [], { shape: 'open-1' })
+const ticked = atom({ plugin: 'vibesenpai', key: 'ticked' } as const, 0, { shape: 'ticked-1' })
+const busy = atom({ plugin: 'vibesenpai', key: 'busy' } as const, false, { shape: 'busy-1' })
+const answered = atom({ plugin: 'vibesenpai', key: 'answered' } as const, {}, { shape: 'answered-1' })
+const applied = atom({ plugin: 'vibesenpai', key: 'applied' } as const, {}, { shape: 'applied-1' })
+const drafted = atom({ plugin: 'vibesenpai', key: 'drafted' } as const, [], { shape: 'drafted-1' })
+const pictures = atom({ plugin: 'vibesenpai', key: 'pictures' } as const, false, { shape: 'pictures-1' })
+const note = atom({ plugin: 'vibesenpai', key: 'note' } as const, '', { shape: 'note-1' })
+const excerpts = atom({ plugin: 'vibesenpai', key: 'excerpts' } as const, {}, { shape: 'excerpts-1' })
+const frame = atom({ plugin: 'vibesenpai', key: 'frame' } as const, 0, { shape: 'frame-1' })
 
 /** When the person last looked: what "new" is measured from, kept across sessions. */
 const SEEN_KEY = 'lastSeen'
@@ -173,16 +173,16 @@ async function apply($: EngineInterface, fixes: PaneFixState[]): Promise<void> {
       await update($, drafted, (d) => [...new Set([...d, ...ids])])
       await say('')
     } else if (r.refusal === 'no_composer') {
-      await say('There is no prompt box here. Run /agentsensei:apply instead.')
+      await say('There is no prompt box here. Run /vibesenpai:apply instead.')
     } else {
       // The pane may hold the keyboard after a click; the clipboard still gets the request to the prompt.
       const c = await $.ui.copy({ text })
       await say(c.isCopied
         ? 'The prompt box would not take it, so it is on your clipboard. Paste it into your prompt and press Enter.'
-        : `The prompt box would not take it${r.refusal !== undefined ? ` (${r.refusal})` : ''}. Run /agentsensei:apply instead.`)
+        : `The prompt box would not take it${r.refusal !== undefined ? ` (${r.refusal})` : ''}. Run /vibesenpai:apply instead.`)
     }
   } catch (err) {
-    await say(`Apply failed: ${err instanceof Error ? err.message : String(err)}. Run /agentsensei:apply instead.`)
+    await say(`Apply failed: ${err instanceof Error ? err.message : String(err)}. Run /vibesenpai:apply instead.`)
   }
   await update($, picked, () => [])
 }
@@ -242,7 +242,7 @@ function autoRefresh($: EngineInterface): void {
 
 /** Opens the pane, reading the analysis the first time. `since` is the previous visit, so "new" means new to you. */
 async function show($: EngineInterface): Promise<boolean> {
-  const opened = await $.ui.open({ id: PANE, title: 'agentsensei' })
+  const opened = await $.ui.open({ id: PANE, title: 'vibesenpai' })
   if (!opened.isPlaced) return false
   // A guess about the terminal must never keep the pane from opening.
   const draws = await Promise.all([$.env.get('TERM_PROGRAM'), $.env.get('TERM'), $.env.get('TMUX')])
@@ -261,7 +261,7 @@ async function show($: EngineInterface): Promise<boolean> {
 
 export const register: Register = on => {
   // The plugin's own command: open the pane where a surface draws one, else fall through to the text version.
-  on('command.run', { command: 'agentsensei:insights' }, async ($, e, next) => ((await show($)) ? { text: 'Insights opened beside the chat.' } : next(e)))
+  on('command.run', { command: 'vibesenpai:insights' }, async ($, e, next) => ((await show($)) ? { text: 'Insights opened beside the chat.' } : next(e)))
 
   // After each turn, re-read only if a background pass changed something.
   on('turn.complete', async ($, e, next) => {
@@ -283,7 +283,7 @@ export const register: Register = on => {
       const secs = Math.max(0, Math.round((Date.now() - loadStarted) / 1000))
       return (
         <Box flexDirection="column" alignItems="center" paddingY={2} gap={1}>
-          <Text weight="bold" color="claude">agentsensei</Text>
+          <Text weight="bold" color="claude">vibesenpai</Text>
           {message === ''
             ? <Text><Text color="claude">{spin}</Text> Reading your history <Text dimColor>· {secs}s</Text></Text>
             : <Text>{message}</Text>}
@@ -688,8 +688,8 @@ export const register: Register = on => {
           {line('Judge', state('judge'), `${data.read} of ${data.total} sessions read`)}
           {today !== undefined && line('Today', `${human(today.tokens)} of ${human(today.limit)} tokens${today.tokens >= today.limit ? ' · budget reached, continues tomorrow' : ''}`)}
           {sp?.allTime !== undefined && sp.allTime.calls > 0 && line('Spent', spendText(sp.allTime), ...(sp.allTime.usdMicros !== undefined ? [costNote(subscribed ? 'subscription' : sp.billing)] : []))}
-          {sp !== undefined && sp.older > 0 && line('Older', `${sp.older} past session${sp.older === 1 ? '' : 's'} not read`, 'agentsensei judge --backlog reads them')}
-          {sp !== undefined && line('Model reads', sp.enabled ? 'on · /agentsensei:judge off stops them' : 'off · /agentsensei:judge on')}
+          {sp !== undefined && sp.older > 0 && line('Older', `${sp.older} past session${sp.older === 1 ? '' : 's'} not read`, 'vibesenpai judge --backlog reads them')}
+          {sp !== undefined && line('Model reads', sp.enabled ? 'on · /vibesenpai:judge off stops them' : 'off · /vibesenpai:judge on')}
           {line('Dismissed', `${data.dismissed ?? 0} finding${data.dismissed === 1 ? '' : 's'}`)}
         </Box>
       )
@@ -700,7 +700,7 @@ export const register: Register = on => {
     const canDraw = (await read($, pictures)) as boolean
     const mark = () => {
       if (e.surface === 'terminal' && canDraw && 'Image' in els) { const { Image } = els; return <Image source={{ png: MARK_PNG }} columns={10} rows={5} alt=" " /> }
-      if (e.surface !== 'terminal' && 'Svg' in els) { const { Svg } = els; return <Svg source={MARK_SVG} alt="agentsensei" width={40} height={40} /> }
+      if (e.surface !== 'terminal' && 'Svg' in els) { const { Svg } = els; return <Svg source={MARK_SVG} alt="vibesenpai" width={40} height={40} /> }
       return null
     }
 
@@ -711,13 +711,13 @@ export const register: Register = on => {
           {mark()}
           <Box flexDirection="column" flexGrow={1}>
             <Box flexDirection="row" justifyContent="space-between" gap={2}>
-              <Text weight="bold" color="claude">agentsensei</Text>
+              <Text weight="bold" color="claude">vibesenpai</Text>
               {behind && !showCard
                 ? <Text>{reading && <Text color="claude">{spin} </Text>}{bar(12)}<Text dimColor> {data.read}/{target}</Text></Text>
                 : <Text dimColor>{data.read}/{data.total} sessions read</Text>}
             </Box>
             <Box flexDirection="row" justifyContent="space-between" gap={2}>
-              <Box flexShrink={1}><Text dimColor>Find out why your agents failed you.</Text></Box>
+              <Box flexShrink={1}><Text dimColor>Discover how your agents failed you.</Text></Box>
               {/* Refresh sits on the time it updates, the way a feed's timestamp does. */}
               <Box flexDirection="row" flexShrink={0} gap={1}>
                 <Text dimColor>{refreshing ? 'refreshing…' : `updated ${mins === 0 ? 'just now' : `${mins}m ago`}`}</Text>

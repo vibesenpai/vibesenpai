@@ -97,7 +97,7 @@ export function harnessTtlStatus(home: string): string[] {
 export function cmdDoctor(a: Argv): number {
   const home = homedir();
   const { config } = configFromFlags(a);
-  console.log('agentsensei doctor\n');
+  console.log('vibesenpai doctor\n');
 
   console.log(`  node       ${process.version}`);
 
@@ -133,8 +133,8 @@ export function cmdDoctor(a: Argv): number {
   const js = readJudgeState(config.archive);
   const block = reportBlock(st, nextRung('block'), tallyByDimension(js), js.dismissed ?? 0, jobs);
   if (block !== '') for (const l of block.split('\n')) console.log(`             ${l}`);
-  if (process.env['AGENTSENSEI_DISABLE'] === '1') {
-    console.log(`  ambient    AGENTSENSEI_DISABLE=1 is set — every hook exits on line one`);
+  if (process.env['VIBESENPAI_DISABLE'] === '1') {
+    console.log(`  ambient    VIBESENPAI_DISABLE=1 is set — every hook exits on line one`);
   }
 
   const d = describeCatalog(config.archive);
@@ -187,7 +187,7 @@ export function cmdDoctor(a: Argv): number {
   if (judgeOn) {
     console.log('             redacted transcript text leaves this machine when the judge');
     console.log('             runs, and only when you run a command. --disable to stop it.');
-    console.log('             turn it off:  agentsensei judge --disable --apply');
+    console.log('             turn it off:  vibesenpai judge --disable --apply');
   } else {
     console.log('             the judge would send redacted session content to a model, and');
     console.log('             it is OFF. Nothing else reaches the network during analysis;');
@@ -201,7 +201,7 @@ export function cmdDoctor(a: Argv): number {
 export function cmdSkeleton(a: Argv): number {
   const sessionId = a._[1];
   if (sessionId === undefined) {
-    console.error('usage: agentsensei skeleton <sessionId> [--live] [--window n]');
+    console.error('usage: vibesenpai skeleton <sessionId> [--live] [--window n]');
     return 1;
   }
   const { config } = configFromFlags(a);
@@ -217,7 +217,7 @@ export async function cmdStanding(a: Argv): Promise<number> {
     try {
       runAndWait('compute-standing.ts', ['--force'], { inherit: true });
     } catch {
-      console.error('the standing pass failed — see `agentsensei doctor`.');
+      console.error('the standing pass failed — see `vibesenpai doctor`.');
       return 1;
     }
   }

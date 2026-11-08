@@ -132,7 +132,7 @@ describe('skeleton — line mapping', () => {
 });
 
 function stampLike() {
-  return { tool: 'agentsensei', schema: 'skeleton', v: SCHEMA.skeleton } as const;
+  return { tool: 'vibesenpai', schema: 'skeleton', v: SCHEMA.skeleton } as const;
 }
 function w() {
   return { from: { uuid: 'a', sessionId: 's1' }, to: { uuid: 'a', sessionId: 's1' } };
@@ -173,7 +173,7 @@ describe('skeleton — windowing', () => {
 
   it('is versioned and self-describing', () => {
     const sk = buildSkeletons('s1', many(3));
-    expect(sk[0]).toMatchObject({ tool: 'agentsensei', schema: 'skeleton', v: SCHEMA.skeleton });
+    expect(sk[0]).toMatchObject({ tool: 'vibesenpai', schema: 'skeleton', v: SCHEMA.skeleton });
   });
 
   it('produces nothing from events that yield no lines', () => {

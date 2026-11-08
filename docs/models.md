@@ -138,8 +138,8 @@ they survive `npx` re-runs.
 
 | Context | Trigger behaviour |
 |---|---|
-| `agentsensei models install` | Downloads. The explicit, documented way. |
-| `agentsensei init` | **Offers** it as a setup step, with the size stated. Declining is normal and remembered. |
+| `vibesenpai models install` | Downloads. The explicit, documented way. |
+| `vibesenpai init` | **Offers** it as a setup step, with the size stated. Declining is normal and remembered. |
 | Interactive CLI needing a model dimension | **Prompts once**: *"3 dimensions need models (~270MB). Download now? [y/N]"* — then remembers the answer either way. |
 | `--with-models` | Downloads without prompting. For scripts and for people who already decided. |
 | `--no-models` | Never downloads; model dimensions are skipped silently. |

@@ -4,7 +4,7 @@ description: How to set up, what the rules are, and what is reproducible without
 ---
 
 ```bash
-git clone https://github.com/crozzfire/agentsensei && cd agentsensei
+git clone https://github.com/vibesenpai/vibesenpai && cd vibesenpai
 npm install
 npm test                 # the whole suite, no network
 npm run cli -- now       # against your own sessions

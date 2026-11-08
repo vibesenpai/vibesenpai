@@ -15,7 +15,7 @@ import { readStanding } from '../src/standing.ts';
 import { disclosure, nextRung, reportBlock } from '../src/session-block.ts';
 
 function main(): void {
-  if (process.env['AGENTSENSEI_DISABLE'] === '1') return;
+  if (process.env['VIBESENPAI_DISABLE'] === '1') return;
 
   const { config } = resolveConfig();
 

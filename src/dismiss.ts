@@ -222,7 +222,7 @@ export function candidateLines(c: Candidate, short: string, currentSessionId?: s
   return [`${short}  ${name} · ${basename(c.subject)} · ${when}${count}`];
 }
 
-/** The listing `/agentsensei:dismiss` puts in front of the person. */
+/** The listing `/vibesenpai:dismiss` puts in front of the person. */
 export function renderCandidates(
   cs: Candidate[],
   opts: { currentSessionId?: string; dismissedBefore?: number } = {},

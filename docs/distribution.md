@@ -21,7 +21,7 @@ pipeline (direct PRs are auto-closed; everything flows through the submission fo
 
 ```
 /plugin marketplace add anthropics/claude-plugins-community
-/plugin install agentsensei@claude-community
+/plugin install vibesenpai@claude-community
 ```
 
 That is the realistic distribution target: a security screen rather than a business relationship, and
@@ -30,15 +30,14 @@ marketplace — which is the single biggest discovery lever available without be
 
 **Tier 1 ships first regardless**, because it has no gatekeeper and works the day the repo is public:
 
-> **Note on the namespace.** The repo lives at `crozzfire/agentsensei`, so the marketplace path is
-> `crozzfire/agentsensei`. The **plugin name stays `agentsensei`**, so commands remain
-> `/agentsensei:*` — marketplace path and plugin name are independent. If this later moves to an
-> `agentsensei` org, `marketplace.json`'s top-level `renames` key handles the move without breaking
-> existing installs.
+> **Note on the namespace.** The repo lives at `vibesenpai/vibesenpai`, so the marketplace path is
+> `vibesenpai/vibesenpai`, and commands are `/vibesenpai:*`. Marketplace path and plugin name are
+> independent: if the repo moves, `marketplace.json`'s top-level `renames` key handles the move
+> without breaking existing installs.
 
 ```
-/plugin marketplace add crozzfire/agentsensei
-/plugin install agentsensei
+/plugin marketplace add vibesenpai/vibesenpai
+/plugin install vibesenpai
 ```
 
 **Tier 3 is cheap and worth doing all of it** — these are PRs or form submissions, not negotiations:
@@ -120,7 +119,7 @@ a sub-10ms no-op that checks a stamp file and moves on.
 
 | What | Where | Why |
 |---|---|---|
-| **Store** (catalog + findings, SQLite — **no transcript copies**) | `$XDG_DATA_HOME/agentsensei` | durable derived data. Must **survive plugin uninstall** and be shared with the CLI — two stores would mean two different answers |
+| **Store** (catalog + findings, SQLite — **no transcript copies**) | `$XDG_DATA_HOME/vibesenpai` | durable derived data. Must **survive plugin uninstall** and be shared with the CLI — two stores would mean two different answers |
 | **Classifiers** (~270 MB) | `$CLAUDE_PLUGIN_DATA` when running as a plugin, else XDG | large, disposable, re-downloadable, and correctly removed when the plugin is uninstalled |
 
 That split is the right default precisely because the consequences of losing each are different:
@@ -132,7 +131,7 @@ Asking at install is better than asking at first report, because the user is alr
 decision-making frame and expects setup questions. Two options:
 
 ```
-  agentsensei installed.
+  vibesenpai installed.
 
   34 sessions found in ~/.claude/projects — ready to analyse with no further setup.
 
@@ -144,7 +143,7 @@ decision-making frame and expects setup questions. Two options:
   no account, nothing sent anywhere.
 
     1  Download now
-    2  Later — run /agentsensei:setup-models any time
+    2  Later — run /vibesenpai:setup-models any time
 ```
 
 **No hard count in the copy.** "6 more dimensions" would go stale the moment a dimension is added,
@@ -159,12 +158,12 @@ invisibly. So the flow is:
 1. `userConfig` in the plugin manifest optionally captures the preference at install time (a verified
    plugin.json field, used by mem0).
 2. The first `SessionStart` hook **emits the offer** — it writes text, not bytes.
-3. If the user picks option 1, **the model runs `agentsensei models install` as a foreground tool
+3. If the user picks option 1, **the model runs `vibesenpai models install` as a foreground tool
    call** in the conversation. Progress is visible, failure is legible, and nothing happens in a
    background process nobody is watching.
 
 That keeps "hooks never download" intact while still giving the choice at install time. The offer is
-shown **once**; the answer is remembered either way, and `/agentsensei:setup-models` remains the
+shown **once**; the answer is remembered either way, and `/vibesenpai:setup-models` remains the
 path back for anyone who deferred.
 
 **Naming — the artifact and the capability get different names, on purpose.**
@@ -173,8 +172,8 @@ path back for anyone who deferred.
   it mislabels the largest component: of the 270 MB, **175 MB is EmbeddingGemma, which classifies
   nothing** — it is an embedding model. Only the NLI cross-encoder and the SetFit heads are
   classifiers. "Models" also survives adding a reranker or any other model type later. Used in config
-  keys, paths, `doctor` output, and the command: `/agentsensei:setup-models`,
-  `agentsensei models install`.
+  keys, paths, `doctor` output, and the command: `/vibesenpai:setup-models`,
+  `vibesenpai models install`.
 - **Capability: "semantic analysis."** This is the real and explainable line: the rules tier is
   **structural** (did a command run, was a test executed, did files change), the model tier is
   **semantic** (is this a paraphrase, does this contradict, is this prompt specific enough). It is
@@ -183,6 +182,43 @@ path back for anyone who deferred.
 The worry that "models" implies an LLM dependency is real but belongs in the copy, not the noun — one
 clause ("no LLM, no API key, nothing sent anywhere") settles it, and that clause has to be there
 regardless.
+
+### Name: agentsensei → vibesenpai (2026-11-08)
+
+**Why we renamed.** On 2026-10-31 an unrelated npm account (`vrningolli`) published `agentsensei`,
+described as *"reviews your Claude Code and Codex sessions and coaches you to prompt and use AI agents
+better"*. A coach addressed to the developer is the framing this project rejects (D1). Sharing a name
+with it would blur that line, and the npm name was gone.
+
+**Timeline (observed):**
+
+| Date | Event |
+|---|---|
+| 2026-10-15 | 3 commits pushed to a **private** `crozzfire/agentsensei` (spec, docs, scaffold) |
+| 2026-10-22 | Checked: private, 0 forks, sole collaborator; then deleted and recreated empty |
+| 2026-10-31 14:38Z | `vrningolli/-agentsensei` created in one commit; dormant since 2022 |
+| 2026-10-31 14:54Z | `agentsensei` published to npm: `0.0.0-stage`, then `0.1.0` a minute later |
+
+**Was it copied?** Not found. Their 26 files (about 10,000 words, read through the GitHub API on
+2026-11-08) share no run of 7 words with our three pushed commits, apart from 3 boilerplate import
+and error lines. None of our own terms appear (`skeleton`, `dimension`, `redundant_call`,
+`edit_retry`, `overreach`, `guard`). The overlap is the name and the idea, so there was nothing to
+report, and an npm name dispute over a real package would fail.
+
+**Why vibesenpai.** It keeps agentsensei's hybrid shape (a tech word plus a Japanese one), with
+neither of its words. "vibe" carries the search term; senp*ai* ends in "ai"; the senpai is the one
+who notices. The pitch stays an investigation, not coaching: *Discover how your agents failed you.*
+Checked free on 2026-11-08: npm `vibesenpai` (and no lookalikes), `.com`, `.dev`, `.ai`, `.app`,
+`.io`, `.sh`, `vibesenp.ai`, and the GitHub org `vibesenpai`.
+
+Considered and dropped: `kaigan` (too close in sound to the author's earlier project, Kaizen),
+`sixeyes`, `sagemode`, `turnsense`, `vibesatori`. Most anime eye names (`sharingan`, `byakugan`,
+`rinnegan`, `rikugan`) were already taken on npm.
+
+**Kept for continuity.** A fix marker written as `(agentsensei fix <id>)` still dates a fix
+(`src/fix-marker.ts`), and `agentsensei-judge` transcripts are still skipped as our own
+(`src/read.ts`). The rules file moved to `.claude/rules/vibesenpai.md` with its text unchanged, so
+outcome tracking (which hashes the text) carries over.
 
 ---
 

@@ -1,6 +1,6 @@
 /**
  * The one way this project calls a model: the local `claude -p` CLI, isolated so the judge never
- * judges itself. `AGENTSENSEI_DISABLE=1`, a `JUDGE_CWD_MARKER` working directory that
+ * judges itself. `VIBESENPAI_DISABLE=1`, a `JUDGE_CWD_MARKER` working directory that
  * `discoverTranscripts` skips, and no tools. Rules: .claude/rules/judge.md.
  */
 
@@ -99,7 +99,7 @@ function modelExecOptions(opts: ModelOptions) {
     timeout: opts.timeoutMs ?? 300_000,
     maxBuffer: opts.maxBufferBytes ?? 64 * 1024 * 1024,
     stdio: ['pipe', 'pipe', 'ignore'] as ['pipe', 'pipe', 'ignore'],
-    env: { ...process.env, AGENTSENSEI_DISABLE: '1' },
+    env: { ...process.env, VIBESENPAI_DISABLE: '1' },
   };
 }
 

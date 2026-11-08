@@ -104,7 +104,7 @@ export type Event = {
    */
   devCommand?: { name: string; part: 'invocation' | 'instructions' };
 
-  /** Fix ids a developer prompt carries in agentsensei's marker: the moment those fixes were applied. */
+  /** Fix ids a developer prompt carries in vibesenpai's marker: the moment those fixes were applied. */
   fixApplied?: string[];
 
   /**

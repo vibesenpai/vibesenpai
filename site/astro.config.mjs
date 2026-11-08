@@ -2,31 +2,31 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-// The site lives under /agentsensei on GitHub Pages. `base` has to match or
+// The site lives under /vibesenpai on GitHub Pages. `base` has to match or
 // every internal link 404s on the deployed copy while working locally — which
 // is the classic way a docs deploy looks fine in dev and is broken in public.
 export default defineConfig({
-  site: 'https://crozzfire.github.io',
-  base: '/agentsensei',
+  site: 'https://vibesenpai.github.io',
+  base: '/vibesenpai',
   integrations: [
     starlight({
-      title: 'agentsensei',
+      title: 'vibesenpai',
       // The brand lives in `assets/brand/` at the repo root; the site keeps
       // copies because Vite will not serve files from outside its own root.
       logo: { src: './src/assets/mark.svg' },
       favicon: '/favicon.svg',
       head: [
-        { tag: 'meta', attrs: { property: 'og:image', content: 'https://crozzfire.github.io/agentsensei/og.jpg' } },
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://vibesenpai.github.io/vibesenpai/og.jpg' } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
-        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://crozzfire.github.io/agentsensei/og.jpg' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://vibesenpai.github.io/vibesenpai/og.jpg' } },
       ],
       description:
-        "Find out why your agents failed you. It reads your own sessions and shows you the exact turns, what you'd asked for, and what it cost.",
+        "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.",
       social: {
-        github: 'https://github.com/crozzfire/agentsensei',
+        github: 'https://github.com/vibesenpai/vibesenpai',
       },
       editLink: {
-        baseUrl: 'https://github.com/crozzfire/agentsensei/edit/main/site/',
+        baseUrl: 'https://github.com/vibesenpai/vibesenpai/edit/main/site/',
       },
       sidebar: [
         {

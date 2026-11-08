@@ -2,7 +2,7 @@ sequenceDiagram
   autonumber
   participant You
   participant CC as Claude Code
-  participant H as agentsensei hooks
+  participant H as vibesenpai hooks
   participant W as detached worker
   participant M as the model
 
@@ -17,7 +17,7 @@ sequenceDiagram
   Note right of H: no judge pass.<br/>standing only.
   H->>W: refresh standing, if stale
 
-  You->>CC: /agentsensei:now
+  You->>CC: /vibesenpai:now
   CC-->>You: findings so far (0.4s)
   CC->>W: judge THIS session
   W->>M: redacted packet

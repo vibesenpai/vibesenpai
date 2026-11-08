@@ -22,7 +22,7 @@ false positives across 1,139 sessions.
 
 **Cost:** whole categories of real problem are unreachable by rules, which is
 why there is a second tier at all.
-[The compiler enforces this →](/agentsensei/architecture/two-tiers/)
+[The compiler enforces this →](/vibesenpai/architecture/two-tiers/)
 
 ## Scope belongs to the detector, not the pipeline
 
@@ -67,5 +67,5 @@ That is why `now` shows them under `SESSION COST` rather than flagging them.
 
 The full record, including the ones that were reversed, is in `DECISIONS.md`.
 The ones that were **built and then deleted** are in
-[the graveyard](/agentsensei/work/graveyard/), which is the more interesting
+[the graveyard](/vibesenpai/work/graveyard/), which is the more interesting
 half.

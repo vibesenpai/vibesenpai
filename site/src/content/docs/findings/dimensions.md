@@ -1,6 +1,6 @@
 ---
 title: The dimensions
-description: What agentsensei looks for, which tier each lives in, and which one does not work.
+description: What vibesenpai looks for, which tier each lives in, and which one does not work.
 ---
 
 Two tiers, and we are explicit about which is which because they have very
@@ -38,7 +38,7 @@ right thing to do. It is reported so you can see it, not so you can act on it.
 
 ## The judge — reads conversation
 
-These need [the judge](/agentsensei/architecture/judge/) enabled.
+These need [the judge](/vibesenpai/architecture/judge/) enabled.
 
 | dimension | what it catches |
 |---|---|
@@ -59,7 +59,7 @@ dimension can be *discovered* rather than guessed at.
 
 **2 of 38** against labelled data, across two models and three pipeline
 versions. Established, not provisional. Treat any `overreach` finding as a
-reason to look rather than a conclusion. [Why it stays](/agentsensei/work/limits/).
+reason to look rather than a conclusion. [Why it stays](/vibesenpai/work/limits/).
 
 ## Confidence
 

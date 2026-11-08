@@ -291,7 +291,7 @@ model download, no Ollama, no network, and costs single-digit milliseconds.
 
 Each finding ships with a confidence tier and the method that produced it. **No dimension has a
 measured accuracy yet, because nothing is built** — the figures below are *a priori* expectations with
-their basis stated, and `agentsensei eval` replaces each one with a measured number against the gold
+their basis stated, and `vibesenpai eval` replaces each one with a measured number against the gold
 set. Any claim of accuracy before that is exactly the "vibes" this project exists to reject.
 
 | Tier | What it means | Expected precision | Basis |
@@ -362,7 +362,7 @@ anything.
 Precedence follows the existing rule — CLI flag → env var → config file → default:
 
 ```jsonc
-// $XDG_CONFIG_HOME/agentsensei/config.json
+// $XDG_CONFIG_HOME/vibesenpai/config.json
 {
   "dimensions": {
     "preset": "core",                     // core | standard | all | custom
@@ -381,12 +381,12 @@ Precedence follows the existing rule — CLI flag → env var → config file �
 ```
 
 ```bash
-agentsensei report --preset all
-agentsensei report --dimensions constraint_decay,no_verification
-agentsensei report --no-dimensions tool_loop
-agentsensei dimensions list                 # all 40: group, preset, status, confidence
-agentsensei dimensions enable goal_drift
-agentsensei dimensions explain goal_drift   # definition, signal, source, example
+vibesenpai report --preset all
+vibesenpai report --dimensions constraint_decay,no_verification
+vibesenpai report --no-dimensions tool_loop
+vibesenpai dimensions list                 # all 40: group, preset, status, confidence
+vibesenpai dimensions enable goal_drift
+vibesenpai dimensions explain goal_drift   # definition, signal, source, example
 ```
 
 Four design points that matter more than the syntax:

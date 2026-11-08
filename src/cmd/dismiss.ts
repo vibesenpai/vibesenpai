@@ -36,7 +36,7 @@ export function cmdDismiss(a: Argv): number {
   try {
     db = openStore(config.archive);
   } catch {
-    console.error('the store could not be opened — see `agentsensei doctor`.');
+    console.error('the store could not be opened — see `vibesenpai doctor`.');
     return 1;
   }
   try {
@@ -117,7 +117,7 @@ export function cmdDismiss(a: Argv): number {
       ),
     );
     console.log(
-      dim(`  Run /agentsensei:dismiss undo ${clearing ? 'all' : [...short.values()].join(' ')} to restore`),
+      dim(`  Run /vibesenpai:dismiss undo ${clearing ? 'all' : [...short.values()].join(' ')} to restore`),
     );
     return 0;
   } finally {
@@ -167,10 +167,10 @@ export function refreshStanding(config: Config): void {
     runAndWait('compute-standing.ts', ['--force'], {
       env: {
         ...process.env,
-        AGENTSENSEI_ARCHIVE: config.archive,
-        AGENTSENSEI_SOURCES: config.sources.join(','),
-        AGENTSENSEI_PRESET: config.preset,
-        AGENTSENSEI_MUTE: config.mute.join(','),
+        VIBESENPAI_ARCHIVE: config.archive,
+        VIBESENPAI_SOURCES: config.sources.join(','),
+        VIBESENPAI_PRESET: config.preset,
+        VIBESENPAI_MUTE: config.mute.join(','),
       },
     });
   } catch {

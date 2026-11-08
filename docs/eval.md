@@ -12,7 +12,7 @@ own honesty principle. So:
 | **Silver** | Published LLM-judge labels (SWE-chat pushback/intent, `misalignments.json`) | 1000s | Broad agreement with the literature | "silver agreement," explicitly labeled |
 | **Gold** | Hand-labelled by us, against real trajectories | **0 so far** | **Real precision/recall** | the headline number — and there is no headline number yet |
 
-`agentsensei eval` is not built. The tiering is still load-bearing, because it is what stops the silver
+`vibesenpai eval` is not built. The tiering is still load-bearing, because it is what stops the silver
 numbers being quoted as precision.
 
 ## What this means for the judge numbers, which is the awkward part

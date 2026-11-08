@@ -1,20 +1,21 @@
-# agentsensei
+# vibesenpai
 
 <p align="center"><img src="assets/brand/hero-16x9.jpg" width="720" alt="The mascot: an old sensei in a straw hat, pointing at turn 41 in a transcript, where an edit was refused because the file was not read first."></p>
 
-[![CI](https://github.com/crozzfire/agentsensei/actions/workflows/ci.yml/badge.svg)](https://github.com/crozzfire/agentsensei/actions/workflows/ci.yml)
+[![CI](https://github.com/vibesenpai/vibesenpai/actions/workflows/ci.yml/badge.svg)](https://github.com/vibesenpai/vibesenpai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen.svg)](package.json)
 
-**Find out why your agents failed you.** It reads your own sessions and shows
-you the exact turns, what you'd asked for, and what it cost.
+**Discover how your agents failed you.** vibesenpai reads the sessions already
+on your disk and shows you the exact turns, what you'd asked for, and what it
+cost. Then it hands your agent the rule that stops it happening again.
 
 Your agent edits a file it hasn't read. The harness refuses. It reads the file
 and tries again. That round trip cost you tokens, it happens in **one session in
 three**, and you have never once noticed it — because by the time you read the
 reply, it worked.
 
-`agentsensei` reads the transcripts already sitting in `~/.claude/projects`,
+`vibesenpai` reads the transcripts already sitting in `~/.claude/projects`,
 finds those moments, prices them, and quotes the turns back to you:
 
 ```
@@ -96,8 +97,8 @@ through your own harness it is no longer strictly true of us either —
 ## Install
 
 ```
-/plugin marketplace add crozzfire/agentsensei
-/plugin install agentsensei
+/plugin marketplace add vibesenpai/vibesenpai
+/plugin install vibesenpai
 ```
 
 That is the whole thing. No npm, no clone, nothing to bootstrap — this ships
@@ -107,12 +108,12 @@ Claude Code needs it.
 You get three commands:
 
 ```
-/agentsensei:insights              what happened in this session
-/agentsensei:fix              a recommendation, with its evidence
-/agentsensei:report  a self-contained HTML report
+/vibesenpai:insights              what happened in this session
+/vibesenpai:fix              a recommendation, with its evidence
+/vibesenpai:report  a self-contained HTML report
 ```
 
-To stop it: `/plugin disable agentsensei`.
+To stop it: `/plugin disable vibesenpai`.
 
 > **Not published yet.** The marketplace entry is built and the plugin runs from
 > a clone, but it has not been exercised through a real `/plugin install`. Until
@@ -121,7 +122,7 @@ To stop it: `/plugin disable agentsensei`.
 Then, for the session you are in right now:
 
 ```
-/agentsensei:insights
+/vibesenpai:insights
 ```
 
 ```
@@ -142,8 +143,8 @@ Then, for the session you are in right now:
 
   Last read 2026-10-23 11:48.
 
-  Run /agentsensei:fix for possible fixes
-  Run /agentsensei:report for more details
+  Run /vibesenpai:fix for possible fixes
+  Run /vibesenpai:report for more details
 ```
 
 `no findings` is a clean bill of health, not a broken tool. That distinction is
@@ -189,7 +190,7 @@ daily limit.** The free checks send nothing.
 | | |
 |---|---|
 | reads | `~/.claude/projects/**` in place |
-| writes | `~/.local/share/agentsensei` (its own store). Never your settings or project files |
+| writes | `~/.local/share/vibesenpai` (its own store). Never your settings or project files |
 | sends | redacted session text to Claude Haiku through your own `claude` CLI, from the background after a turn ends |
 
 **It tells you before it spends.** The first session after install opens with a notice: what it
@@ -199,8 +200,8 @@ that session's first turn ends.
 **What it spends.** About 60k tokens a session, measured. On install it catches up on up to 200
 of your most recent past sessions, then reads each new one. The background reads stop at
 **2M tokens a day** and carry on the next day. Older sessions are read only if you ask
-(`agentsensei judge --backlog --apply`). Both limits can be changed with
-`agentsensei judge --daily-tokens <n> --apply` and `--catch-up <n> --apply`.
+(`vibesenpai judge --backlog --apply`). Both limits can be changed with
+`vibesenpai judge --daily-tokens <n> --apply` and `--catch-up <n> --apply`.
 
 **What it spent.** The insights pane's Health tab shows tokens and Claude Code's own dollar
 figure for the last 7 days and all time. The dollar figure is at API prices: on a subscription
@@ -211,8 +212,8 @@ it comes out of your plan's usage, not a bill, and the pane shows your plan's us
   anything. Measured: 50% of real sessions carry secret-shaped content at that
   fidelity — API keys, JWTs, URL credentials — and tool output is where it
   concentrates.
-- **`/agentsensei:judge off` stops the model reads.** The free checks keep running.
-- **`AGENTSENSEI_DISABLE=1` stops everything**, immediately, including the hooks.
+- **`/vibesenpai:judge off` stops the model reads.** The free checks keep running.
+- **`VIBESENPAI_DISABLE=1` stops everything**, immediately, including the hooks.
   If you are evaluating this on a work machine, that is your kill switch.
 
 ## Why a model at all?
@@ -288,7 +289,7 @@ not a claim we have earned.
 See [CONTRIBUTING.md](CONTRIBUTING.md). Briefly:
 
 ```bash
-git clone https://github.com/crozzfire/agentsensei && cd agentsensei
+git clone https://github.com/vibesenpai/vibesenpai && cd vibesenpai
 npm install
 npm test                  # the whole suite, no network
 npm run cli -- now        # run against your own sessions

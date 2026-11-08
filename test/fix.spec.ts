@@ -222,8 +222,13 @@ describe('fix — what Apply would change', () => {
 
   it('reads back the ids its own marker carries, and nothing else', () => {
     expect(fixIdsIn(`add this line ${fixMarker(['a1b2c3', '0f9e8d'])}`)).toEqual(['a1b2c3', '0f9e8d']);
-    expect(fixIdsIn('agentsensei fix a1b2c3')).toBeUndefined();
-    expect(fixIdsIn('(agentsensei fix XYZ)')).toBeUndefined();
+    expect(fixIdsIn('vibesenpai fix a1b2c3')).toBeUndefined();
+    expect(fixIdsIn('(vibesenpai fix XYZ)')).toBeUndefined();
+  });
+
+  it('still reads a marker written under the old name', () => {
+    expect(fixMarker(['a1b2c3'])).toBe('(vibesenpai fix a1b2c3)');
+    expect(fixIdsIn('add this line (agentsensei fix a1b2c3, 0f9e8d)')).toEqual(['a1b2c3', '0f9e8d']);
   });
 });
 

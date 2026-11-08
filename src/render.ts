@@ -136,7 +136,7 @@ function evidenceLines(f: Finding, byUuid: Map<string, Event>, max = 6): string[
 
   const hidden = f.evidence.length - shown.length;
   if (hidden > 0) {
-    out.push(`${INDENT.repeat(2)}${' '.repeat(turnW)}  ${dim(`… ${hidden} more — agentsensei skeleton`)}`);
+    out.push(`${INDENT.repeat(2)}${' '.repeat(turnW)}  ${dim(`… ${hidden} more — vibesenpai skeleton`)}`);
   }
   return [...out, ''];
 }

@@ -1,4 +1,4 @@
-// The insights pane's contract: what it reads from `agentsensei report --json`, and what it keeps.
+// The insights pane's contract: what it reads from `vibesenpai report --json`, and what it keeps.
 
 export type PaneRow = { turn: string; what: string; detail: string; failed: boolean; retry: boolean; asked?: { seq: number; text: string }; ts?: string };
 
@@ -109,7 +109,7 @@ export type PaneProgress = { target: number; seconds?: number; finishOn?: string
 
 declare module 'claude-code' {
   interface PluginState {
-    agentsensei: {
+    vibesenpai: {
       snapshot: Shaped<PaneData | null>;
       loadedAt: Shaped<string>;
       stamp: Shaped<string>;

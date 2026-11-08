@@ -11,7 +11,7 @@ let sources: string;
 let catalog: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'agentsensei-test-'));
+  root = mkdtempSync(join(tmpdir(), 'vibesenpai-test-'));
   sources = join(root, '.claude', 'projects');
   catalog = join(root, 'store');
   mkdirSync(sources, { recursive: true });
@@ -207,7 +207,7 @@ describe('catalog — robustness', () => {
     session('aaa', ['{"a":1}']);
     runScan({ sources: [sources], catalog });
     const raw = JSON.parse(readFileSync(join(catalog, 'index.json'), 'utf8'));
-    expect(raw).toMatchObject({ tool: 'agentsensei', schema: 'catalog', v: SCHEMA.catalog });
+    expect(raw).toMatchObject({ tool: 'vibesenpai', schema: 'catalog', v: SCHEMA.catalog });
   });
 
   it('re-derives rather than trusting a catalog from a NEWER version', () => {
@@ -335,12 +335,14 @@ describe('scan counts what it would analyse, not our own exhaust', () => {
   it('skips transcripts our own model calls wrote', () => {
     // Our own judge children must not count as the user's transcripts.
     const root = mkdtempSync(join(tmpdir(), 'as-cat-judge-'));
-    const mine = join(root, 'projects', '-private-tmp-agentsensei-judge');
+    const mine = join(root, 'projects', '-private-tmp-vibesenpai-judge');
     const theirs = join(root, 'projects', '-Users-someone-Workspace');
     const old = join(root, 'projects', '-private-tmp-as-judge-probe');
-    for (const d of [mine, theirs, old]) mkdirSync(d, { recursive: true });
+    const renamed = join(root, 'projects', '-private-tmp-agentsensei-judge');
+    for (const d of [mine, theirs, old, renamed]) mkdirSync(d, { recursive: true });
     writeFileSync(join(mine, 'a.jsonl'), '{}\n');
     writeFileSync(join(old, 'b.jsonl'), '{}\n');
+    writeFileSync(join(renamed, 'd.jsonl'), '{}\n');
     writeFileSync(join(theirs, 'c.jsonl'), '{}\n');
 
     const found = findTranscripts([join(root, 'projects')]);

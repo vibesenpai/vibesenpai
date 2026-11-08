@@ -7,7 +7,7 @@ import { clearCatchUpFrom, openStore, readCatchUpFrom, tokensSince, writeCatchUp
 import type { JudgeState } from './state.ts';
 
 /** Set by the Stop hook on the pass it spawns. */
-export const LIMITS_ENV = 'AGENTSENSEI_LIMITS';
+export const LIMITS_ENV = 'VIBESENPAI_LIMITS';
 
 export function limited(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[LIMITS_ENV] === '1';

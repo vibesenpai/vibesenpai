@@ -21,7 +21,7 @@ let bin: string;
 let log: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'agentsensei-drain-'));
+  root = mkdtempSync(join(tmpdir(), 'vibesenpai-drain-'));
   sources = join(root, 'projects', '-Users-test-proj');
   archive = join(root, 'archive');
   bin = join(root, 'bin');
@@ -79,8 +79,8 @@ function runPass(env: Record<string, string> = {}): void {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env['PATH'] ?? ''}`,
-      AGENTSENSEI_SOURCES: join(root, 'projects'),
-      AGENTSENSEI_ARCHIVE: archive,
+      VIBESENPAI_SOURCES: join(root, 'projects'),
+      VIBESENPAI_ARCHIVE: archive,
       NODE_NO_WARNINGS: '1',
       ...env,
     },

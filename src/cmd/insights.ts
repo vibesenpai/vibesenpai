@@ -196,7 +196,7 @@ export async function cmdInsights(a: Argv): Promise<number> {
     );
   }
 
-  // Debug view; also available as `agentsensei skeleton`.
+  // Debug view; also available as `vibesenpai skeleton`.
   if (a.flags['skeleton'] === true) {
     return printSkeletons(a, current.sessionId, current.source, undefined, true);
   }
@@ -204,8 +204,8 @@ export async function cmdInsights(a: Argv): Promise<number> {
 
     // Next steps go last, as `Run X for Y` sentences like `nextRung`.
     const ways = [
-      ...(haveSomethingToFix ? ['Run /agentsensei:fix for possible fixes'] : []),
-      'Run /agentsensei:report for more details',
+      ...(haveSomethingToFix ? ['Run /vibesenpai:fix for possible fixes'] : []),
+      'Run /vibesenpai:report for more details',
     ];
     console.log('');
     for (const w of ways) console.log(`  ${dim(w)}`);

@@ -134,9 +134,9 @@ describe('the first spend is disclosed once', () => {
   });
 
   it('offers a way in and both ways out', () => {
-    expect(text).toMatch(/\/agentsensei:insights/);
-    expect(text).toMatch(/\/agentsensei:judge off/);
-    expect(text).toMatch(/plugin disable agentsensei/);
+    expect(text).toMatch(/\/vibesenpai:insights/);
+    expect(text).toMatch(/\/vibesenpai:judge off/);
+    expect(text).toMatch(/plugin disable vibesenpai/);
   });
 
   it('goes out through systemMessage, not the model channel', () => {

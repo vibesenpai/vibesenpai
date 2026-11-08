@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how `agentsensei` works, for someone seeing it for the first time. It is
+This document explains how `vibesenpai` works, for someone seeing it for the first time. It is
 meant to be read start to finish — about fifteen minutes — after which the code should be navigable.
 
 It covers **mechanism**. The reasoning behind each design choice lives in
@@ -14,7 +14,7 @@ It covers **mechanism**. The reasoning behind each design choice lives in
 
 ## What this is
 
-`agentsensei` reads the transcripts your AI coding sessions already leave on disk, finds the turns
+`vibesenpai` reads the transcripts your AI coding sessions already leave on disk, finds the turns
 where you and the agent wasted effort, and shows you the evidence — the exact turns, verbatim.
 
 It produces exactly two kinds of output, and never a third:
@@ -41,7 +41,7 @@ Nine terms do most of the work in this document.
 
 | Term | Meaning |
 |---|---|
-| **harness** | The tool running the agent — Claude Code, Codex, Cursor. `agentsensei` reads what a harness writes. |
+| **harness** | The tool running the agent — Claude Code, Codex, Cursor. `vibesenpai` reads what a harness writes. |
 | **session** | One continuous conversation with an agent. The unit a developer recognises. |
 | **transcript** | The JSONL file a harness writes for a session, one record per line. Our raw input. |
 | **turn** | A single step in a session: a user message, an agent reply, a tool call, or a tool result. |
@@ -94,10 +94,10 @@ breach is **ours**, from data that was not ours to duplicate.
 Local-first usually means "nothing leaves the machine." Necessary, not sufficient: **the smallest
 attack surface is the one that does not exist.**
 
-So `agentsensei scan` ✅ keeps a catalog — bookkeeping, no content:
+So `vibesenpai scan` ✅ keeps a catalog — bookkeeping, no content:
 
 ```
-$XDG_DATA_HOME/agentsensei/
+$XDG_DATA_HOME/vibesenpai/
   index.json      per source: path, offset, size, mtime, sha256, version, gone
 ```
 
@@ -221,7 +221,7 @@ implementation detail:
 
 1. **Detector input**, and later model input — a window must fit a 4K-token prompt alongside a
    rubric and examples, so the budget is ~2K tokens.
-2. **The evidence shown to you.** `agentsensei explain` prints the skeleton; it is not an internal
+2. **The evidence shown to you.** `vibesenpai explain` prints the skeleton; it is not an internal
    format.
 3. **The wire format for a future team feature.** So skeletons are redacted at construction — no
    file contents, no absolute paths, no identifiers — built as though they will be transmitted even
@@ -346,7 +346,7 @@ The harness is the primary surface; the CLI is secondary. Installation is two sl
 **Claude Code writes its own configuration** — which is why this path is preferred over any installer
 of ours.
 
-> **The install flow diagram was deleted** — it showed `/plugin marketplace add` driving an `/agentsensei:setup` command that does not exist.
+> **The install flow diagram was deleted** — it showed `/plugin marketplace add` driving an `/vibesenpai:setup` command that does not exist.
 
 Two things about this flow are deliberate.
 
@@ -359,7 +359,7 @@ itself where you already are.
 it needs a consented write, and `setup` is where that gets asked. The optional semantic models are
 offered here too; their download mechanics are in [models.md](models.md).
 
-Everything else is daily use: `/agentsensei:insights`, `:fix N`, `:report 7d`, `:why N`, plus the
+Everything else is daily use: `/vibesenpai:insights`, `:fix N`, `:report 7d`, `:why N`, plus the
 statusline. The CLI mirrors all of it for CI and scripting.
 
 ---

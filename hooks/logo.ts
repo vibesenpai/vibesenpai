@@ -1,7 +1,7 @@
-// The agentsensei mark for the pane: assets/brand/mark.svg, and the same as a 160 px PNG (base64) for
+// The vibesenpai mark for the pane: assets/brand/mark.svg, and the same as a 160 px PNG (base64) for
 // terminals that draw pictures.
 
-export const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="agentsensei">
+export const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="vibesenpai">
   <rect width="64" height="64" rx="14" fill="#0d1117"/>
   <path d="M21 30Q32 32 43 30L42 39Q32 43 22 39Z" fill="#c9d4df"/>
   <path d="M24.5 34.5q2.5 2 5 0M34.5 34.5q2.5 2 5 0" fill="none" stroke="#1f2a44" stroke-width="1.8" stroke-linecap="round"/>

@@ -1,13 +1,13 @@
 # Applying a fix
 
-- agentsensei never writes a project file or sends a prompt. Apply drafts a request into the prompt
+- vibesenpai never writes a project file or sends a prompt. Apply drafts a request into the prompt
   box (`$.prompt.fill`, never over a typed draft); the developer's Enter is the yes, and the agent
-  makes the change under the harness's own permission prompt. `/agentsensei:apply` is the same yes,
+  makes the change under the harness's own permission prompt. `/vibesenpai:apply` is the same yes,
   typed.
 - The core (`applyPlan` in `src/fix.ts`) names a target, never a file. Each harness's adapter
   (`src/harness/claude-code.ts`) names the file and words the request. Claude Code: rules go to
-  `.claude/rules/agentsensei.md` with one pointer line in `CLAUDE.md`; no CLAUDE.md word budget.
-- Every request ends with `(agentsensei fix <id>)` (`src/fix-marker.ts`). The parser sets
+  `.claude/rules/vibesenpai.md` with one pointer line in `CLAUDE.md`; no CLAUDE.md word budget.
+- Every request ends with `(vibesenpai fix <id>)` (`src/fix-marker.ts`). The parser sets
   `Event.fixApplied` from a developer prompt or a developer command's output carrying it;
   `compute-standing` stores the earliest sighting per project (`fix_applied`) and whether our rule
   text was seen loaded (`rule_loaded`, a hash of our own text). Applied is never set by a button.

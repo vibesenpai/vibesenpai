@@ -32,7 +32,7 @@ for arg in "$@"; do
     *) DIR="$arg" ;;
   esac
 done
-DIR="${DIR:-/tmp/agentsensei-corpus}"
+DIR="${DIR:-/tmp/vibesenpai-corpus}"
 mkdir -p "$DIR"
 
 jqlike() { node -e "
@@ -94,4 +94,4 @@ if [ "$UPDATE" = "1" ]; then
   echo "  manifest updated — review the baseline diff before committing"
 fi
 
-AGENTSENSEI_CORPUS="$DIR" node --experimental-strip-types scripts/verify-corpus.ts
+VIBESENPAI_CORPUS="$DIR" node --experimental-strip-types scripts/verify-corpus.ts

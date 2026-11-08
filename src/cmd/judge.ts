@@ -206,6 +206,6 @@ export function cmdJudge(a: Argv): number {
   // Enabling is also the explicit act that releases a hold after repeated paid failures.
   releaseHold(config.archive, 'judge');
   console.log('\n  judge enabled. it runs detached, after your turn ends.');
-  console.log('  `agentsensei judge --disable --apply` stops it.');
+  console.log('  `vibesenpai judge --disable --apply` stops it.');
   return 0;
 }

@@ -17,7 +17,7 @@ export type Config = {
   configFile: string | undefined;
 };
 
-/** Where each value came from, so `agentsensei config` can show its work. */
+/** Where each value came from, so `vibesenpai config` can show its work. */
 export type Provenance = Record<keyof Omit<Config, 'configFile'>, Layer>;
 export type Layer = 'flag' | 'env' | 'file' | 'default';
 
@@ -68,8 +68,8 @@ export function resolveConfig(input: ResolveInput = {}): {
 
   const configFile =
     flags.config ??
-    env['AGENTSENSEI_CONFIG'] ??
-    join(xdg(env, 'XDG_CONFIG_HOME', '.config', home), 'agentsensei', 'config.json');
+    env['VIBESENPAI_CONFIG'] ??
+    join(xdg(env, 'XDG_CONFIG_HOME', '.config', home), 'vibesenpai', 'config.json');
 
   let fromFile: Partial<Config> = {};
   try {
@@ -85,7 +85,7 @@ export function resolveConfig(input: ResolveInput = {}): {
 
   for (const [layer, raw] of [
     ['--preset', input.flags?.preset],
-    ['AGENTSENSEI_PRESET', env['AGENTSENSEI_PRESET']],
+    ['VIBESENPAI_PRESET', env['VIBESENPAI_PRESET']],
     ['config file', fromFile.preset],
   ] as const) {
     if (raw !== undefined && asPreset(raw) === undefined) {
@@ -109,28 +109,28 @@ export function resolveConfig(input: ResolveInput = {}): {
   const [sources, pSources] = pick(
     'sources',
     flags.sources,
-    splitList(env['AGENTSENSEI_SOURCES']),
+    splitList(env['VIBESENPAI_SOURCES']),
     [join(home, '.claude', 'projects'), join(home, '.codex', 'sessions')],
   );
 
   const [archive, pArchive] = pick(
     'archive',
     flags.archive,
-    env['AGENTSENSEI_ARCHIVE'],
-    join(dataHome, 'agentsensei'),
+    env['VIBESENPAI_ARCHIVE'],
+    join(dataHome, 'vibesenpai'),
   );
 
   const [preset, pPreset] = pick(
     'preset',
     asPreset(input.flags?.preset),
-    asPreset(env['AGENTSENSEI_PRESET']),
+    asPreset(env['VIBESENPAI_PRESET']),
     'core',
   );
 
   const [mute, pMute] = pick(
     'mute',
     input.flags?.mute,
-    splitList(env['AGENTSENSEI_MUTE']),
+    splitList(env['VIBESENPAI_MUTE']),
     [],
   );
 

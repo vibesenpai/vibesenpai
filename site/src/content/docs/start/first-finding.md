@@ -6,7 +6,7 @@ description: How to read what the tool prints, and why "no findings" is a real r
 Run it:
 
 ```
-/agentsensei:insights
+/vibesenpai:insights
 ```
 
 ```
@@ -27,8 +27,8 @@ Run it:
 
   Last read 2026-10-23 11:48.
 
-  Run /agentsensei:fix for possible fixes
-  Run /agentsensei:report for more details
+  Run /vibesenpai:fix for possible fixes
+  Run /vibesenpai:report for more details
 ```
 
 ## "no findings" is a clean bill of health
@@ -60,17 +60,17 @@ two sessions apart not at all.
 
 **`compacted 4×`** is worth knowing on its own: a compaction discards context,
 and an instruction given before one may simply not be there afterwards. If you
-later see a `constraint_violation`, [this is why](/agentsensei/findings/fixes/).
+later see a `constraint_violation`, [this is why](/vibesenpai/findings/fixes/).
 
 ## When something does fire
 
 ```
-  ✗ edit_retry      4 edits refused, then retried    /agentsensei:fix
+  ✗ edit_retry      4 edits refused, then retried    /vibesenpai:fix
                     2× the text didn't match
                     2× the file wasn't read first
 ```
 
-Every finding is anchored to real turns. `/agentsensei:fix` or `agentsensei fix`
+Every finding is anchored to real turns. `/vibesenpai:fix` or `vibesenpai fix`
 gives you a recommendation — and the turn numbers let you open the
 transcript and judge for yourself, which is the point. A finding is evidence,
 not a verdict.
@@ -78,7 +78,7 @@ not a verdict.
 ## Across your history
 
 ```
-/agentsensei:report
+/vibesenpai:report
 ```
 
 It writes a self-contained HTML file — no JavaScript, no external resources,

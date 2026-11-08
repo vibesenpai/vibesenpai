@@ -22,7 +22,7 @@ let root: string;
 let sources: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'agentsensei-read-'));
+  root = mkdtempSync(join(tmpdir(), 'vibesenpai-read-'));
   sources = join(root, '.claude', 'projects', '-Users-test-proj');
   mkdirSync(sources, { recursive: true });
 });
@@ -213,7 +213,7 @@ describe('resolveCurrentSession — explicit beats ambient beats guessing', () =
     session('ours', ['{"a":1}']);
     session('theirs', ['{"a":1}']);
     const r = resolveCurrentSession(SOURCES(), {
-      env: { AGENTSENSEI_SESSION_ID: 'ours', CLAUDE_SESSION_ID: 'theirs' },
+      env: { VIBESENPAI_SESSION_ID: 'ours', CLAUDE_SESSION_ID: 'theirs' },
     });
     expect(r?.sessionId).toBe('ours');
   });
