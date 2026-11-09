@@ -1,6 +1,6 @@
 {
   "name": "vibesenpai",
-  "version": "0.1.0",
+  "version": "0.0.1-alpha",
   "description": "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.",
   "license": "MIT",
   "type": "module",

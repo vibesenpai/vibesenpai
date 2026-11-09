@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Pre-alpha. Nothing has been released yet. Releases ship as a zip on a tagged GitHub release (D69); npm is not used.
+## [0.0.1-alpha] - 2026-11-08
+
+The first release, an alpha. It ships as a zip on a tagged GitHub release (D69). The npm package
+`vibesenpai` holds no code: it points to the plugin install.
 
 ### Changed
 
@@ -75,3 +78,6 @@ Ten detectors were built, measured and deleted — see
 candidates were the agent's own prior edit; `permission_denied`, where only 6
 of 398 denials were ever re-issued; and `file_churn`, which fires on 48% of
 sessions and could never be shown to be waste.
+
+[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.1-alpha...HEAD
+[0.0.1-alpha]: https://github.com/vibesenpai/vibesenpai/releases/tag/v0.0.1-alpha
