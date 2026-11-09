@@ -6,7 +6,7 @@ import type { Event } from '../types.ts';
 export const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 // Read-only tools. Needed because `Read` also carries a `filePath`.
-export const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']);
+const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']);
 
 export type EditEvidence =
   /** A Claude-owned writer. Closed list, authoritative. */

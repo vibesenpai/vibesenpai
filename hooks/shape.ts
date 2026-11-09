@@ -31,16 +31,16 @@ export type Item = {
   turnAt?: string
 }
 
-export type Block = { dimension: string; items: Item[]; sessions: number; fix?: PaneFixState }
+type Block = { dimension: string; items: Item[]; sessions: number; fix?: PaneFixState }
 
-export type CacheSummary = { count: number; tokens: number; largest: (PaneRebuild & { sessionId: string })[] }
+type CacheSummary = { count: number; tokens: number; largest: (PaneRebuild & { sessionId: string })[] }
 
 export type View = { newItems: Item[]; blocks: Block[]; cache: CacheSummary }
 
-export const NEW_SHOWN = 3
+const NEW_SHOWN = 3
 export const BLOCK_SHOWN = 2
 
-export function itemsOf(data: PaneData): Item[] {
+function itemsOf(data: PaneData): Item[] {
   const out: Item[] = []
   for (const s of data.sessions) {
     for (const j of s.judged) {
@@ -157,7 +157,7 @@ export function human(n: number): string {
 }
 
 /** `$1.87`, or `< $0.01` below a cent. From micro-dollars. */
-export function dollars(micros: number): string {
+function dollars(micros: number): string {
   return micros < 10_000 ? '< $0.01' : `$${(micros / 1e6).toFixed(2)}`
 }
 
@@ -214,7 +214,7 @@ export function fixesView(data: PaneData): { waiting: PaneFixState[]; applied: P
   }
 }
 
-export const TABS = [['findings', 'Findings'], ['fixes', 'Fixes'], ['health', 'Health']] as const
+const TABS = [['findings', 'Findings'], ['fixes', 'Fixes'], ['health', 'Health']] as const
 
 /**
  * The folder tab: the active label boxed and open at the bottom, joined to a rule the pane's width.

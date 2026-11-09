@@ -428,7 +428,7 @@ export function compactionsFor(
 }
 
 /** Quote length shown by `:fix`, matched to the HTML report. */
-export const QUOTE_MAX = 200;
+const QUOTE_MAX = 200;
 
 /** Where a fix lands: harness-neutral. Each harness's adapter names the file. */
 export type ApplyTarget =

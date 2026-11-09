@@ -10,7 +10,7 @@ export type Harness = 'claude-code' | 'codex' | 'swe-chat' | 'unknown';
 /** How well the selected parser matches the input: `range` means untested inside a claimed range. */
 type MatchLevel = 'exact' | 'range' | 'fallback' | 'none';
 
-export type Provenance = {
+type Provenance = {
   harness: Harness;
   version: string | undefined;
   /** Which strategy ran, e.g. `claude-code/2.1.x`. */
@@ -159,7 +159,7 @@ function caveatFor(
 }
 
 /** The factory entry point: pick a parser, run it, report how much to trust it. */
-export function parseWith(
+function parseWith(
   registry: ParserRegistry,
   sourcePath: string,
   text: string,

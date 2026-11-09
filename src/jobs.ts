@@ -15,7 +15,7 @@ import { runDetached } from './spawn.ts';
 import { isFresh, readStanding } from './standing.ts';
 import { health, stderrPath, supervise, type JobHealth, type JobSpec } from './supervise/index.ts';
 
-export const JOB_NAMES = ['standing', 'judge'] as const;
+const JOB_NAMES = ['standing', 'judge'] as const;
 
 /** How long the judge may run, and how long a silent one is believed. Also bounds a `run` row's staleness. */
 export const JUDGE_DEADLINE_MS = 60 * 60_000;

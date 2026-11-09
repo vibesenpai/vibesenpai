@@ -4,7 +4,7 @@ import { buildTurns, cleanCut, truncate } from './judge/packet.ts';
 import { redact } from './redact.ts';
 import type { Event } from './types.ts';
 
-export type ExcerptEntry = {
+type ExcerptEntry = {
   role: 'developer' | 'agent';
   /** When its first message was written. */
   at?: string;

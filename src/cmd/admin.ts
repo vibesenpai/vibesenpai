@@ -69,7 +69,7 @@ export function cmdConfig(a: Argv): number {
 }
 
 /** Report the harness's own retention. Read-only: we never write it. */
-export function harnessTtlStatus(home: string): string[] {
+function harnessTtlStatus(home: string): string[] {
   const settings = join(home, '.claude', 'settings.json');
   let configured: number | undefined;
   try {

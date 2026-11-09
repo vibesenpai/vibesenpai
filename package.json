@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:pane": "VIBESENPAI_DISABLE=1 claude plugin test .",
     "typecheck": "tsc --noEmit",
+    "lint": "knip",
     "cli": "node --experimental-strip-types src/cli.ts",
     "verify:corpus": "bash scripts/verify-corpus.sh",
     "measure": "node --experimental-strip-types scripts/measure-dimensions.ts",
@@ -23,6 +24,7 @@
     "@anthropic-ai/sdk": "^0.135.0",
     "@types/node": "24.10.1",
     "hyparquet": "^1.31.5",
+    "knip": "6.43.0",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
   },

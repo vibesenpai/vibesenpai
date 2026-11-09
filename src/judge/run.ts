@@ -16,10 +16,10 @@ import type { JudgeEpisode, Lookbacks } from './prompt.ts';
 import type { Instruction } from '../parsers/claude-code.ts';
 
 /** Well under any reasonable hook budget, and the model call is the long pole. */
-export const TIMEOUT_MS = 180_000;
+const TIMEOUT_MS = 180_000;
 
 /** The carry for a session already judged up to `offset` bytes. */
-export function carryFor(state: JudgeState, sessionId: string, events: Event[], fromSeq: number): JudgeCarry {
+function carryFor(state: JudgeState, sessionId: string, events: Event[], fromSeq: number): JudgeCarry {
   return {
     openFailures: openFailuresBefore(events, fromSeq),
     reported: state.findings
@@ -33,14 +33,14 @@ export function carryFor(state: JudgeState, sessionId: string, events: Event[], 
  * The byte watermark that resumes at turn `turn`, and no earlier.
  * Rounds up: resuming one turn early would re-read a just-finished oversized turn for ever.
  */
-export function byteAfter(turn: number, turns: number, size: number): number {
+function byteAfter(turn: number, turns: number, size: number): number {
   let b = Math.ceil((turn / turns) * size);
   while (b < size && Math.floor((b / size) * turns) < turn) b += 1;
   return Math.min(b, size);
 }
 
 /** Mark a session no packet can hold, without opening a store at every caller. */
-export function skipSession(archive: string, sessionId: string, reason: string): void {
+function skipSession(archive: string, sessionId: string, reason: string): void {
   try {
     const db = openStore(archive);
     try {
@@ -53,7 +53,7 @@ export function skipSession(archive: string, sessionId: string, reason: string):
   }
 }
 
-export type Parts = Map<string, { seq: number; chars: number } | undefined>;
+type Parts = Map<string, { seq: number; chars: number } | undefined>;
 
 /** Packets to send, and the progress (byte offsets, part cursors) each stands for if it succeeds. A round is one; so is each batch cut from it. */
 export type Batch = { sessions: JudgePacketSession[]; offsets: Map<string, number>; parts: Parts };
@@ -318,7 +318,7 @@ export async function runBatch(
  * The refusal for a packet redaction would still change (`wouldLeak`), checked before each send.
  * Catches any path that builds a packet without the builder. Never logs the offending text.
  */
-export function redactionRefusal(sessionIds: string[]): string {
+function redactionRefusal(sessionIds: string[]): string {
   return `judge packet failed the redaction gate (${sessionIds.length} session(s)); nothing sent`;
 }
 

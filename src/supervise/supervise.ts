@@ -19,7 +19,7 @@ export type SuperviseOptions = {
   clean?: (line: string) => string;
 };
 
-export function isAlive(pid: number): boolean {
+function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;

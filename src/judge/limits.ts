@@ -14,7 +14,7 @@ export function limited(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /** Invocation overhead per call (measured ~26k); a batch makes at most two calls. */
-export const CALL_OVERHEAD_TOKENS = 26_000;
+const CALL_OVERHEAD_TOKENS = 26_000;
 
 export function batchCost(packetTokens: number): number {
   return packetTokens + 2 * CALL_OVERHEAD_TOKENS;

@@ -12,7 +12,7 @@ import type { JudgeEpisode } from './prompt.ts';
 /** What the parse kept for one session: its developer prompts and the instructions the harness loaded. */
 export type LookbackSource = { prompts: { seq: number; text: string }[]; instructions: Instruction[] };
 
-export type LookbackItem = { kind: 'turn'; seq: number; text: string } | { kind: 'instruction'; source: string; fromSeq: number; text: string };
+type LookbackItem = { kind: 'turn'; seq: number; text: string } | { kind: 'instruction'; source: string; fromSeq: number; text: string };
 
 /**
  * `agentTurns`: the agent's turns in the packet, so the gate can ask whether the agent acted after the source.

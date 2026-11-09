@@ -25,7 +25,7 @@ export type DetectorContext = {
 };
 
 // How much a detector evaluates at once: .claude/rules/detectors.md, "Scope is a property of the detector".
-export type Scope =
+type Scope =
   /** One 6–12 line window; for the semantic tier, where a token budget binds. */
   | 'window'
   /** One whole thread (main or one subagent), for rules where locality is the signal. */

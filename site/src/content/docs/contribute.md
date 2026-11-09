@@ -17,6 +17,7 @@ and a PR that adds one needs an argument.
 
 ```bash
 npm run typecheck        # strict, with noUnusedLocals
+npm run lint             # knip: no unused files, exports or dependencies
 npm test
 npm run test:pane        # the pane, through Claude Code's plugin test runner
 npm run verify:corpus    # fetches two small MIT corpora; fails on count drift

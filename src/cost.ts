@@ -21,7 +21,7 @@ export type Cost = {
   carried: number;
 };
 
-export const ZERO: Cost = { written: 0, received: 0, carriedTurns: 0, carried: 0 };
+const ZERO: Cost = { written: 0, received: 0, carriedTurns: 0, carried: 0 };
 
 function add(a: Cost, b: Cost): Cost {
   return {

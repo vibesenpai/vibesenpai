@@ -51,7 +51,7 @@ export type OutcomeSession = {
   keys?: Record<string, { times: number; turn?: number }>;
 };
 
-export type Window = { times: number; sessions: number };
+type Window = { times: number; sessions: number };
 
 export type FixState = ApplyPlan & {
   applied?: { at: string; sessionId: string };

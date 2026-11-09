@@ -134,7 +134,7 @@ export function reportUnresolved(r: { unknown: string[]; ambiguous: string[] }):
 }
 
 /** What is dismissed, labelled from the findings it hides. */
-export function renderDismissed(db: Db, rows: DismissalRow[]): string {
+function renderDismissed(db: Db, rows: DismissalRow[]): string {
   if (rows.length === 0) return '  Nothing is dismissed.\n';
   const known = new Map(candidates(db, dismissedFrom([])).map((c) => [c.key, c]));
   const cleared = rows.filter((r) => r.reason === 'cleared');

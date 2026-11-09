@@ -18,10 +18,10 @@ import { plural } from '../format.ts';
 import { type Argv, configFromFlags, detectorsFromConfig, printSkeletons } from './common.ts';
 
 /** As many dimensions as the history block shows before it summarises. */
-export const HISTORY_DIMENSIONS = 3;
+const HISTORY_DIMENSIONS = 3;
 
 /** Your history, on demand (otherwise only shown at session start). */
-export function printHistory(config: Config, judgeState: JudgeState): void {
+function printHistory(config: Config, judgeState: JudgeState): void {
   const standing = readStanding(config.archive);
   if (standing === undefined) {
     console.log('');
@@ -70,7 +70,7 @@ export function printHistory(config: Config, judgeState: JudgeState): void {
 }
 
 /** Progress and what remains, from the store rather than from the standing. */
-export function printAnalysis(config: Config, state: JudgeState): void {
+function printAnalysis(config: Config, state: JudgeState): void {
   let lines: string[] = [];
   try {
     const db = openStore(config.archive);

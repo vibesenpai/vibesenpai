@@ -180,7 +180,7 @@ export async function cmdReport(a: Argv): Promise<number> {
 }
 
 /** A session id that did not resolve, said in a way that can be acted on. */
-export function sessionLookupError(wanted: string, hit: SessionLookup & { ok: false }): string {
+function sessionLookupError(wanted: string, hit: SessionLookup & { ok: false }): string {
   switch (hit.reason) {
     case 'too-short':
       return `--session "${wanted}" is too short — give at least ${MIN_ID_PREFIX} characters`;
@@ -199,7 +199,7 @@ export function sessionLookupError(wanted: string, hit: SessionLookup & { ok: fa
  * Write the HTML report, 0600, temp-then-rename. Into the archive by default, not the working
  * directory, where `git add -A` could publish it.
  */
-export function writeHtmlReport(
+function writeHtmlReport(
   data: ReportData,
   archive: string,
   f: Argv['flags'],

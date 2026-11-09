@@ -2,7 +2,7 @@
 
 import type { JobRecord, JobSpec, Lease } from './types.ts';
 
-export type ReclaimKind = 'never-started' | 'died' | 'overran';
+type ReclaimKind = 'never-started' | 'died' | 'overran';
 
 export type Decision =
   | { kind: 'running' }

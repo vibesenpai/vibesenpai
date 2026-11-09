@@ -1,7 +1,7 @@
 /** The supervisor's vocabulary. Harness-agnostic: nothing here knows about hooks, plugins or our passes. */
 
 /** Free failures retry on a back-off; paid ones stop after a few, so a deterministic fault cannot bill on a loop. */
-export type FailureKind = 'free' | 'paid';
+type FailureKind = 'free' | 'paid';
 
 export type JobSpec = {
   name: string;

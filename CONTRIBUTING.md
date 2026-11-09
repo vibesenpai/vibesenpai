@@ -14,6 +14,7 @@ accident, and a change that adds one needs an argument in the PR.
 
 ```bash
 npm run typecheck        # strict, plus noUnusedLocals / noUnusedParameters
+npm run lint             # knip: no unused files, exports or dependencies
 npm test
 npm run verify:corpus    # fetches two small MIT corpora; fails on count drift
 ```

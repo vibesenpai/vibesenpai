@@ -24,7 +24,7 @@ const scopedFile = (fixId: string): string => `.claude/rules/vibesenpai/${fixId}
 const AGENT_FILE = '.claude/agents/ask.md';
 
 /** The permission entry for a command head, in the form Claude Code's own dialog writes. */
-export const askRule = (head: string): string => `Bash(${head} *)`;
+const askRule = (head: string): string => `Bash(${head} *)`;
 
 /**
  * A PreToolUse hook that refuses Edit/Write on one path. `file_path` arrives absolute, so `~` becomes
@@ -44,7 +44,7 @@ export function guardHook(path: string): object {
 }
 
 /** A read-only subagent: `tools:` restricts, where a command's `allowed-tools` only pre-approves (checked 2026-11-01). */
-export const ASK_AGENT = `---
+const ASK_AGENT = `---
 name: ask
 description: Answers the developer's questions about this project without changing anything. Use it whenever the developer asks a question rather than asking for a change.
 tools: Read, Grep, Glob

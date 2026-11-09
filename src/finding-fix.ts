@@ -100,7 +100,7 @@ export function forbids(text: string, verb: string): boolean {
  * The turns a finding is about: from the developer prompt before its first cited turn (or where the
  * expectation was set, if later) through its last cited turn.
  */
-export function windowOf(f: JudgedFinding, events: Event[]): { lo: number; hi: number } {
+function windowOf(f: JudgedFinding, events: Event[]): { lo: number; hi: number } {
   const first = Math.min(...f.turns);
   const hi = Math.max(...f.turns);
   const prompts = events.filter((e) => e.turnType === 'user_prompt' && !e.isSidechain && e.devCommand === undefined).map((e) => e.seq);
@@ -113,7 +113,7 @@ export function windowOf(f: JudgedFinding, events: Event[]): { lo: number; hi: n
  * The expectation the developer set in an earlier turn, as lookback verified it. The anchoring quote and
  * a developer-reference are not one: they are the reaction ("I had asked you…"), not the rule.
  */
-export function expectationOf(f: JudgedFinding): string | undefined {
+function expectationOf(f: JudgedFinding): string | undefined {
   const e = f.established;
   return e !== undefined && e.source === 'turn' && e.quote.trim() !== '' ? e.quote.trim() : undefined;
 }
@@ -231,7 +231,7 @@ export function findingRules(judged: JudgedFinding[]): string[] {
 }
 
 /** A standing rule in the developer's own words. */
-export function ruleLine(words: string): string {
+function ruleLine(words: string): string {
   return `- Standing instruction from the developer: "${words.replace(/\s+/g, ' ').trim()}"`;
 }
 

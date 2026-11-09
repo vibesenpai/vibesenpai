@@ -146,7 +146,7 @@ export function nextRung(from: 'block' | 'insights' | 'report' | 'fix'): string 
 const JOB_LABEL: Record<string, string> = { judge: 'The judge', standing: 'The history pass' };
 
 /** One plain fact per failing job (Principle One: no imperative, no severity word). Silent when healthy. */
-export function healthLines(jobs: JobHealth[]): string[] {
+function healthLines(jobs: JobHealth[]): string[] {
   const out: string[] = [];
   for (const j of jobs) {
     const who = JOB_LABEL[j.job] ?? j.job;

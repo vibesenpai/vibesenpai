@@ -7,7 +7,7 @@ import type { Versioned } from './schema.ts';
 
 // Events: the normalised stream, aligned to SWE-chat's `conversations` schema.
 
-export type Harness = 'claude-code' | 'codex' | (string & {});
+type Harness = 'claude-code' | 'codex' | (string & {});
 
 /** SWE-chat's `turn_type` vocabulary. `tool_use`/`tool_result` are content blocks flattened into events. */
 export type TurnType =

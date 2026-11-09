@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { writeJson } from '../files.ts';
 import type { JobRecord, Lease } from './types.ts';
 
-export const jobsDir = (archive: string): string => join(archive, 'jobs');
+const jobsDir = (archive: string): string => join(archive, 'jobs');
 const recordPath = (archive: string, name: string): string => join(jobsDir(archive), `${name}.json`);
 const leaseDir = (archive: string, name: string): string => join(jobsDir(archive), `${name}.lease`);
 const leaseFile = (archive: string, name: string): string => join(leaseDir(archive, name), 'lease.json');
