@@ -1,6 +1,6 @@
 ---
 title: The two tiers
-description: Rules read structure and the compiler enforces it. The judge reads conversation, and it is a separate claim.
+description: The free checks read structure and the compiler enforces it. The judge reads conversation, and it is a separate claim.
 ---
 
 Two tiers, and they are not equally reliable. Everything in the output keeps
@@ -53,7 +53,7 @@ Write account for **998 of roughly 1,400 tool refusals** in the public corpus,
 and `edit_retry` already covers both.
 
 The remaining failures are visible in what you *said*, not in exit codes. The
-expensive proof: `inaccurate_self_report` was first built as a rule and died at
+expensive proof: `inaccurate_self_report` was first built as a structural check and died at
 **0 true positives against 5 false.** The same dimension works as a judge
 dimension. Same target, different tier, opposite outcome.
 
@@ -61,12 +61,12 @@ dimension. Same target, different tier, opposite outcome.
 
 ## Two kinds of claim, one display
 
-| | rule tier | judge |
+| | the free checks | judge |
 |---|---|---|
 | reads | structure | conversation |
 | confidence | `certain` — the harness said so | a model's reading |
 | shown as | the finding | the finding |
-| costs | nothing | your quota, when you ask |
+| costs | nothing | your own quota, in the background, within 2M tokens a day |
 
 A judge finding that cannot quote the packet it came from is discarded on the
 way out. The headline counts both tiers, and the display does not say which tier a

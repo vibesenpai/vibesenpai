@@ -1,0 +1,6 @@
+flowchart LR
+  C["an edit tool call"] --> R("the tool itself<br/>refused it?")
+  R -- yes --> N2("same path edited again<br/>before your next prompt?")
+  N2 -- yes --> F["Edit retry<br/>+ the harness's reason"]
+  R -- no --> X["not a finding"]
+  N2 -- no --> X

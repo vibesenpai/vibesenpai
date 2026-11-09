@@ -7,7 +7,7 @@ description: How to set up, what the rules are, and what is reproducible without
 git clone https://github.com/vibesenpai/vibesenpai && cd vibesenpai
 npm install
 npm test                 # the whole suite, no network
-npm run cli -- now       # against your own sessions
+npm run cli -- insights  # against your own sessions
 ```
 
 Node 22.13+. Zero runtime dependencies — that is a constraint, not an accident,
@@ -18,6 +18,7 @@ and a PR that adds one needs an argument.
 ```bash
 npm run typecheck        # strict, with noUnusedLocals
 npm test
+npm run test:pane        # the pane, through Claude Code's plugin test runner
 npm run verify:corpus    # fetches two small MIT corpora; fails on count drift
 ```
 
@@ -51,13 +52,19 @@ heuristics are how the first three detectors died.
 **Never copy raw harness data.** Transcripts are read in place and the derived
 form is redacted at construction, never after.
 
-**Never write the user's config without consent.** Every write prints the change
-and requires `--apply`.
+**Never write a project file or the user's config.** A fix is applied from the
+pane: Apply drafts a request into Claude Code's prompt box, and the developer's
+Enter is the yes. The agent then makes the change under Claude Code's own
+permission prompt. Every request ends with a marker,
+`(vibesenpai fix <id>)`, and a fix counts as applied only when that marker is
+seen in a session, never because a button was pressed.
 
 **Principle Zero: a broken analyzer must never break a session.** Every entry
 point exits 0 whatever happens.
 
-**No number a user cannot verify.** Tokens, never dollars.
+**No number a user cannot verify.** Every published frequency comes from
+`npm run measure` over the pinned corpus. Spend is recorded in tokens and in the
+dollar figure Claude Code itself reports, never a figure of ours.
 
 ## Adding a detector
 
@@ -69,3 +76,11 @@ point exits 0 whatever happens.
 
 Step 5 is not optional. Three detectors passed every test and produced 19 false
 positives and 0 true positives on real sessions.
+
+## Releasing
+
+Set the same version in `package.json` and `.claude-plugin/plugin.json`, then
+push a tag `v<version>`. The release workflow runs the tests, checks the tag
+matches both files, builds the zip, attaches it to a GitHub release, and points
+`marketplace.json` at it by `sha256`.
+[Releases and install counts →](/vibesenpai/architecture/releases/)

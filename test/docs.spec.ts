@@ -530,3 +530,24 @@ describe('the fix block reads as sections, not as a form', () => {
     expect(configs.length, 'every config remedy needs a `helps`').toBeGreaterThanOrEqual(4);
   });
 });
+
+describe('the docs site cannot fall behind the product', () => {
+  const page = (slug: string): string => `site/src/content/docs/${slug}.md`;
+
+  it('every shipped slash command has a Commands page', () => {
+    const shipped = readdirSync('commands').filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3));
+    expect(shipped.filter((c) => !existsSync(page(`commands/${c}`)))).toEqual([]);
+  });
+
+  it('every dimension, model read or free check, has a Dimensions page', () => {
+    const keys = [...JUDGE_DIMENSIONS, ...detectorsFor('all').map((d) => d.dimension)];
+    const missing = keys.map((k) => k.replace(/_/g, '-')).filter((s) => !existsSync(page(`dimensions/${s}`)));
+    expect(missing).toEqual([]);
+  });
+
+  it('every user setting is on the Reference page', () => {
+    const ref = readFileSync(page('reference'), 'utf8');
+    const settings = ['VIBESENPAI_SOURCES', 'VIBESENPAI_ARCHIVE', 'VIBESENPAI_PRESET', 'VIBESENPAI_MUTE', 'VIBESENPAI_CONFIG', 'VIBESENPAI_DISABLE', 'VIBESENPAI_COLOR'];
+    expect(settings.filter((s) => !ref.includes(s))).toEqual([]);
+  });
+});

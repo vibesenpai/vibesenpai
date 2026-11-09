@@ -1,0 +1,8 @@
+flowchart LR
+  L("a stated rule<br/>not honoured?") -- yes --> LB("rule set before<br/>the agent acted?")
+  LB -- yes --> V("that quote found<br/>in what was sent?")
+  V -- yes --> K["Constraint violation"]
+  LB -- no --> D["dropped as<br/>a suggestion"]
+  V -- no --> D
+  classDef bad color:#f0a39a
+  class D bad

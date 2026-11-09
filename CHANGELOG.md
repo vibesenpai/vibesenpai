@@ -26,8 +26,8 @@ Pre-alpha. Nothing has been released yet. Releases ship as a zip on a tagged Git
 - **A fix for each finding, built from its evidence** (D67). A command the developer forbade becomes
   a `permissions.ask` rule, a write outside the project a guard on that path, a broken CLAUDE.md
   line a request for a test, an earlier instruction a rule scoped to the files it was broken in.
-  Questions answered with edits across sessions give a read-only `ask` subagent. Shown in `fix`, the
-  HTML report and the pane; outcomes count the fix's own constraint.
+  Questions answered with edits across sessions give a read-only `ask` subagent. Shown in the pane
+  and the HTML report; outcomes count the fix's own constraint.
 - **`edit_retry`** — the first fully-measured detector. Fires on 380 of 1,139
   real sessions (33.4%), 927 instances, every one `certain`, **0 false
   positives** hand-verified.
@@ -35,17 +35,25 @@ Pre-alpha. Nothing has been released yet. Releases ship as a zip on a tagged Git
   file is cheap and frequently correct.
 - **The judge** — a model pass that reads conversation rather than
   structure, covering `constraint_violation`, `misread_intent`,
-  `inaccurate_self_report`, `overreach` and `other`. Off by default.
+  `inaccurate_self_report`, `overreach` and `other`. On by default after a
+  one-time notice; it runs in the background after a turn ends, within 2M
+  tokens a day, and `/vibesenpai:judge off` stops it.
+- **The pane** — `/vibesenpai:insights` opens it beside the chat: Findings,
+  Fixes and Health tabs, the conversation around a finding read in place, and
+  Apply, which drafts a fix into the prompt box for the developer's Enter.
+- **Before / Since** — once a fix is applied, how often the same thing happened
+  before and since, in counts per project.
+- **Job supervision** — background passes heal at the next hook; free failures
+  retry, paid failures stop the judge after three until it is re-enabled.
 - **Two-stage extraction**, which took session-level agreement from 129/232 to
   **165/232** and more than doubled `misread_intent`.
-- **`agentsensei fix`** — one evidence-backed change, across seven artifact
-  kinds, leading with the strongest enforcement tier available.
-- **`agentsensei report --html`** — a self-contained report, no JavaScript, no
-  external resources, mode 0600.
-- **`agentsensei judge --status`** — pending sessions and an ETA from a measured
-  ~30s per call.
-- **Claude plugin manifest**, so `/plugin install agentsensei` works, with the
-  three slash commands now in the repository rather than hand-placed outside it.
+- **`/vibesenpai:report`** — a self-contained HTML report, with no external
+  resources, mode 0600.
+- **`/vibesenpai:judge`** — model reads on or off; with no argument, what was
+  read, what is pending and what was spent.
+- **Claude plugin manifest**, so `/plugin install vibesenpai@vibesenpai` works.
+- **Releases as a zip on a tagged GitHub release** (D69), so installs can be
+  counted from downloads without telemetry.
 - **A docs site** under `site/`, built with Starlight, including pages on how
   this project measures itself and what it deleted.
 - `LICENSE` (MIT), `NOTICE`, `CONTRIBUTING.md`, `SECURITY.md`,

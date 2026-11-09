@@ -1,67 +1,66 @@
 ---
-title: What it is
-description: Discover how your agents failed you — and an honest account of what this does and does not do.
+title: What it shows you
+description: Your own words, the turns where the agent went wrong, and a change you can apply.
 ---
 
-`vibesenpai` reads the transcripts your coding agent already writes, finds the
-turns where effort was wasted, and tells you what that cost in tokens.
+vibesenpai reads the session transcripts Claude Code already keeps on your disk and shows
+you where the agent went wrong. Each finding is shown in a pane beside the chat:
 
-```
-  11,000+ tokens discarded on 4 findings · 19 more flagged
-    18 sessions · 2,460 edits
-```
+- **Your words.** A finding's headline is what you said: the request the agent answered, or
+  your reaction when it went wrong.
+- **The turns.** When it happened, and the conversation around it, read from the transcript
+  in place.
+- **The fix.** A change addressed to the agent: a rule, a permission prompt, a guard. Apply
+  drafts it into your prompt box, and nothing changes until you press Enter.
 
-The one detector measured end to end fires on **380 of 1,139 real sessions** —
-one session in three — across **927 instances with zero false positives**,
-hand-verified. That is an agent editing a file it had not read, or anchoring an
-edit on text that had since changed: the harness refuses, the agent retries, and
-you never notice because by the time you read the reply it worked.
+![The HTML report, opened from the pane: findings by kind, each with its sessions and turns](../../../assets/home/shots/report.png)
 
-It is a CLI and a Claude Code plugin. It runs on your machine, reads files in
-place, and copies nothing.
+## Two outputs
 
-## What it actually does
+Everything it produces is one of two things:
 
-Three things, in order of how much you will use them:
+| | |
+|---|---|
+| **Evidence** | specific turns in specific sessions, with the words that were said |
+| **Something applicable** | a rule, a setting or a guard for the agent, which you can Apply |
 
-**`vibesenpai insights`** — what happened in the session you are in. Findings with
-the turns they came from, plus what the session cost in tokens and how that
-compares to the corpus median.
-
-**`vibesenpai report`** — the same across your history.
-
-**`vibesenpai fix`** — a recommendation, with the evidence for it. Or a
-plain statement that no fix exists, which is a real answer here rather than a
-shrug.
+A finding is shown only with the turns it points at, and every fix comes from a finding.
 
 ## What it is not
 
-**Not a score.** There is no grade, no percentage of how good a prompter you
-are. Those are unfalsifiable and they make people defensive.
+- **Not a score.** There is no grade, rating or percentage of how well you or the agent did.
+- **Not advice to you.** It does not tell you how to prompt. Every fix is addressed to the
+  agent, as something Claude Code loads or enforces.
+- **Not a dashboard of numbers.** A count appears beside the turns it counts. Cache figures
+  appear only when the cache was rebuilt from scratch.
+- **Not a second copy of your sessions.** Transcripts are read where Claude Code keeps them.
+  What it stores is its own findings and settings.
 
-**Not advice about you.** It will not tell you to communicate more clearly. Any
-change it suggests is addressed to your *agent* — a hook, a setting, a line of
-prompt — because that is a thing you can apply in one keystroke rather than a
-habit you have to build.
+## The free checks and the model reads
 
-**Not a dashboard.** `fix` returns a single recommendation. A tool that hands you six
-problems has handed you nothing to do.
+**The free checks** read the structure of a session (which edits Claude Code refused and
+had to be retried, when the cache was rebuilt) and cost nothing. **The model reads** send a
+redacted part of each session to Claude Haiku on your own Claude Code account to find what
+structure cannot show, such as a constraint broken or a claim that was not true; they are on
+by default and [have limits and an off switch](/vibesenpai/commands/judge/).
 
-**Not finished.** Two rule detectors ship. The judge ships and is measured
-honestly on [its own page](/vibesenpai/work/measuring/) — including the one
-dimension that does not work.
+The kinds it looks for are listed under [Dimensions](/vibesenpai/dimensions/). What leaves
+your machine is on [What it sends, and what it costs](/vibesenpai/start/sends-and-costs/).
 
-## Who it is for
+## Where you use it
 
-If you use a coding agent for hours a day and have the vague sense that some of
-that time is being spent re-doing work, this is for you.
+In Claude Code, through three slash commands:
 
-If you want a leaderboard or a productivity metric, it is not — and nothing on
-this site is going to change that, because the project has a standing rule
-against numbers nobody can verify.
+| | |
+|---|---|
+| [`/vibesenpai:insights`](/vibesenpai/commands/insights/) | opens the pane |
+| [`/vibesenpai:judge`](/vibesenpai/commands/judge/) | turns the model reads on or off |
+| [`/vibesenpai:report`](/vibesenpai/commands/report/) | writes the HTML report of your history |
 
-## Supported agents
+Two hooks keep the analysis current in the background. At the start of a session, a short
+summary of your recent history may appear; it reaches you, not the agent.
 
-**Claude Code only, today.** The parser layer is a registry and the internals
-are harness-agnostic by design, but one parser exists. "Works with any agent"
-is not a claim this project has earned.
+## Supported
+
+**Claude Code only.** The parser layer is built to take other harnesses, and one parser
+exists today.

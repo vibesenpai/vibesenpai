@@ -33,16 +33,18 @@ misunderstood the architecture" is outside what it can honestly assert, and
 three of the research taxonomy's seven categories are deliberately not
 implemented for exactly that reason.
 
-## A `deny` rule is not a security boundary
+## A permission rule is not a security boundary
 
-When `fix` suggests a `permissions.deny` entry, it says this too: a rule written
-for `pnpm add` does not match `npx pnpm add`, `pnpm -C dir add`, `sh -c 'pnpm
-add'`, or someone editing `package.json` by hand. Claude Code's own
-documentation says a Bash rule "isn't a security boundary", and we are not going
-to imply otherwise by offering one without the caveat.
+When a finding names a command you had ruled out, its fix is a `permissions.ask`
+entry in `.claude/settings.local.json`: Claude Code asks before running that
+command. It is a prompt, not a wall. A rule written for `pnpm add` does not match
+`npx pnpm add`, `pnpm -C dir add`, `sh -c 'pnpm add'`, or an edit to
+`package.json` by hand. Claude Code's own documentation says a Bash rule "isn't a
+security boundary".
 
-That is why the stronger suggestion is a `Stop` hook checking `git diff` — it
-sees every write surface, including the shell.
+A `Stop` hook checking `git diff` sees every write surface, including the shell.
+That fix is printed for you to copy; it has no Apply, because a hook that exits 2
+with an unfilled placeholder would block every turn.
 
 ## Findings are evidence, not verdicts
 

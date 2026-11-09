@@ -1,74 +1,99 @@
 ---
-title: Install
-description: One command in Claude Code. There is nothing else to set up.
+title: Install and update
+description: Two commands in Claude Code, what happens the first time, and how to update or turn it off.
 ---
+
+:::caution[Not published yet]
+No release has been published. The marketplace entry is built and the plugin runs from a
+clone, but it has not been exercised through a real `/plugin install`. Until it has,
+[Contribute](/vibesenpai/contribute/) has the from-source path.
+:::
+
+## Install
+
+In Claude Code:
 
 ```
 /plugin marketplace add vibesenpai/vibesenpai
 /plugin install vibesenpai@vibesenpai
 ```
 
-That is the whole thing. No npm, no clone, nothing to bootstrap — vibesenpai
-ships with **zero runtime dependencies**, and Node is already on your machine
-because Claude Code requires it.
+On Claude Code 2.1.275 or later, one step does both:
 
-To update to a new release: `/plugin`, then **Installed**, vibesenpai, **Update now**; or
-`claude plugin update vibesenpai@vibesenpai` from a terminal. Updates are not automatic for
-marketplaces outside Anthropic's own unless you turn auto-update on under **Marketplaces**.
+```
+/plugin install vibesenpai --marketplace vibesenpai/vibesenpai
+```
 
-:::caution[Not published yet]
-The marketplace entry is built and the plugin runs from a clone, but it has not
-been exercised through a real `/plugin install`. Until it has,
-[Contribute](/vibesenpai/contribute/) has the from-source path.
-:::
+There is nothing else to set up and nothing to install from npm. The plugin carries its own
+hooks and commands; your `~/.claude/settings.json` is not touched.
 
-## What you get
-
-Three commands:
+## Requirements
 
 | | |
 |---|---|
-| `/vibesenpai:insights` | what happened in the session you are in |
-| `/vibesenpai:judge` | model reads on or off |
-| `/vibesenpai:report` | a self-contained HTML report of your history |
+| **Node** | 22.13 or later. The plugin runs TypeScript directly, with no build step and no runtime dependencies |
+| **Claude Code** | A release ships as a zip on a tagged GitHub release ([D69](/vibesenpai/architecture/decisions/)). Claude Code added that kind of marketplace source in 2.1.224; what older versions do with it has not been tested |
+| **Harness** | Claude Code only |
 
-And two hooks, which keep your history indexed in the background. Both are
-local and cost nothing — see [Phases of a run](/vibesenpai/architecture/phases/).
+## The first time
 
-## What it does on first run
-
-It reads the transcripts Claude Code already writes to `~/.claude/projects`.
-Nothing is copied:
+At the start of a session, a one-time notice says what the model reads will do:
 
 ```
-scanned 16 transcripts · 16 new, 0 grown, 0 unchanged
-read 55.7 MB · copied nothing
-catalog · 16 sessions · ~/.local/share/vibesenpai
+vibesenpai is on. Starting when this turn ends, it reads your sessions in the background
+with Claude Haiku on your plan or API key: up to 200 recent past sessions first,
+then each new one, about 60k tokens a session and at most 2.0M tokens a day.
+Nothing has been spent yet.
 ```
 
-The first time you run `/vibesenpai:insights`, it will also read that session with
-the model on your own account and tell you it is doing so. That is the judge,
-it is on from installation, and
-[what it sends and what it costs](/vibesenpai/start/sends-and-costs/) is a page
-of its own because you should not have to go looking for it.
+It then lists three commands: `/vibesenpai:insights` (what it has found),
+`/vibesenpai:judge off` (stop the model reads; the free checks keep running) and
+`/plugin disable vibesenpai` (stop everything). On an API key, Bedrock or Vertex it says
+"on your API key" instead of "on your plan or API key".
+
+It is shown once per machine. After that:
+
+- **The free checks** run in the background, started by the hooks at session start and when
+  a turn ends, at most every 10 minutes. They read transcripts in place and spend nothing.
+- **The model reads** start when a turn ends: up to 200 of your most recent past sessions
+  first, then each new session as it grows, within 2M tokens a day.
+  [`/vibesenpai:judge`](/vibesenpai/commands/judge/) has the limits and the off switch.
+- **The pane** opens with [`/vibesenpai:insights`](/vibesenpai/commands/insights/). It
+  shows what has been found so far and fills in as the background passes finish.
+
+What is sent to the model, and what it costs, is on
+[What it sends, and what it costs](/vibesenpai/start/sends-and-costs/).
+
+## Update
+
+In Claude Code: `/plugin`, then **Installed**, **vibesenpai**, **Update now**. From a
+terminal:
+
+```
+claude plugin update vibesenpai@vibesenpai
+```
+
+Claude Code does not auto-update plugins from marketplaces outside Anthropic's own unless you
+turn auto-update on for that marketplace under **Marketplaces**.
 
 ## Where it keeps things
 
 | path | what |
 |---|---|
-| `~/.claude/projects/**` | **read in place.** Never modified, never copied |
-| `~/.local/share/vibesenpai` | its own store: the catalog, findings, reports |
-| `~/.claude/settings.json` | untouched — the plugin carries its own hooks |
+| `~/.claude/projects/` | Claude Code's transcripts. **Read in place**, never modified, never copied |
+| `~/.local/share/vibesenpai` | its own store: findings, your answers, settings, reports |
+| `~/.claude/settings.json` | never written |
 
-Override the store with `VIBESENPAI_ARCHIVE`, and the transcript sources with
-`VIBESENPAI_SOURCES`.
+Every file in the store, and what losing it costs, is listed in
+[Reference](/vibesenpai/reference/#files).
 
 ## Turning it off
 
-```
-/plugin disable vibesenpai
-```
+| | |
+|---|---|
+| `/vibesenpai:judge off` | stops the model reads. The free checks keep running |
+| `/plugin disable vibesenpai` | stops everything, hooks included |
+| `VIBESENPAI_DISABLE=1` | in the environment Claude Code runs in, stops every hook on its first line |
 
-Harness-native, and it stops everything — hooks included.
-[What it sends, and what it costs](/vibesenpai/start/sends-and-costs/) has the
-rest, including why there is no "keep the rules, stop the model" switch.
+Disabling keeps the store. Deleting `~/.local/share/vibesenpai` removes everything it has
+written.

@@ -1,0 +1,7 @@
+flowchart LR
+  G("2+ calls with the same<br/>tool, input and output?") -- yes --> CH("an edit or a prompt<br/>between them?")
+  CH -- no --> GAP("median gap<br/>under 60 s?")
+  GAP -- yes --> F["Repeated call"]
+  G -- no --> X["not a finding"]
+  CH -- yes --> X
+  GAP -- no --> X

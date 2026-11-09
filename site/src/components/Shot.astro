@@ -1,0 +1,21 @@
+---
+// A product screenshot from src/assets/home/shots/<name>.png, framed; a labelled empty frame until it is taken.
+import { Image } from 'astro:assets';
+
+interface Props { name: string; alt: string }
+const { name, alt } = Astro.props;
+const shots = import.meta.glob<{ default: ImageMetadata }>('../assets/home/shots/*.png', { eager: true });
+const found = shots[`../assets/home/shots/${name}.png`]?.default;
+---
+
+<figure class="shot">
+  {found
+    ? <Image src={found} alt={alt} widths={[640, 960, 1280]} sizes="(max-width: 860px) 92vw, 640px" />
+    : <div class="empty" role="img" aria-label={alt}><span>Screenshot: {name}</span></div>}
+</figure>
+
+<style>
+  .shot { margin: 0; border-radius: 14px; overflow: hidden; border: 1px solid var(--vs-line); background: var(--vs-panel); box-shadow: 0 30px 90px -40px var(--vs-glow); }
+  .shot :global(img) { display: block; width: 100%; height: auto; }
+  .empty { aspect-ratio: 4 / 3; display: grid; place-items: center; color: var(--vs-quiet); font-size: 14px; }
+</style>

@@ -27,9 +27,10 @@ detector with a precision problem. It is a detector with no subject.
 
 18.1% of sessions had a denied tool call, which looked like a lot.
 
-Then: of **398 denials, only 6 were re-issued** after the guard. People decline
-things and move on. That is a person exercising control over their own machine,
-which is the system working rather than failing.
+Then the denials were read. On real interactive data they are `ExitPlanMode` and
+`AskUserQuestion`: a person rejecting a plan or answering a question. That is a
+person exercising control over their own machine, which is plan mode working
+rather than failing.
 
 We could have shipped a finding that fired on one in five sessions. It would
 have been telling people off for saying no.
@@ -49,11 +50,14 @@ dimension, different tier, opposite outcome.
 
 ## `file_churn` — real, frequent, and not established as waste
 
-A file going through many versions in one session: present in **48% of
-sessions**.
+A file going through many versions in one session. **48% of sessions** edit
+some file five or more times, and 23% ten or more (GRAVEYARD.md, 1,139
+sessions). The frequency probe in `npm run measure` asks a narrower question
+of the same sessions, whether a file has more than five versions in Claude
+Code's file history, and finds **11%**.
 
 The problem was never detection. It was that nobody could show churn is waste.
-Iterating is how the work gets done. A finding that fires on half of all
+Iterating is how the work gets done. A finding that fires on that many
 sessions and cannot say whether the thing it found was bad is a number, not an
 insight.
 

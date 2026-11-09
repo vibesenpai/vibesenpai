@@ -1,0 +1,18 @@
+flowchart LR
+  T["a session transcript<br/><small>read in place</small>"]
+
+  T --> FREE["the free checks<br/><small>structure only, no model, every session</small>"]
+  T --> MODEL["the model reads<br/><small>on unless turned off with /vibesenpai:judge off</small>"]
+
+  FREE --> ER["Edit retry<br/><small>on by default</small>"]
+  FREE --> RC["Redundant call<br/><small>off by default</small>"]
+  FREE --> CR["Cache rebuilt<br/><small>a statistic, not a finding</small>"]
+
+  MODEL --> CV["Constraint violation"]
+  MODEL --> MI["Misread intent"]
+  MODEL --> ISR["Inaccurate self report"]
+  MODEL --> OV["Overreach<br/><small>does not work yet</small>"]
+  MODEL --> OT["Other"]
+
+  classDef bad color:#9b2c2c
+  class OV bad

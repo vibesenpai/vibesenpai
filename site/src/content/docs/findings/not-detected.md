@@ -11,7 +11,8 @@ implies it covers everything.
 Ten detectors were built, measured against real sessions, and removed.
 [The graveyard has the numbers](/vibesenpai/work/graveyard/) — including
 `stale_read`, where 100% of candidates turned out to be the agent's own prior
-edit, and `permission_denied`, where only 6 of 398 denials were ever re-issued.
+edit, and `permission_denied`, where the denials in 18.1% of sessions were
+people rejecting a plan or answering a question: plan mode working.
 
 ## Refused on principle
 
@@ -25,8 +26,11 @@ deliberately unimplemented for exactly this reason.
 communication grade. Unfalsifiable, and it makes people defensive rather than
 curious.
 
-**Frequency without consequence.** `file_churn` fires on 48% of sessions and
-nobody could establish that churn is waste. Iterating is how work gets done. A
+**Frequency without consequence.** Across the same 1,139 sessions, 48% edit
+some file five or more times (GRAVEYARD.md), and 11% have a file with more than
+five versions in Claude Code's file history (docs/findings-frequency.md): two
+definitions of churn. Under either, nobody could establish that churn is
+waste. Iterating is how work gets done. A
 finding that common which cannot say whether the thing it found was bad is a
 number pretending to be an insight.
 

@@ -1,0 +1,8 @@
+flowchart LR
+  L("none of the four<br/>kinds fits?") -- yes --> DS("a 3 to 8 word<br/>description given?")
+  DS -- yes --> LB("expectation set before,<br/>found in what was sent?")
+  LB -- yes --> K["Other"]
+  DS -- no --> D["dropped"]
+  LB -- no --> D
+  classDef bad color:#f0a39a
+  class D bad

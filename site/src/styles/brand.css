@@ -1,0 +1,55 @@
+/* Brand tokens over Starlight's, from the mark (assets/brand/mark.svg), and the site's page transition. */
+
+:root {
+  --sl-color-accent-low: #1f2a44;
+  --sl-color-accent: #7fb3d5;
+  --sl-color-accent-high: #c6e7ff;
+  --sl-color-white: #e6edf3;
+  --sl-color-gray-1: #c9d4df;
+  --sl-color-gray-2: #a9b7c6;
+  --sl-color-gray-3: #8fa3b8;
+  --sl-color-gray-4: #4b5a6b;
+  --sl-color-gray-5: #2a3442;
+  --sl-color-gray-6: #161b22;
+  --sl-color-black: #0d1117;
+
+  --vs-ink: #0d1117;
+  --vs-panel: #131922;
+  --vs-line: #222c3b;
+  --vs-hat: #7fb3d5;
+  --vs-text: #e6edf3;
+  --vs-quiet: #8fa3b8;
+  --vs-glow: rgba(127, 179, 213, 0.18);
+  --vs-red: #f0a39a;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #dbeaf5;
+  --sl-color-accent: #1f5f8b;
+  --sl-color-accent-high: #123a56;
+  --sl-color-white: #0d1117;
+  --sl-color-gray-1: #1f2a37;
+  --sl-color-gray-2: #3a4757;
+  --sl-color-gray-3: #5b6878;
+  --sl-color-gray-4: #8a96a5;
+  --sl-color-gray-5: #c9d1db;
+  --sl-color-gray-6: #eef2f6;
+  --sl-color-gray-7: #f6f8fa;
+  --sl-color-black: #ffffff;
+
+  --vs-ink: #ffffff;
+  --vs-panel: #f6f8fa;
+  --vs-line: #dfe5ec;
+  --vs-hat: #1f5f8b;
+  --vs-text: #0d1117;
+  --vs-quiet: #5b6878;
+  --vs-glow: rgba(31, 95, 139, 0.12);
+  --vs-red: #b4322a;
+}
+
+/* A crossfade between pages where the browser supports cross-document view transitions. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+}

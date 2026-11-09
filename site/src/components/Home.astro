@@ -1,0 +1,332 @@
+---
+// The landing page: the approved Stitch v2 direction, in sections. docs/plans/docs-overhaul.md.
+import { Image } from 'astro:assets';
+import sensei from '../assets/home/sensei.jpg';
+import Shot from './Shot.astro';
+
+const base = '/vibesenpai';
+const install = '/plugin marketplace add vibesenpai/vibesenpai\n/plugin install vibesenpai@vibesenpai';
+
+const values = [
+  {
+    id: 'turn',
+    title: 'The turn, not a score',
+    body: 'Each finding opens on your own words and the turns where it went wrong, read from the transcript where it already is.',
+    points: [
+      ['Your words first, then the agent’s', `${base}/start/pane/`],
+      ['The conversation around the cited turn', `${base}/start/first-finding/`],
+      ['No grades and no percentages', `${base}/work/measuring/`],
+    ],
+    shot: 'finding',
+    alt: 'The vibesenpai pane beside the chat, with one finding open: the developer’s words, the cited turns, and the conversation around them.',
+  },
+  {
+    id: 'fix',
+    title: 'A fix you apply',
+    body: 'A finding comes with a change for your agent: a rule, a permission prompt, a guard or a test. Apply drafts it into your prompt box, and your Enter is the yes.',
+    points: [
+      ['Built from the finding’s own evidence', `${base}/start/fixes/`],
+      ['Claude Code’s permission prompt makes the change', `${base}/start/fixes/`],
+      ['Nothing is ever written for you', `${base}/start/sends-and-costs/`],
+    ],
+    shot: 'apply',
+    alt: 'A fix drafted into the Claude Code prompt box after pressing Apply in the pane.',
+  },
+  {
+    id: 'worked',
+    title: 'Know if it worked',
+    body: 'Once a fix is applied, the pane counts how often the same thing happened before it and since. Counts, never rates.',
+    points: [
+      ['Before and since, in this project', `${base}/start/fixes/`],
+      ['Says where it came back, if it did', `${base}/start/fixes/`],
+      ['A rule counts from when it was loaded', `${base}/start/fixes/`],
+    ],
+    shot: 'fixes',
+    alt: 'The Fixes tab of the pane: a fix marked applied, with its Before and Since counts.',
+  },
+  {
+    id: 'background',
+    title: 'Runs while you work',
+    body: 'The free checks read every session. Model reads run in the background after a turn ends, within 2M tokens a day, and stop with one command.',
+    points: [
+      ['Nothing appears until you open it', `${base}/commands/insights/`],
+      ['Spend and progress on the Health tab', `${base}/commands/judge/`],
+      ['/vibesenpai:judge off stops the model reads', `${base}/commands/judge/`],
+    ],
+    shot: 'health',
+    alt: 'The Health tab of the pane: sessions read, tokens used today against the daily limit, and the model reads switch.',
+  },
+  {
+    id: 'report',
+    title: 'Your history in one page',
+    body: '/vibesenpai:report writes one self-contained HTML file: every finding, the turns behind it, and its fix. It opens offline.',
+    points: [
+      ['Findings first, by kind', `${base}/commands/report/`],
+      ['Every session that was read, and what was not', `${base}/commands/report/`],
+      ['Light and dark, nothing loaded from elsewhere', `${base}/commands/report/`],
+    ],
+    shot: 'report',
+    alt: 'The vibesenpai HTML report: findings grouped by kind, each with its turns and its fix.',
+  },
+];
+
+const dimensions = {
+  model: [
+    ['Constraint violation', 'constraint-violation', 'An instruction you stated was not followed.'],
+    ['Misread intent', 'misread-intent', 'An ambiguous request filled the wrong way.'],
+    ['Inaccurate self report', 'inaccurate-self-report', 'Work or success claimed that did not happen.'],
+    ['Overreach', 'overreach', 'Work nobody asked for. Shipped, and measured as not working yet.'],
+    ['Other', 'other', 'A real problem outside the four, named in a few words.'],
+  ],
+  free: [
+    ['Edit retry', 'edit-retry', 'An edit the harness refused, then retried.'],
+    ['Repeated call', 'redundant-call', 'The same call and the same answer, with nothing changed between.'],
+    ['Cache rebuilds', 'cache-rebuilds', 'The prompt cache thrown away and written again.'],
+  ],
+};
+
+const terms = [
+  ['Reads your sessions in place.', 'Transcripts are never copied. What it keeps is redacted when it is written.'],
+  ['Sends only redacted text, on your account.', 'Model reads go to Claude Haiku through your own Claude Code login. The send stops if anything redaction should have removed is still there.'],
+  ['Never writes your files.', 'A fix is a request in your prompt box. The agent makes the change under Claude Code’s own permission prompt.'],
+  ['Stops with one command.', '/vibesenpai:judge off stops the model reads. /plugin disable vibesenpai stops everything.'],
+];
+
+const faq = [
+  ['Does it send my code anywhere?', 'It never opens your repository, but a session’s text includes what the agent’s tools returned, such as files it read and command output. With model reads on, which is the default, a redacted and length-capped copy of that text goes to Claude Haiku through your own Claude Code login. With them off, nothing leaves your machine.'],
+  ['What does it cost?', 'The free checks cost nothing. Model reads use about 60,000 tokens a session on your plan or API key, and never more than 2 million a day.'],
+  ['Which agents does it read?', 'Claude Code. Other harnesses are not supported yet.'],
+  ['How do I turn it off?', '/vibesenpai:judge off stops the model reads and keeps the free checks. /plugin disable vibesenpai turns everything off.'],
+];
+---
+
+<div class="home not-content">
+  <section class="hero">
+    <div class="glow" aria-hidden="true"></div>
+    <h1 class="rise r1">Discover how your agents failed you.</h1>
+    <p class="lede rise r2">vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.</p>
+    <div class="art rise r3">
+      <Image src={sensei} alt="The vibesenpai mascot, an old sensei in a straw hat, pointing at a turn in a transcript." widths={[480, 720, 960]} sizes="(max-width: 720px) 90vw, 560px" loading="eager" />
+    </div>
+    <div class="actions rise r4">
+      <a class="primary" href={`${base}/start/install/`}>Get started</a>
+      <a class="quiet" href={`${base}/work/measuring/`}>How accurate it is</a>
+    </div>
+    <div class="install rise r5">
+      <pre><code>{install}</code></pre>
+      <button type="button" data-copy={install}>Copy</button>
+    </div>
+  </section>
+
+  <section class="proof reveal">
+    <p class="kicker">A real session from the public test data of <a href="https://github.com/daaain/claude-code-log">claude-code-log</a> (MIT)</p>
+    <div class="pair">
+      <figure class="claim">
+        <figcaption>The developer asked to</figcaption>
+        <blockquote>“…hide the group instead of all items that belong to a group.”</blockquote>
+      </figure>
+      <figure class="reality">
+        <figcaption>The agent started hiding each item. The developer, at turn 15:</figcaption>
+        <blockquote>“You can set group.visible using the vis library which is less work.”</blockquote>
+      </figure>
+    </div>
+    <p class="caption">vibesenpai flagged it as <a href={`${base}/dimensions/misread-intent/`}>misread intent</a>, with the turn cited and the request it came from.</p>
+  </section>
+
+  {values.map((v, i) => (
+    <section class:list={['value', 'reveal', { flip: i % 2 === 1 }]} id={v.id}>
+      <div class="words">
+        <h2>{v.title}</h2>
+        <p>{v.body}</p>
+        <ul>
+          {v.points.map(([label, href]) => <li><a href={href}>{label}</a></li>)}
+        </ul>
+      </div>
+      <div class="picture">
+        <Shot name={v.shot} alt={v.alt} />
+      </div>
+    </section>
+  ))}
+
+  <section class="dims reveal" id="dimensions">
+    <h2>What it looks for</h2>
+    <p class="sub">Each kind has its own page: an example conversation, how it is detected, and the fixes it can offer.</p>
+    <div class="groups">
+      <div>
+        <h3>Model reads</h3>
+        <dl>
+          {dimensions.model.map(([name, slug, line]) => (
+            <><dt><a href={`${base}/dimensions/${slug}/`}>{name}</a></dt><dd>{line}</dd></>
+          ))}
+        </dl>
+      </div>
+      <div>
+        <h3>The free checks</h3>
+        <dl>
+          {dimensions.free.map(([name, slug, line]) => (
+            <><dt><a href={`${base}/dimensions/${slug}/`}>{name}</a></dt><dd>{line}</dd></>
+          ))}
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section class="terms reveal">
+    <h2>What leaves your machine</h2>
+    <div class="lines">
+      {terms.map(([head, body]) => <p><strong>{head}</strong> <span>{body}</span></p>)}
+    </div>
+    <p class="measured">
+      Measured, not claimed: the edit-retry check fired on 380 of 1,139 real sessions, with no false positives in a hand check.
+      We also publish <a href={`${base}/work/measuring/`}>how accurate the model reads are</a> and <a href={`${base}/work/graveyard/`}>the ten detectors we built and deleted</a>.
+    </p>
+  </section>
+
+  <section class="faq reveal">
+    <h2>Common questions</h2>
+    {faq.map(([q, a]) => (
+      <details>
+        <summary>{q}</summary>
+        <p>{a}</p>
+      </details>
+    ))}
+  </section>
+
+  <section class="closing reveal">
+    <h2>See what your last session cost you.</h2>
+    <div class="install">
+      <pre><code>{install}</code></pre>
+      <button type="button" data-copy={install}>Copy</button>
+    </div>
+    <a class="primary" href={`${base}/start/install/`}>Get started</a>
+  </section>
+</div>
+
+<script>
+  for (const b of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+    b.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(b.dataset.copy ?? '');
+        b.textContent = 'Copied';
+        setTimeout(() => (b.textContent = 'Copy'), 1600);
+      } catch {
+        b.textContent = 'Select and copy';
+      }
+    });
+  }
+</script>
+
+<style>
+  .home {
+    --gap: clamp(72px, 10vw, 136px);
+    color: var(--vs-text);
+  }
+  .home a { color: var(--vs-hat); text-underline-offset: 3px; }
+  .home h2 { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 14px; color: var(--vs-text); }
+  .home h3 { font-size: 15px; font-weight: 600; color: var(--vs-quiet); margin: 0 0 12px; }
+  section { margin-top: var(--gap); }
+
+  /* Hero: centred, the mascot in a soft halo of the hat's blue. */
+  .hero { position: relative; text-align: center; margin-top: 24px; padding-top: 24px; }
+  .glow {
+    position: absolute; inset: -80px -10% auto; height: 760px; z-index: -1; pointer-events: none;
+    background: radial-gradient(ellipse 50% 45% at 50% 55%, var(--vs-glow), transparent 70%);
+  }
+  .hero h1 {
+    font-size: clamp(40px, 6.4vw, 76px); line-height: 1.02; letter-spacing: -0.035em; font-weight: 700;
+    max-width: 12ch; margin: 0 auto 20px; color: var(--vs-text);
+  }
+  .lede { font-size: clamp(17px, 1.6vw, 20px); color: var(--vs-quiet); max-width: 46ch; margin: 0 auto 36px; line-height: 1.55; }
+  .art { width: min(560px, 90%); margin: 0 auto; border-radius: 20px; overflow: hidden; border: 1px solid var(--vs-line); box-shadow: 0 40px 120px -40px var(--vs-glow); }
+  .art :global(img) { display: block; width: 100%; height: auto; }
+  .actions { display: flex; gap: 24px; justify-content: center; align-items: center; margin: 36px 0 20px; flex-wrap: wrap; }
+  .primary {
+    display: inline-block; background: var(--vs-hat); color: var(--vs-ink) !important; font-weight: 600;
+    padding: 12px 22px; border-radius: 8px; text-decoration: none;
+  }
+  .quiet { font-weight: 500; }
+  .install {
+    position: relative; display: inline-block; text-align: left; max-width: 100%;
+    background: var(--vs-panel); border: 1px solid var(--vs-line); border-radius: 10px; padding: 12px 84px 12px 16px;
+  }
+  .install pre { margin: 0; background: none; border: 0; padding: 0; overflow-x: auto; }
+  .install code { font-size: 13.5px; color: var(--vs-text); background: none; }
+  .install button {
+    position: absolute; top: 10px; right: 10px; font: 500 12.5px var(--sl-font); color: var(--vs-quiet);
+    background: transparent; border: 1px solid var(--vs-line); border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  }
+  .install button:hover { color: var(--vs-text); border-color: var(--vs-quiet); }
+
+  /* Proof: the claim, then the reality beside it. */
+  .proof { text-align: center; }
+  .kicker { color: var(--vs-quiet); font-size: 14px; margin-bottom: 20px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 920px; margin: 0 auto; text-align: left; }
+  .pair figure { margin: 0; padding: 28px; border-radius: 14px; border: 1px solid var(--vs-line); background: var(--vs-panel); }
+  .pair figcaption { font-size: 13px; color: var(--vs-quiet); margin-bottom: 12px; }
+  .claim blockquote { margin: 0; padding: 0; border: 0; font-size: clamp(20px, 2.2vw, 26px); line-height: 1.3; color: var(--vs-text); font-style: normal; }
+  .reality { border-color: color-mix(in srgb, var(--vs-red) 45%, var(--vs-line)) !important; }
+  .reality blockquote { margin: 0; padding: 0; border: 0; font-size: clamp(20px, 2.2vw, 26px); line-height: 1.3; color: var(--vs-red); font-style: normal; }
+  .caption { color: var(--vs-quiet); margin-top: 20px; }
+
+  /* Value propositions: words and a screenshot, alternating sides. */
+  .value { display: grid; grid-template-columns: 5fr 7fr; gap: clamp(32px, 5vw, 72px); align-items: center; }
+  .value.flip { grid-template-columns: 7fr 5fr; }
+  .value.flip .words { order: 2; }
+  .words p { color: var(--vs-quiet); font-size: 18px; line-height: 1.6; margin: 0 0 20px; max-width: 42ch; }
+  .words ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .words li { padding-left: 18px; position: relative; }
+  .words li::before { content: ''; position: absolute; left: 0; top: 0.62em; width: 8px; height: 1.5px; background: var(--vs-hat); }
+  .words li a { color: var(--vs-text); text-decoration: none; border-bottom: 1px solid var(--vs-line); }
+  .words li a:hover { border-color: var(--vs-hat); }
+
+  /* Dimensions and terms: plain lists, no cards. */
+  .sub { color: var(--vs-quiet); max-width: 60ch; margin: 0 0 32px; }
+  .groups { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+  .groups dl { margin: 0; }
+  .groups dt { margin-top: 16px; font-weight: 600; }
+  .groups dt a { color: var(--vs-text); text-decoration: none; }
+  .groups dt a:hover { color: var(--vs-hat); }
+  .groups dd { margin: 2px 0 0; color: var(--vs-quiet); }
+  .lines { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 56px; margin-top: 24px; }
+  .lines p { margin: 0; color: var(--vs-quiet); line-height: 1.6; }
+  .lines strong { color: var(--vs-text); display: block; font-size: 19px; margin-bottom: 4px; }
+  .measured { margin-top: 40px; color: var(--vs-quiet); max-width: 72ch; }
+
+  .faq { max-width: 780px; }
+  .faq details { border-top: 1px solid var(--vs-line); padding: 18px 0; }
+  .faq details:last-of-type { border-bottom: 1px solid var(--vs-line); }
+  .faq summary { cursor: pointer; font-size: 18px; font-weight: 600; color: var(--vs-text); }
+  .faq p { color: var(--vs-quiet); margin: 12px 0 0; }
+
+  .closing { text-align: center; margin-bottom: 96px; }
+  .closing .install { margin: 8px 0 28px; }
+
+  @media (max-width: 860px) {
+    .pair, .value, .value.flip, .groups, .lines { grid-template-columns: 1fr; }
+    .value.flip .words { order: 0; }
+    .install { padding-right: 16px; padding-bottom: 44px; }
+    .install pre { white-space: pre-wrap; word-break: break-all; }
+    .install button { top: auto; bottom: 10px; }
+  }
+
+  /* Motion: one entrance on load, then sections easing in as they scroll into view. Off for reduced motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    .rise { animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+    .r2 { animation-delay: 0.08s; }
+    .r3 { animation-delay: 0.18s; }
+    .r4 { animation-delay: 0.32s; }
+    .r5 { animation-delay: 0.4s; }
+    .glow { animation: breathe 9s ease-in-out infinite alternate; }
+
+    @supports (animation-timeline: view()) {
+      .reveal { animation: reveal linear both; animation-timeline: view(); animation-range: entry 5% cover 28%; }
+      .reveal .picture { animation: lift linear both; animation-timeline: view(); animation-range: entry 0% cover 40%; }
+      .proof .reality { animation: slide linear both; animation-timeline: view(); animation-range: entry 20% cover 45%; }
+    }
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  @keyframes breathe { from { opacity: 0.7; transform: scale(0.98); } to { opacity: 1; transform: scale(1.03); } }
+  @keyframes reveal { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+  @keyframes lift { from { transform: translateY(40px) scale(0.97); } to { transform: none; } }
+  @keyframes slide { from { opacity: 0; transform: translateX(32px); } to { opacity: 1; transform: none; } }
+</style>

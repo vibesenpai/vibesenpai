@@ -3,23 +3,22 @@ sequenceDiagram
   participant You
   participant CC as Claude Code
   participant H as vibesenpai hooks
-  participant W as detached worker
+  participant W as detached jobs
   participant M as the model
 
-  Note over H: nothing here spends
-
   CC->>H: SessionStart
-  H-->>You: last pass's report (instant)
-  H->>W: refresh standing, if stale
-  W-->>W: parse + detect (local, free)
+  H-->>You: last pass's summary (systemMessage)
+  H->>W: standing pass, if stale
+  W-->>W: parse + the free checks (local)
 
+  You->>CC: a turn
   CC->>H: Stop
-  Note right of H: no judge pass.<br/>standing only.
-  H->>W: refresh standing, if stale
+  H->>W: standing pass, if stale
+  H->>W: judge, if due and within limits
+  Note right of H: the hook exits here
+  W->>M: redacted packet (asserted)
+  M-->>W: episodes, then labels
+  W-->>W: findings stored
 
-  You->>CC: /vibesenpai:now
-  CC-->>You: findings so far (0.4s)
-  CC->>W: judge THIS session
-  W->>M: redacted packet
-  M-->>W: episodes → labels
-  Note over You,M: findings appear next time you ask
+  You->>CC: /vibesenpai:insights
+  CC-->>You: what the passes stored (sends nothing)

@@ -10,16 +10,17 @@ flowchart LR
   end
 
   T --> R --> P --> D --> F
-  F --> OUT["now · fix · report"]
+  F --> OUT["insights · report · the pane"]
 
   P -. "redacted here,<br/>at construction" .-> P
 
   C["catalog<br/><small>offsets + hashes</small>"]
   R -. "scan / doctor only" .-> C
 
-  J["the judge<br/><small>when you ask</small>"]
-  P -- "full text,<br/>when you ask" --> J
-  J --> F
+  J["the judge<br/><small>background, from the Stop hook</small>"]
+  P -- "redacted text,<br/>within limits" --> J
+  S[("store.db<br/><small>derived, redacted</small>")]
+  J --> S --> F
 
   classDef side stroke-dasharray:4 4,color:#666
   class C side

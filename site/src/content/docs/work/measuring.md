@@ -20,8 +20,7 @@ sessions**.
 ```
 
 Three denominators, because they answer different questions. **Session-level**
-asks "did we find the problem in this session at all" — the unit the product
-works in, since it surfaces a single recommendation rather than an exhaustive list.
+asks "did we find the problem in this session at all".
 **Episode-level** asks "did we find this specific incident". **Claim-level**
 additionally requires us to have given it the same label the humans did.
 

@@ -1,0 +1,5 @@
+flowchart LR
+  T["the agent's words<br/>and its tool calls"] --> EX["extract stage"]
+  EX --> L("its account of its own work<br/>is not what the turns show?")
+  L -- yes --> K["Inaccurate self report"]
+  L -- no --> E["another kind, or none"]

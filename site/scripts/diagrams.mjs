@@ -69,7 +69,24 @@ if (sources.length === 0) {
 // A transparent background: the page supplies its own, and a baked-in white
 // rectangle is exactly what makes a diagram look wrong in dark mode.
 const config = join(mkdtempSync(join(tmpdir(), 'mmdc-')), 'config.json');
-writeFileSync(config, JSON.stringify({ theme: 'neutral', flowchart: { curve: 'basis' } }));
+// Dark panels with light text and slate lines read on both the site's dark and light pages.
+writeFileSync(config, JSON.stringify({
+  theme: 'base',
+  flowchart: { curve: 'basis' },
+  themeVariables: {
+    fontFamily: FONT,
+    primaryColor: '#161b22',
+    primaryTextColor: '#e6edf3',
+    primaryBorderColor: '#3a4a5e',
+    secondaryColor: '#1f2a44',
+    tertiaryColor: '#131922',
+    lineColor: '#8fa3b8',
+    textColor: '#8fa3b8',
+    edgeLabelBackground: '#1f2a44',
+    clusterBkg: '#131922',
+    clusterBorder: '#3a4a5e',
+  },
+}));
 
 let failed = 0;
 for (const file of sources) {

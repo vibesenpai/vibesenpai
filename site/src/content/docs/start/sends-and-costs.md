@@ -1,95 +1,129 @@
 ---
-title: What it sends, and what it costs
-description: A redacted subset of what your provider already has, on your own account, when you ask — and roughly 58k tokens a session.
+title: What leaves your machine, and what it costs
+description: Redacted session text, to the model on your own Claude Code login, after a turn ends, within 2M tokens a day.
 ---
 
-This page is near the top because the judge is **on from installation**. You
-should not have to go looking for what that means.
+The model reads are **on from installation**, so what they send and spend is
+stated here, near the top.
 
 ## The short version
 
-> Your transcripts stay on disk. When you ask for a finding, a **redacted
-> subset of what your provider already has** — they logged that session — goes
-> to the model on **your** account. No third party, no service of ours, nothing
-> you were not already paying for.
-
-The claim this replaces was "nothing leaves your machine". That was true of an
-earlier design, where the plan was a local model, and it stopped being true
-when the judge started running through your own `claude` CLI. It is said this
-way now because the honest version is also the stronger one.
-
-## No new trust relationship
-
-That is the actual differentiator, and it is worth being precise about:
-
-| | where your data goes |
-|---|---|
-| **mem0** | your memories go to `mcp.mem0.ai` — **a new party** |
-| **vibe-log** | optional cloud sync of sanitised patterns — **a new party** |
-| **vibesenpai** | the model you already use, on your own account — **nobody new** |
-
-And strictly *less* than that provider already holds: what we send is redacted
-first, and it is a subset of a session they logged in full.
-
-Note "your provider", not "Anthropic". The judge shells out to your own
-`claude` CLI, so if you are configured against Bedrock or Vertex, the excerpt
-goes there instead.
-
-## What leaves, exactly
+> Your transcripts stay on disk. After a turn ends, **redacted session text
+> your provider already logged** goes to the model (Claude Haiku by default)
+> through your own Claude Code login. No third party, no service of ours.
 
 | | |
 |---|---|
-| **read** | `~/.claude/projects/**`, in place — never modified, never copied |
-| **written** | `~/.local/share/vibesenpai`, mode 0600 |
-| **sent** | redacted session text, to your own model, **when you run a command** |
-| **sent unprompted** | nothing. The `Stop` hook does not spawn a judge pass |
+| **read** | `~/.claude/projects/**`, in place: never modified, never copied |
+| **written** | the archive (default `~/.local/share/vibesenpai`): derived, redacted data only |
+| **sent** | redacted session text, to the model, on your account |
+| **when** | in the background, after a turn ends, from the `Stop` hook |
+| **how much** | about 60k tokens a session, at most 2M tokens a day |
 
-That last row is the one that makes the rest defensible.
-[Phases of a run](/vibesenpai/architecture/phases/) has the detail, and it is
-asserted by a test rather than promised.
+## What is sent
 
-## Redaction is asserted, not attempted
+The judge builds a packet from the session's text. Its shape is fixed in
+`src/judge/packet.ts`:
 
-Immediately before every call the packet is checked, and the send is
-**aborted** if redaction would still change anything. Not a warning — a warning
-in a detached process is a thing nobody reads.
+- **Your prompts are sent whole.** The developer's words are never cut.
+- **The agent's turns are merged, then capped once** by how long the session
+  is: 5,000 characters a turn in a session of up to 8 merged turns, down to 500
+  in one of more than 74.
+- **The agent's turns include what its tools returned**: files it read, command
+  output, search results. They are capped with the rest of the turn, so code
+  and output from a session can be part of what is sent.
+- A cut keeps the head and the tail, and states how much was left out.
 
-This is not theoretical. Measured across the corpus, **50% of real sessions
-carry secret-shaped content** at the fidelity the judge reads: API keys, JWTs,
-bearer tokens, URL credentials. Tool output is where it concentrates.
+The packet goes to `claude -p` with no tools allowed (`--allowed-tools ''`): the
+model reads and answers; it cannot act.
 
-[The four places redaction happens →](/vibesenpai/architecture/judge/)
+## Redaction is asserted before every call
+
+Redaction happens when the packet is built. Immediately before each call the
+packet is checked again, and the send is **aborted** if redaction would still
+change anything:
+
+```
+  redact(packet) === packet   or the send aborts
+```
+
+What `src/redact.ts` removes:
+
+- private keys (PEM blocks)
+- provider-prefixed tokens: Anthropic, OpenAI, GitHub, Slack, AWS, Google,
+  GitLab, npm, Stripe, Hugging Face and others
+- JWTs and bearer tokens
+- credentials inside URLs
+- values assigned to secret-named variables (`*_TOKEN`, `*_SECRET`,
+  `PASSWORD`, `API_KEY` and the like)
+- email addresses
+- your username in home-directory paths
+
+Commands, paths, commit SHAs and ids are kept: they are the evidence. Nothing is
+redacted on entropy alone.
+
+[Where redaction happens in the pipeline →](/vibesenpai/architecture/judge/)
+
+## On whose account
+
+Your own. The judge calls the `claude` CLI you are already signed in to, so it
+runs on your plan, or on your API key if Claude Code is set up with one. If
+Claude Code is configured for Bedrock or Vertex, the packet goes there.
+
+| | where your data goes |
+|---|---|
+| **mem0** | your memories go to `mcp.mem0.ai`: **a new party** |
+| **vibe-log** | optional cloud sync of sanitised patterns: **a new party** |
+| **vibesenpai** | the model you already use, on your own account: **nobody new** |
+
+## When
+
+Only the `Stop` hook spends. When a turn ends, the hook starts a detached
+judge pass and exits; the pass never runs inside the turn. Opening
+`/vibesenpai:insights` or `/vibesenpai:report` sends nothing.
+
+The first time a session starts after installation, a one-time notice states
+these figures and the off switch. Nothing is spent until that session's first
+turn ends.
+
+The automatic pass reads:
+
+- the live session again after about 50 new turns
+- **up to 200 past sessions once**, newest first; the cutoff is stored, so a
+  later pass never reaches further back
+- within **2M tokens a day** (local day). When the day's budget is reached, the
+  pass stops and continues the next day.
+
+[Phases of a run →](/vibesenpai/architecture/phases/)
 
 ## What it costs
 
 ```
-  one session        ~58,000 input + ~4,000 output tokens
-  wall clock         about a minute, in the background
-  your whole history  judge --backlog, which prints the cost first
+  per session     about 60k tokens
+  per day         at most 2M tokens, about 33 sessions
 ```
 
-Reported in **tokens, never dollars**. What a token costs depends on your plan
-and tier, and on a subscription the dollar figure is notional — so you get the
-number you can verify.
+A packet is filled with whole sessions up to 60,000 tokens, and each model call
+carries about 26k tokens of invocation overhead of its own, so sessions share a
+call.
 
-Claude Code attributes recent usage to plugins in `/usage`, so you can see what
-this spent without taking our word for it.
+Each call's tokens and the dollar figure Claude Code reports for it
+(`total_cost_usd`) are recorded. `/vibesenpai:judge` shows them. The dollars are
+Claude Code's own figure at API prices; on a subscription they are plan usage,
+not a bill.
 
-For scale: Anthropic says Claude Code's own background work is *"typically
-under $0.04 per session"* and does not ask first. `/insights`, which is
-first-party and does something similar to this, spends your tokens on exactly
-the same terms — when invoked, with no separate opt-in.
+## How to stop it
 
-## Turning it off
+```
+/vibesenpai:judge off
+```
+
+Stops the model reads. The free checks keep running, and nothing is sent.
+`/vibesenpai:judge on` turns them back on.
 
 ```
 /plugin disable vibesenpai
 ```
 
-Harness-native, stops everything including the hooks. `VIBESENPAI_DISABLE=1`
-does the same from the environment.
-
-There is deliberately **no "keep the rules, stop the model" switch.** Without
-the judge this is a one-detector tool — `edit_retry` found 4 occurrences across
-18 sessions where the judge found 19 — so all-or-nothing is the honest offer
-rather than a degraded mode we pretend is useful.
+Stops everything, the hooks included. `VIBESENPAI_DISABLE=1` does the same from
+the environment.

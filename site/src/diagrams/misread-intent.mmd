@@ -1,0 +1,8 @@
+flowchart LR
+  L("the request left room,<br/>filled the wrong way?") -- yes --> LB("expectation set before<br/>the agent acted?")
+  LB -- yes --> V("that quote found<br/>in what was sent?")
+  V -- yes --> K["Misread intent"]
+  LB -- no --> D["dropped as<br/>a suggestion"]
+  V -- no --> D
+  classDef bad color:#f0a39a
+  class D bad
