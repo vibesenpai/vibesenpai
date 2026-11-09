@@ -14,10 +14,16 @@ describe('the marketplace manifest matches the schema', () => {
   });
 
   it('points at the plugin with a source the validator accepts', () => {
-    // `{ source: 'local', path: '.' }` is rejected; a relative string is accepted.
-    const p = (m['plugins'] as { source?: unknown }[])[0];
-    expect(typeof p?.source, 'source must be a relative path string').toBe('string');
-    expect(p?.source as string).toMatch(/^\.\//);
+    // `{ source: 'local', path: '.' }` is rejected. Before a release it is `./`; a release sets the archive (D69).
+    const s = (m['plugins'] as { source?: unknown }[])[0]?.source;
+    if (typeof s === 'string') {
+      expect(s).toMatch(/^\.\//);
+      return;
+    }
+    const a = s as { source?: string; url?: string; sha256?: string };
+    expect(a.source).toBe('archive');
+    expect(a.url).toMatch(/^https:\/\/github\.com\/vibesenpai\/vibesenpai\/releases\/download\/v[^/]+\/vibesenpai-[^/]+\.zip$/);
+    expect(a.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('carries no fields Claude Code ignores', () => {

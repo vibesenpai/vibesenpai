@@ -80,3 +80,14 @@ push a tag `v<version>`. The release workflow runs the tests, checks the tag
 matches both files, builds the zip, attaches it to a GitHub release, and points
 `marketplace.json` at it by `sha256`.
 [Releases and install counts](/vibesenpai/architecture/releases/)
+
+Then check the release from the outside, on your own machine:
+
+```sh
+npm run validate:release -- <version>            # the published files, then a real install
+npm run validate:release -- <version> --spend    # also the model reads
+```
+
+It installs into a separate Claude Code profile (`CLAUDE_CONFIG_DIR`), so your own setup is not
+touched; log in to that profile once the first time. Without `--spend` it still runs one short
+`claude -p` turn on that account. It does not run in CI, because it needs an account.

@@ -18,7 +18,8 @@
     "measure": "node --experimental-strip-types scripts/measure-dimensions.ts",
     "pull:swechat": "node --experimental-strip-types scripts/pull-swechat.ts",
     "gold": "node --experimental-strip-types scripts/gold-score.ts",
-    "judge:control": "node --experimental-strip-types scripts/judge-control.ts"
+    "judge:control": "node --experimental-strip-types scripts/judge-control.ts",
+    "validate:release": "bash scripts/validate-release.sh"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

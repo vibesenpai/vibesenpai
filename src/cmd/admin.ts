@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { bold, dim } from '../style.ts';
 import { join } from 'node:path';
-import { type Layer } from '../config.ts';
+import { claudeDir, type Layer } from '../config.ts';
 import { describeCatalog, readCatalog, runScan } from '../catalog.ts';
 import { parse, registry } from '../parsers/index.ts';
 import { readJudgeState, tallyByDimension } from '../judge/state.ts';
@@ -70,7 +70,7 @@ export function cmdConfig(a: Argv): number {
 
 /** Report the harness's own retention. Read-only: we never write it. */
 function harnessTtlStatus(home: string): string[] {
-  const settings = join(home, '.claude', 'settings.json');
+  const settings = join(claudeDir(process.env, home), 'settings.json');
   let configured: number | undefined;
   try {
     const raw = JSON.parse(readFileSync(settings, 'utf8')) as Record<string, unknown>;
@@ -86,7 +86,7 @@ function harnessTtlStatus(home: string): string[] {
     lines.push(`  harness    cleanupPeriodDays = ${configured} (your setting)`);
   }
   try {
-    const stamp = readFileSync(join(home, '.claude', '.last-cleanup'), 'utf8').trim();
+    const stamp = readFileSync(join(claudeDir(process.env, home), '.last-cleanup'), 'utf8').trim();
     lines.push(`             last cleanup: ${stamp}`);
   } catch {
     /* no stamp yet */

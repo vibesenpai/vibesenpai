@@ -43,6 +43,12 @@ function asPreset(v: unknown): Preset | undefined {
 }
 
 
+/** Claude Code's own directory: `CLAUDE_CONFIG_DIR` when set, else `~/.claude`. */
+export function claudeDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const v = env['CLAUDE_CONFIG_DIR'];
+  return v && v.trim() !== '' ? v : join(home, '.claude');
+}
+
 function xdg(env: NodeJS.ProcessEnv, key: string, fallback: string, home: string): string {
   const v = env[key];
   return v && v.trim() !== '' ? v : join(home, fallback);
@@ -110,7 +116,7 @@ export function resolveConfig(input: ResolveInput = {}): {
     'sources',
     flags.sources,
     splitList(env['VIBESENPAI_SOURCES']),
-    [join(home, '.claude', 'projects'), join(home, '.codex', 'sessions')],
+    [join(claudeDir(env, home), 'projects'), join(home, '.codex', 'sessions')],
   );
 
   const [archive, pArchive] = pick(

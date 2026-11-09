@@ -25,7 +25,7 @@ file, and the config file over the default.
 
 | setting | environment | config file key | default |
 |---|---|---|---|
-| transcript sources | `VIBESENPAI_SOURCES`, separated by `,` or `:` | `sources` (a list) | `~/.claude/projects` and `~/.codex/sessions` |
+| transcript sources | `VIBESENPAI_SOURCES`, separated by `,` or `:` | `sources` (a list) | `~/.claude/projects` (under `CLAUDE_CONFIG_DIR` when that is set) and `~/.codex/sessions` |
 | the store's location | `VIBESENPAI_ARCHIVE` | `archive` | `$XDG_DATA_HOME/vibesenpai`, else `~/.local/share/vibesenpai` |
 | free-check preset | `VIBESENPAI_PRESET` | `preset` | `core` |
 | muted free checks | `VIBESENPAI_MUTE`, separated by `,` or `:` | `mute` (a list) | none |
