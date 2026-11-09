@@ -18,16 +18,19 @@ constraint violation. [More below](#one-finding-more-than-one-kind).
 
 ## Every dimension
 
-| Dimension | Tier | On by default |
-|---|---|---|
-| [Constraint violation](/vibesenpai/dimensions/constraint-violation/) | model read | yes |
-| [Misread intent](/vibesenpai/dimensions/misread-intent/) | model read | yes |
-| [Inaccurate self report](/vibesenpai/dimensions/inaccurate-self-report/) | model read | yes |
-| [Overreach](/vibesenpai/dimensions/overreach/) | model read | yes |
-| [Other](/vibesenpai/dimensions/other/) | model read | yes |
-| [Edit retry](/vibesenpai/dimensions/edit-retry/) | free check | yes |
-| [Repeated call](/vibesenpai/dimensions/redundant-call/) | free check | no |
-| [Cache rebuilds](/vibesenpai/dimensions/cache-rebuilds/) | a statistic, not a finding | yes |
+| Dimension | Tier | On by default | In the paper |
+|---|---|---|---|
+| [Constraint violation](/vibesenpai/dimensions/constraint-violation/) | model read | yes | S3 Developer Constraint Violation |
+| [Misread intent](/vibesenpai/dimensions/misread-intent/) | model read | yes | S2 Misread Developer Intent |
+| [Inaccurate self report](/vibesenpai/dimensions/inaccurate-self-report/) | model read | yes | S7 Inaccurate Self-Reporting |
+| [Overreach](/vibesenpai/dimensions/overreach/) | model read | yes | S4 Self-Initiated Overreach |
+| [Other](/vibesenpai/dimensions/other/) | model read | yes | |
+| [Edit retry](/vibesenpai/dimensions/edit-retry/) | free check | yes | |
+| [Repeated call](/vibesenpai/dimensions/redundant-call/) | free check | no | |
+| [Cache rebuilds](/vibesenpai/dimensions/cache-rebuilds/) | a statistic, not a finding | yes | |
+
+*In the paper* is the matching kind in the research the model reads are built on
+([below](#where-the-dimensions-come-from)).
 
 There are two tiers:
 
@@ -45,6 +48,28 @@ There are two tiers:
 Model findings can be wrong; free-check findings are facts Claude Code
 recorded. Each finding stores how it was flagged, but the pane shows only that
 it was. [Limits](/vibesenpai/work/limits/) has more.
+
+## Where the dimensions come from
+
+The four model-read dimensions come from the paper
+[How Coding Agents Fail Their Users](https://arxiv.org/abs/2605.29442) (arXiv 2605.29442). It studied real coding-agent
+sessions and sorted the ways an agent fails its user into seven kinds, found
+where the developer corrected or pushed back on the agent.
+
+vibesenpai reads four of those kinds. The other three are not covered:
+
+- **Wrong project diagnosis** (S1)
+- **Faulty implementation** (S5)
+- **Operational execution error** (S6)
+
+Faulty implementation and operational execution error need the diff or the full
+command text, which the model reads are not sent
+([Limits](/vibesenpai/work/limits/#can-it-see-my-code)). The paper's labelled
+sessions are also what the model reads are checked against
+([How it was measured](/vibesenpai/architecture/measurements/)).
+
+The free checks and Cache rebuilds are not from the paper. They read what
+Claude Code itself records, such as a refused edit.
 
 ## How a fix is chosen
 
