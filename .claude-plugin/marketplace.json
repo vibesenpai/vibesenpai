@@ -14,7 +14,11 @@
         "name": "vibesenpai contributors"
       },
       "category": "Productivity",
-      "source": "./",
+      "source": {
+        "source": "archive",
+        "url": "https://github.com/vibesenpai/vibesenpai/releases/download/v0.0.1-alpha/vibesenpai-0.0.1-alpha.zip",
+        "sha256": "24f3adc511e5efc4c8ab233d63ad901b1867631bd44eaf2bb9b89cf9a02448c7"
+      },
       "homepage": "https://github.com/vibesenpai/vibesenpai#readme"
     }
   ]
