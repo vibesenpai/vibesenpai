@@ -186,40 +186,62 @@ describe('renderHtml — the rollup attributes cost to the right dimension', () 
 
 describe('gatherReport — the standing it builds equals the one computeStanding would', () => {
   it('folding per session matches a second pass over the same sessions', async () => {
-    // `gather`'s in-loop standing must match `computeStanding` on the same data.
+    // Fixture transcripts, so the test is fast, repeatable and runs where there is no local history.
+    const { mkdtempSync, mkdirSync, writeFileSync, readFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { basename, join } = await import('node:path');
     const { gatherReport } = await import('../src/gather.ts');
     const { computeStanding } = await import('../src/standing.ts');
     const { editRetry } = await import('../src/detect/edit-retry.ts');
     const { parse } = await import('../src/parsers/index.ts');
-    const { readFileSync } = await import('node:fs');
     const { discoverTranscripts } = await import('../src/read.ts');
-    const { basename } = await import('node:path');
 
-    const sources = [`${process.env['HOME']}/.claude/projects`];
-    const files = discoverTranscripts(sources).slice(0, 3);
-    if (files.length === 0) return; // nothing local to compare against
+    const root = mkdtempSync(join(tmpdir(), 'as-fold-'));
+    const dir = join(root, '-Users-x-app');
+    mkdirSync(dir);
+    const usage = { input_tokens: 10, output_tokens: 300, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+    const edit = (id: string, file: string) => ({ type: 'tool_use', id, name: 'Edit', input: { file_path: file, old_string: 'a', new_string: 'b' } });
+    const session = (id: string, refusal: string | undefined, file: string) => {
+      const base = { sessionId: id, version: '2.1.296', timestamp: '2026-10-20T10:00:00.000Z' };
+      const lines: object[] = [
+        { ...base, type: 'user', uuid: `${id}-u1`, message: { role: 'user', content: 'fix it' } },
+        { ...base, type: 'assistant', uuid: `${id}-a1`, message: { role: 'assistant', id: `${id}-m1`, usage, content: [edit(`${id}-t1`, file)] } },
+      ];
+      if (refusal !== undefined) {
+        lines.push(
+          { ...base, type: 'user', uuid: `${id}-r1`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `${id}-t1`, is_error: true, content: `<tool_use_error>${refusal}</tool_use_error>` }] } },
+          { ...base, type: 'assistant', uuid: `${id}-a2`, message: { role: 'assistant', id: `${id}-m2`, usage, content: [edit(`${id}-t2`, file)] } },
+          { ...base, type: 'user', uuid: `${id}-r2`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `${id}-t2`, content: 'ok' }] } },
+        );
+      } else {
+        lines.push({ ...base, type: 'user', uuid: `${id}-r1`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `${id}-t1`, content: 'ok' }] } });
+      }
+      writeFileSync(join(dir, `${id}.jsonl`), lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
+    };
+    session('s1', 'String to replace not found in file.', '/x/a.ts');
+    session('s2', 'File has not been read yet. Read it first before writing to it.', '/x/b.ts');
+    session('s3', undefined, '/x/c.ts');
 
     const detectors = [editRetry()];
-    const now = new Date('2026-10-20T00:00:00.000Z');
+    const now = new Date('2026-10-21T00:00:00.000Z');
+    const gathered = await gatherReport({ sources: [root], detectors, preset: 'core', muted: [], now });
 
-    const gathered = await gatherReport({ sources, detectors, preset: 'core', muted: [], now });
-
-    const inputs = files.map((f) => {
+    const inputs = discoverTranscripts([root]).map((f) => {
       const id = basename(f, '.jsonl');
-      return { sessionId: id, project: 'x', events: parse(f, readFileSync(f, 'utf8'), id).events };
+      return { sessionId: id, project: '-Users-x-app', events: parse(f, readFileSync(f, 'utf8'), id).events };
     });
+    expect(inputs).toHaveLength(3);
     const { standing: direct } = await computeStanding(inputs, detectors, { now: now.toISOString() });
 
-    // Compare the arithmetic, not the session set (gather sees every file).
-    expect(Object.keys(gathered.standing.wastedTokens).sort()).toEqual(
-      expect.arrayContaining(Object.keys(direct.wastedTokens).sort()),
-    );
-    for (const [reason, v] of Object.entries(direct.wastedTokens)) {
-      const g = gathered.standing.wastedTokens[reason];
-      expect(g).toBeDefined();
-      // gather covers a superset of sessions, so its figure cannot be smaller.
-      expect((g as { written: number }).written).toBeGreaterThanOrEqual(v.written);
-    }
+    // The same sessions on both sides, so every tally must agree exactly.
+    expect(direct.dimensions.find((d) => d.dimension === 'edit_retry')?.occurrences).toBe(2);
+    expect(Object.keys(direct.reasons).sort(), 'both refusal reasons are seen').toHaveLength(2);
+    expect(Object.keys(direct.wastedTokens).length, 'the cost arithmetic is exercised').toBeGreaterThan(0);
+    expect(gathered.standing.sessions).toBe(direct.sessions);
+    expect(gathered.standing.edits).toBe(direct.edits);
+    expect(gathered.standing.dimensions).toEqual(direct.dimensions);
+    expect(gathered.standing.reasons).toEqual(direct.reasons);
+    expect(gathered.standing.wastedTokens).toEqual(direct.wastedTokens);
   });
 });
 
