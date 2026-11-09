@@ -34,9 +34,7 @@ The model reads the conversation and tool calls, not your repository, so it can
 only contradict a claim with something in the turns. Quote anchoring checks that
 the cited words exist; it does not prove the conclusion drawn from them.
 
-There is no per-dimension frequency from a source this site cites. Across all
-model-read kinds, agreement with published labels is in
-[How accurate it is](/vibesenpai/work/measuring/).
+There is no per-dimension frequency from a source this site cites.
 
 ## Example conversation
 

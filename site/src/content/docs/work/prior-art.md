@@ -30,7 +30,7 @@ here quotes the turn it came from, so you can open the transcript and disagree.
 That is the difference between a report and evidence.
 
 **It publishes no accuracy figure.** Neither does anyone else in this space. We
-publish [165 of 232](/vibesenpai/work/measuring/) and call it *silver
+publish 165 of 232 and call it *silver
 agreement* rather than precision, because the labels we agree with were
 themselves model-produced.
 

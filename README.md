@@ -15,8 +15,7 @@ not score you and does not tell you how to work.
 
 **[Documentation](https://vibesenpai.github.io/vibesenpai/)** ·
 [What it shows you](https://vibesenpai.github.io/vibesenpai/start/what-it-is/) ·
-[What leaves your machine](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/) ·
-[How accurate it is](https://vibesenpai.github.io/vibesenpai/work/measuring/)
+[What leaves your machine](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/)
 
 ## Install
 

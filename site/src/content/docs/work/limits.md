@@ -16,7 +16,6 @@ it as a reason to look rather than a conclusion.
 
 Every accuracy figure on this site is *silver agreement* — agreement with labels
 that were themselves produced by a model, with human validation on a sample.
-[The details](/vibesenpai/work/measuring/).
 
 Until someone hand-labels a real set, this tool has no precision number and we
 will not invent one.

@@ -36,9 +36,7 @@ What it is not:
 - **Not a new preference.** If the developer brings a new requirement to work in
   progress, the lookback gate drops it as a suggestion.
 
-There is no per-dimension frequency from a source this site cites. Across all
-model-read kinds, agreement with published labels is in
-[How accurate it is](/vibesenpai/work/measuring/).
+There is no per-dimension frequency from a source this site cites.
 
 ## Example conversation
 

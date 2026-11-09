@@ -31,9 +31,7 @@ What it is not:
 - **Not a change of mind.** A new preference brought to work in progress is a
   suggestion, and the lookback gate drops it.
 
-There is no per-dimension frequency from a source this site cites. Across all
-model-read kinds, agreement with published labels is in
-[How accurate it is](/vibesenpai/work/measuring/).
+There is no per-dimension frequency from a source this site cites.
 
 ## Example conversation
 

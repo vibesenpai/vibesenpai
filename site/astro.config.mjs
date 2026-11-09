@@ -74,7 +74,6 @@ export default defineConfig({
           label: 'Trust',
           items: [
             { label: 'What leaves your machine', slug: 'start/sends-and-costs' },
-            { label: 'How accurate it is', slug: 'work/measuring' },
             { label: 'Limits', slug: 'work/limits' },
             { label: 'What we do not detect', slug: 'findings/not-detected' },
             { label: 'The graveyard', slug: 'work/graveyard' },

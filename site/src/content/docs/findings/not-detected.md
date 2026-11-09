@@ -37,7 +37,7 @@ number pretending to be an insight.
 ## Not yet
 
 A gold evaluation tier. Everything published is agreement with model-generated
-labels — [silver, not gold](/vibesenpai/work/measuring/) — and there is no
+labels — silver, not gold — and there is no
 precision figure for this tool until someone hand-labels a real set.
 
 More harnesses. The parser layer is a registry; one parser exists.

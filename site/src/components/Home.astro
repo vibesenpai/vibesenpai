@@ -15,7 +15,7 @@ const values = [
     points: [
       ['Your words first, then the agent’s', `${base}/start/pane/`],
       ['The conversation around the cited turn', `${base}/start/first-finding/`],
-      ['No grades and no percentages', `${base}/work/measuring/`],
+      ['No grades and no percentages', `${base}/start/what-it-is/`],
     ],
     shot: 'finding',
     alt: 'The vibesenpai pane beside the chat, with one finding open: the developer’s words, the cited turns, and the conversation around them.',
@@ -110,7 +110,7 @@ const faq = [
     </div>
     <div class="actions rise r4">
       <a class="primary" href={`${base}/start/install/`}>Get started</a>
-      <a class="quiet" href={`${base}/work/measuring/`}>How accurate it is</a>
+      <a class="quiet" href="#dimensions">What it looks for</a>
     </div>
     <div class="install rise r5">
       <pre><code>{install}</code></pre>
@@ -178,7 +178,7 @@ const faq = [
     </div>
     <p class="measured">
       Measured, not claimed: the edit-retry check fired on 380 of 1,139 real sessions, with no false positives in a hand check.
-      We also publish <a href={`${base}/work/measuring/`}>how accurate the model reads are</a> and <a href={`${base}/work/graveyard/`}>the ten detectors we built and deleted</a>.
+      We also publish <a href={`${base}/work/graveyard/`}>the ten detectors we built and deleted</a>, with the numbers.
     </p>
   </section>
 
