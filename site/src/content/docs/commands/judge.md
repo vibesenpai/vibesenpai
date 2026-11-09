@@ -4,7 +4,7 @@ description: Turns the model reads on or off, and shows how far they have got an
 ---
 
 Turns the model reads on or off, and shows how far they have got and what they have spent.
-It is the one switch for spending.
+It is the one switch for spending. The judge is what does the model reads.
 
 ```
 /vibesenpai:judge on
@@ -19,16 +19,15 @@ run whether the model reads are on or off.
 
 | | |
 |---|---|
-| `off` | stops the model reads. Prints `judge disabled. nothing further will be sent.` |
-| `on` | shows what one pass would send, turns the model reads back on, and prints `judge enabled. it runs detached, after your turn ends.` It also lifts a hold after repeated failures ([below](#when-it-fails)) |
+| `off` | stops the model reads. Prints `judge disabled. nothing further will be sent.` The free checks keep running |
+| `on` | turns the model reads back on. It prints what one pass would send (sessions and tokens of transcript, the fixed overhead per call, the batch ceiling and the daily limits), then `judge enabled. it runs detached, after your turn ends.` It also lifts a hold after repeated failures ([below](#when-it-fails)) |
 | *(nothing)* | shows the status |
 
 ## Status
 
 With no argument it shows what has been read, what is left, and today's use. From a demo run
-over the public test data of [claude-code-log](https://github.com/daaain/claude-code-log) and
-[claude-code-sessions](https://github.com/frederick-douglas-pearce/claude-code-sessions) (both
-MIT), before any model read:
+over the public test data of
+[claude-code-log](https://github.com/daaain/claude-code-log) (MIT), before any model call:
 
 ```
 judge · enabled · model haiku
@@ -41,14 +40,19 @@ judge · enabled · model haiku
   today      0 of 2.0M tokens
 ```
 
-After calls have been made, it adds what they cost. From the same demo run:
+17 of the 101 transcripts are empty, so they count as read before any call is made.
+
+After calls have been made, it adds what they cost. From the same demo run, once every session
+had been read:
 
 ```
   spent      11 call(s) · 576k in · 61k out · $0.08
   dollars are Claude Code's own figure at API prices; on a subscription it is plan usage, not a bill.
 ```
 
-When the model reads are off, it adds `disabled — nothing will be read or sent.`
+When the model reads are off and sessions are still waiting, it prints
+`disabled — nothing will be read or sent.` in place of the line about reading in the background.
+The free checks keep running.
 
 ## When it runs
 
@@ -65,8 +69,8 @@ A live session is read again after about 50 new turns. Several sessions share on
 | tokens a day | 2,000,000, in and out, per local day | reading stops until tomorrow |
 | catch-up | 200 past sessions | the first time, it reads up to 200 past sessions, newest first. After that, only new ones |
 
-Past sessions older than the catch-up are not read. The Health tab counts them on its **Older**
-row. No slash command reads them.
+Past sessions older than the catch-up are not read automatically, to keep the first-day spend
+bounded. The Health tab counts them on its **Older** row.
 
 Both limits are in `judge-settings.json` ([Reference](/vibesenpai/reference/#model-read-settings)).
 
@@ -82,12 +86,12 @@ While a job is failing, each session start says so in one line, and so does the 
 ## What it uses
 
 - **Model:** Claude Haiku by default.
-- **Account:** your own `claude` CLI, as `claude -p`, on the login or API key Claude Code
-  already uses. There is no API key or service of ours.
+- **Account:** your own Claude Code account (plan or API key), through the `claude` CLI as
+  `claude -p`. There is no API key or service of ours.
 - **What it sends:** a redacted part of each session. If redaction would still change anything
   just before a call, the call is not made.
 
-[What it sends, and what it costs](/vibesenpai/start/sends-and-costs/) has the details.
+[What leaves your machine](/vibesenpai/start/sends-and-costs/) has the details.
 [The judge pipeline](/vibesenpai/architecture/judge/) explains how the reads work.
 
 ## Turning everything off

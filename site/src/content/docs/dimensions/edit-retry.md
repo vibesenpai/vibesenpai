@@ -21,7 +21,8 @@ refused.
 
 The agent called an edit tool, the tool itself refused the call, and the agent
 edited the same file again before your next prompt. The agent is working against
-the edit tool's rule that the text to replace must match exactly.
+one of the edit tool's rules, such as reading the file first or matching the
+text exactly.
 
 What it is not:
 
@@ -31,22 +32,8 @@ What it is not:
   tool did its job. The retry is what makes it a finding.
 - **Not a retry after a new instruction.** The attempt ends at your next prompt.
 
-Over 1,139 sessions from the public SWE-chat corpus, 380 sessions (33.4%) had a
-finding, with 927 retries in all. The findings read by hand (16 from that corpus
-and all 12 from the pinned test corpus) had no false positives
-(docs/dimensions.md). How
-often each reason appeared:
-
-| Reason | Retries |
-|---|---|
-| the file wasn't read first | 528 |
-| the text didn't match | 224 |
-| the file changed after it was read | 96 |
-| the text matched several places | 59 |
-| the edit changed nothing | 8 |
-| the call was malformed | 8 |
-| the file doesn't exist | 3 |
-| reason unknown | 1 |
+The most common reasons are an edit to a file that wasn't read first, and text that didn't
+match. How often it fires is on [How it was measured](/vibesenpai/architecture/measurements/#the-free-checks).
 
 ## Example conversation
 
@@ -113,15 +100,18 @@ file doesn't exist, the call was malformed, and reason unknown.
 edit to a file that was not read, which is why these were refused. A rule asking
 for it would describe what already happens. So the most common reason that has
 a fix is offered instead, even when "not read first" is more common. Only when
-no other reason has a fix does the report say "Nothing to change", with the
-tokens those refusals cost.
+no other reason has a fix is there no fix: the pane shows the finding with no
+fix, and the HTML report says "Nothing to change", with the tokens those
+refusals cost.
 
-In the demo data, "the text didn't match" is the most common reason with a fix,
-so the pane offers "Re-read right before editing if anything may have changed
-the file."
+In the public test data, "the text didn't match" is the most common reason with
+a fix, so the pane offers "Re-read right before editing if anything may have
+changed the file."
 
-**In the HTML report** (`/vibesenpai:report`), each fix also has a prompt for one
-session, with no Apply. For example: "For the rest of this session: before
+### Printed in the HTML report only
+
+Each fix also has a prompt for one session, with no Apply. It appears in
+`/vibesenpai:report`. For example: "For the rest of this session: before
 editing, re-read the exact region you are about to change if anything may have
 altered it since you last read it — a linter, a formatter, another tool, or your
 own earlier edit."

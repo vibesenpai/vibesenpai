@@ -708,8 +708,8 @@ export const register: Register = on => {
           })}
           {v.cache.count > 0 && (
             <Box flexDirection="column" marginTop={1}>
-              <Button key="block:cache" plain label={`${caret('block:cache')} Cache rebuilt`} onPress={() => toggle($, 'block:cache')}>
-                <Text weight="bold" color="claude">{caret('block:cache')} Cache rebuilt</Text>
+              <Button key="block:cache" plain label={`${caret('block:cache')} Cache rebuilds`} onPress={() => toggle($, 'block:cache')}>
+                <Text weight="bold" color="claude">{caret('block:cache')} Cache rebuilds</Text>
               </Button>
               <Text dimColor>  {v.cache.count} time{v.cache.count === 1 ? '' : 's'} · {human(v.cache.tokens)} tokens written again</Text>
               {isOpen('block:cache') && v.cache.largest.map((r) => (
@@ -788,7 +788,7 @@ export const register: Register = on => {
           {line('Judge', state('judge'), `${data.read} of ${data.total} sessions read`)}
           {today !== undefined && line('Today', `${human(today.tokens)} of ${human(today.limit)} tokens${today.tokens >= today.limit ? ' · budget reached, continues tomorrow' : ''}`)}
           {sp?.allTime !== undefined && sp.allTime.calls > 0 && line('Spent', spendText(sp.allTime), ...(sp.allTime.usdMicros !== undefined ? [costNote(subscribed ? 'subscription' : sp.billing)] : []))}
-          {sp !== undefined && sp.older > 0 && line('Older', `${sp.older} past session${sp.older === 1 ? '' : 's'} not read`, 'vibesenpai judge --backlog reads them')}
+          {sp !== undefined && sp.older > 0 && line('Older', `${sp.older} past session${sp.older === 1 ? '' : 's'} not read`)}
           {sp !== undefined && line('Model reads', sp.enabled ? 'on · /vibesenpai:judge off stops them' : 'off · /vibesenpai:judge on')}
           <Box flexDirection="row">
             <Box width={14} flexShrink={0}><Text dimColor>Dismissed</Text></Box>

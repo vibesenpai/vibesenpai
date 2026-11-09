@@ -5,12 +5,6 @@ description: Two commands in Claude Code, what happens the first time, and how t
 
 How to install the plugin, what happens after you do, and how to update it or turn it off.
 
-:::caution[Not published yet]
-No release has been published. The plugin runs from a clone, but it has not been tested
-through a real `/plugin install`. Until it has, [Contribute](/vibesenpai/contribute/) has the
-from-source path.
-:::
-
 ## Install
 
 In Claude Code:
@@ -26,8 +20,7 @@ own hooks and commands, and your `~/.claude/settings.json` is not touched.
 ## Requirements
 
 - **Node 22.13 or later.** The plugin runs TypeScript directly, with no build step.
-- **Claude Code.** A release ships as a zip on a GitHub release. Claude Code added support for
-  that kind of marketplace source in 2.1.224; older versions have not been tested.
+- **Claude Code 2.1.224 or later.**
 
 ## What happens the first time
 
@@ -36,7 +29,7 @@ When your next session starts, a one-time notice says what the model reads will 
 ```
 vibesenpai is on. Starting when this turn ends, it reads your sessions in the background
 with Claude Haiku on your plan or API key: up to 200 recent past sessions first,
-then each new one, about 60k tokens a session and at most 2.0M tokens a day.
+then each new one, at most 2.0M tokens a day.
 Nothing has been spent yet.
 ```
 
@@ -51,16 +44,16 @@ The notice is shown once.
 
 After that, three things happen on their own:
 
-- **The free checks** run in the background, at most every 10 minutes. They are started by
-  the hooks when a session starts and when a turn ends. They spend nothing.
+- **The history pass** runs the free checks in the background, at most every 10 minutes. The
+  hooks start it when a session starts and when a turn ends. It spends nothing.
 - **The model reads** start when a turn ends. They read up to 200 of your most recent past
-  sessions first, then each new session as it grows, within 2M tokens a day.
+  sessions first, then each new session as it grows, within about 2M tokens a day.
 - **The pane** shows what has been found so far when you open it with
-  [`/vibesenpai:insights`](/vibesenpai/commands/insights/). It fills in as the background
-  passes finish.
+  [`/vibesenpai:insights`](/vibesenpai/commands/insights/). It fills in as the history pass and
+  the model reads finish.
 
 What is sent to the model, and what it costs, is on
-[What it sends, and what it costs](/vibesenpai/start/sends-and-costs/).
+[What leaves your machine](/vibesenpai/start/sends-and-costs/).
 
 ## Update
 
@@ -79,7 +72,7 @@ that, turn on auto-update for this marketplace under **Marketplaces**.
 | path | what |
 |---|---|
 | `~/.claude/projects/` | Claude Code's transcripts. Read in place; never changed, never copied |
-| `~/.local/share/vibesenpai` | its own store: findings, your answers, settings, reports |
+| `~/.local/share/vibesenpai` (or `$XDG_DATA_HOME/vibesenpai`) | its own store: findings, your answers, settings, reports |
 | `~/.claude/settings.json` | never written |
 
 Every file in the store is listed in [Reference](/vibesenpai/reference/#files).

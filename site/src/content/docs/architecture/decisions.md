@@ -3,15 +3,18 @@ title: Design decisions
 description: The choices that shaped everything else, each with the cost it carries.
 ---
 
+Dnn numbers refer to entries in
+[`DECISIONS.md`](https://github.com/vibesenpai/vibesenpai/blob/main/DECISIONS.md)
+in the repository.
+
 This page lists the decisions that, if reversed, would make vibesenpai a
 different tool. Each states why it was made and what it costs. The full record,
-including reversed decisions, is in
-[`DECISIONS.md`](https://github.com/vibesenpai/vibesenpai/blob/main/DECISIONS.md).
+including reversed decisions, is in `DECISIONS.md`.
 
 ## Never copy a transcript
 
 **Why:** a copy of a file holding a leaked secret is a second exposure, in a
-place the user never chose.
+place you never chose.
 
 **Cost:** no history beyond Claude Code's own retention. When it deletes a
 session, it is gone here too.
@@ -19,11 +22,11 @@ session, it is gone here too.
 
 ## Structure decides; text may only label
 
-**Why:** three detectors built on text produced 5 true positives against about
-25 false positives across 1,139 public sessions.
+**Why:** detectors that read text did not work
+([Contribute](/vibesenpai/contribute/#how-do-i-add-a-detector)).
 
 **Cost:** whole kinds of problem are out of reach of the free checks, which is
-why the judge exists.
+why the model reads exist.
 [The two tiers](/vibesenpai/architecture/two-tiers/)
 
 ## Each detector declares its own scope
@@ -32,9 +35,8 @@ why the judge exists.
 is a different question from the span a free check should look at. Running
 checks per window split evidence that belonged together.
 
-**Cost:** the runner dispatches four scopes. One, `project`, is declared but
-refused with an error until stored history supports it, rather than silently
-checking the wrong span.
+**Cost:** the runner handles several scopes (`window`, `thread`, `session`), and
+each detector must declare the right one.
 
 ## Evidence is keyed by `uuid`, never by position
 
@@ -61,19 +63,18 @@ at a turn.
 **Cost:** numbers such as how much context is re-read, or compaction volume, appear only as
 context beside a finding.
 
-## The summary appears at session start, as a `systemMessage` (D58)
+## The summary appears at session start, in a message to you (D58)
 
-**Why:** a `systemMessage` reaches you and not the model, so showing it does not
-change the session being measured. `additionalContext` is never used: it
-reaches the model.
+**Why:** the summary is a message shown to you, not the agent, so showing it
+does not change the session being measured. Nothing is ever added to what the
+agent reads.
 
 **Cost:** one moment to be seen. Nothing is shown mid-session.
 
 ## The plugin is the only way in (D64)
 
 **Why:** `/plugin install` declares the hooks and commands from the manifest.
-The old installer, which merged entries into `~/.claude/settings.json`, was
-deleted, and with it the only code that wrote your config.
+Nothing in vibesenpai writes `~/.claude/settings.json`.
 
 **Cost:** no install path outside the plugin. The CLI is the engine the plugin
 runs; it is not typed by hand.
@@ -85,12 +86,12 @@ would come back. A dismissal is stored as ids and fixed values only, and every
 view that hides findings says how many.
 
 **Cost:** the judge still reads dismissed findings, or it would report the same
-episode again under a new id.
+moment again under a new id.
 
 ## Cache numbers appear only beside a rebuild (D66)
 
 **Why:** cache totals and hit rates are ordinary. A **rebuild**, where the
-cached prefix is thrown away and written again, is not, so it is shown with its
+cached conversation is thrown away and written again, is not, so it is shown with its
 turn, the gap before it, and what was written.
 
 **Cost:** no usage dashboard. A session with no rebuild shows no cache numbers.
@@ -123,7 +124,7 @@ remains: `/vibesenpai:insights`, `/vibesenpai:judge on|off` (the one switch for
 spending) and `/vibesenpai:report`. Apply drafts a request into the prompt box;
 your Enter is the yes.
 
-**Cost:** a finding's own fix appears after the next standing pass, not the
+**Cost:** a finding's own fix appears after the next history pass, not the
 moment it is judged. Until then its dimension's fix shows.
 
 ---

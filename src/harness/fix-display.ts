@@ -18,7 +18,7 @@ export const APPLY_IN_PANE = 'To apply it: /vibesenpai:insights, then Apply unde
 /** Why there is nothing to apply here: a printed-only hook, or a fix for another project. */
 export function applyRefusal(x: FindingFix, projects: string[]): string {
   return !x.applicable
-    ? 'Printed only: a Stop hook can hold a turn open up to 8 times in a row.'
+    ? 'A Stop hook has no Apply: it needs your paths or test command filled in, and an unfinished one would block every turn.'
     : `This happened in ${projects.map(projectLabel).join(' and ')}. Apply it from a session there.`;
 }
 

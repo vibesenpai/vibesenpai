@@ -16,8 +16,7 @@ It takes no arguments. The pane's **Open full report** button does the same.
 ## What it prints
 
 From a demo run over the public test data of
-[claude-code-log](https://github.com/daaain/claude-code-log) and
-[claude-code-sessions](https://github.com/frederick-douglas-pearce/claude-code-sessions) (both MIT):
+[claude-code-log](https://github.com/daaain/claude-code-log) (MIT):
 
 ```
   84 sessions · 20 findings — opened in your browser
@@ -58,4 +57,4 @@ directory, so it cannot end up in a commit by accident.
 | | |
 |---|---|
 | [`/vibesenpai:insights`](/vibesenpai/commands/insights/) | the same findings in the pane, with Apply |
-| [Reference](/vibesenpai/reference/#files) | the store, and what losing each file costs |
+| [Reference](/vibesenpai/reference/#files) | the store, and what happens if you delete each file |

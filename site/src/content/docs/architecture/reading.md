@@ -1,6 +1,6 @@
 ---
 title: Reading a transcript
-description: Why nothing is ever copied, and why walking the parentUuid tree would have been a silent bug.
+description: Why nothing is copied, and why events are read in file order.
 ---
 
 This page explains how vibesenpai reads Claude Code's transcript files: why it
@@ -23,9 +23,7 @@ chose, which you never asked for. So:
   each time, redacted, and not kept.
 
 **The cost:** no history beyond Claude Code's own retention. When Claude Code
-deletes a transcript, that session is gone here too. An opt-in copy
-was considered and rejected: it would bring back a copy writer, a cleanup loop
-and file-permission checks that not copying avoids.
+deletes a transcript, that session is gone here too.
 
 ## When are secrets removed?
 
@@ -52,11 +50,10 @@ ordinary. Walking only the longest path drops one of them, including its
 `tool_result`.
 
 A `tool_result` is where Claude Code records whether a call failed and who
-refused it, and `edit_retry` reads exactly that. Dropping them would not crash
+refused it, and [Edit retry](/vibesenpai/dimensions/edit-retry/) reads exactly
+that. Dropping them would not crash
 anything. It would produce wrong findings with no visible error.
 
 So events are read in **file order**. The tree is used only for attributing
 subagent work (a sidechain, in Claude Code's terms): a subagent's records form
-one subtree, so its topmost ancestor identifies the call that started it. The
-pinned public corpus that `npm run verify:corpus` checks has 712 sidechain
-events (`scripts/corpus.json`).
+one subtree, so its topmost ancestor identifies the call that started it.

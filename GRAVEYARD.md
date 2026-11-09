@@ -397,9 +397,28 @@ whoever was running them. So:
   quote-anchor fix (16% → 20% claim-level) is the one result from that week that
   needs no error bar.
 
-Still open and recorded so it is not re-discovered: **`overreach` scores 1/38,
-1/38 and 2/38** across three arms and two models. Established as broken rather
-than untuned. Retiring a dimension is a product decision, so it stays for now.
+`overreach` scored **1/38, 1/38 and 2/38** as a main kind, across three arms and
+two models. This was first recorded as broken.
+
+**Corrected 2026-11-08: the moments are found; the label is a neighbour's.**
+Re-scored from the saved two-stage run (`full-ts-pos.json`, code 83e8939) with
+no model calls, against the paper's `misalignments.json`:
+
+```
+  38 overreach episodes on judged sessions
+   3  caught at the right turns as overreach
+  25  caught at the right turns under another kind
+       (misread_intent 15, constraint_violation 8, inaccurate_self_report 8, other 5 findings)
+   8  session had findings, none near the episode
+   2  nothing found in the session
+```
+
+37 of the 38 also carry the paper's S2 (misread) or S3 (constraint) label; one is
+S4 alone. So overreach in this set is almost always a second label, and the
+judge names the first. The single-pass run and var-2/var-3 show the same split.
+Not measured: these runs predate secondary kinds, so how often overreach now
+appears as `also overreach` is unknown until a re-run. The push-back clause could
+not be tested here: the paper's `resolver` field is empty for 34 of the 38.
 
 ## The `settings.json` installer (585 lines)
 

@@ -4,8 +4,10 @@ description: Extract without the categories, label without the transcript, ancho
 ---
 
 This page explains how the judge turns a session into findings, and what stops
-a wrong or leaky result. The judge is one model, Claude Haiku by default,
-called through your own `claude` CLI. The `Stop` hook starts it in the
+a wrong or leaky result. The judge is what does the model reads. It is one
+model, Claude Haiku by default
+([the `model` setting](/vibesenpai/reference/#model-read-settings)), called
+through your own `claude` CLI. The `Stop` hook starts it in the
 background ([Phases of a run](/vibesenpai/architecture/phases/)).
 
 ![The two judge stages](../../../diagrams/judge-stages.svg)
@@ -15,13 +17,13 @@ background ([Phases of a run](/vibesenpai/architecture/phases/)).
 Each batch makes two calls to the same model:
 
 - **Stage A never sees the categories.** It reads the sessions and describes
-  each episode where the collaboration broke down: what was said, what
+  each moment where the collaboration broke down: what was said, what
   diverged, and a verbatim quote.
 - **Stage B never sees the transcript.** It reads stage A's records and gives
   each a dimension.
 
-Splitting them raised session-level agreement from **129/232 to 165/232**
-([docs/eval.md](https://github.com/vibesenpai/vibesenpai/blob/main/docs/eval.md)).
+Splitting them made the findings agree with the labelled research set on more
+sessions ([How it was measured](/vibesenpai/architecture/measurements/#the-model-reads)).
 Stage B is cheap: a record is a few hundred tokens, not a whole session.
 
 The output puts `reasoning` **before** `dimension`, so the model reasons toward
@@ -38,12 +40,12 @@ found is **discarded**.
 
 ## What is the lookback gate?
 
-A `misread_intent` or `constraint_violation` finding must cite where the
+A misread intent, constraint violation or other finding must cite where the
 expectation was set **before** the agent acted:
 
 - an earlier prompt
 - an instruction Claude Code loaded (a `CLAUDE.md` or a rule file)
-- the developer referring to an earlier decision
+- you referring to an earlier decision
 
 Stage B is shown the session's earlier prompts and loaded instructions for
 this. The gate checks the cited quote against them. A finding with no earlier
@@ -74,7 +76,7 @@ Progress and cost are kept apart:
   for.
 - **The ledger moves only with the findings**, in the same transaction. If
   stage B fails, those bytes are read again on the next pass. A failure costs
-  tokens again; it never loses episodes.
+  tokens again; it never loses findings.
 
 ## Where is redaction applied?
 

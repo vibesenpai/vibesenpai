@@ -172,7 +172,7 @@ export function disclosure(settings: { dailyTokens: number; catchUp: number }, e
     '',
     'vibesenpai is on. Starting when this turn ends, it reads your sessions in the background',
     `with Claude Haiku ${api ? 'on your API key' : 'on your plan or API key'}: up to ${settings.catchUp} recent past sessions first,`,
-    `then each new one, about 60k tokens a session and at most ${human(settings.dailyTokens)} tokens a day.`,
+    `then each new one, at most ${human(settings.dailyTokens)} tokens a day.`,
     'Nothing has been spent yet.',
     '',
     '  /vibesenpai:insights         what it has found',

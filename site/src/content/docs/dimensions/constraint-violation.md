@@ -45,7 +45,7 @@ What it is not:
 ## Example conversation
 
 :::note[Illustrative]
-The demo data has no constraint violation. This exchange was written for this
+The public test data has no constraint violation. This exchange was written for this
 page in the shape of a real transcript.
 :::
 
@@ -65,12 +65,12 @@ What the finding records:
 | Cited turns | 11, 12 |
 
 The pane shows your quote as the headline, then the conversation around the
-cited turns, then **Why**. Where the rule was established is stored with the
-finding but not shown in the pane.
+cited turns, then **Why**. Where the rule was established is not shown in the
+pane; the HTML report shows it.
 
 ## How it's detected
 
-A model reads a redacted copy of the session, finds the episode, anchors it to
+A model reads a redacted copy of the session, finds the moment, anchors it to
 a quote, and names its kind. The shared steps are on
 [The judge pipeline](/vibesenpai/architecture/judge/).
 
@@ -81,7 +81,7 @@ where the rule was set before the agent acted:
 - a line of a loaded instruction file;
 - or your own words saying it was settled before.
 
-The code then checks that quote against what was sent. With no source, or a
+That quote is then checked against what was sent. With no source, or a
 quote that cannot be found, the finding is dropped.
 
 ![How a constraint violation is labelled and gated](../../../diagrams/constraint-violation.svg)
@@ -95,11 +95,10 @@ Which fix the pane shows first is explained in
 
 Built from the finding's evidence. The first one that fits is offered.
 
-**Claude Code asks you before this command runs, in every mode:**
-- When: you forbade a command, and the agent ran it.
-- Adds: `"Bash(git push *)"` (for the example above) to `permissions.ask`.
-- Lands in: `.claude/settings.local.json`.
-- Apply: yes.
+**Claude Code asks you before this command runs, in every mode:** when you
+forbade a command and the agent ran it
+([details](/vibesenpai/dimensions/#a-command-you-forbade)). For the example
+above, it adds `"Bash(git push *)"`.
 
 **Claude Code refuses an edit to this path and tells the agent why:**
 - When: the agent wrote to a path outside the project.
@@ -152,11 +151,11 @@ These have no Apply. They appear in `/vibesenpai:report`.
 
   When the conversation was compacted before the cited turn, this is replaced by
   a `SessionStart` hook with the `compact` matcher that runs
-  `cat .claude/standing.md`, so standing instructions are read again after each
-  compaction.
+  `cat .claude/standing.md` (a file you create with your standing instructions),
+  so they are read again after each compaction.
 - **A prompt for one session:** "For the rest of this session, before any edit or
   command: check it against every constraint stated earlier in this
   conversation, and say which one you checked against."
 
-A `Stop` hook stays printed only: one that blocks with an unfilled placeholder
-would stop every turn.
+A Stop hook has no Apply: it needs your paths or test command filled in, and an
+unfinished one would block every turn.

@@ -75,7 +75,7 @@ export function cmdJudge(a: Argv): number {
       console.log(`  today      ${human(Math.max(dailyTokens - left, 0))} of ${human(dailyTokens)} tokens${left <= 0 ? ' · budget reached, continues tomorrow' : ''}`);
     }
     const waiting = waitingOnRequest(config.archive, state, sessionSizes(config.sources));
-    if (waiting > 0) console.log(`  older      ${plural(waiting, 'session')} not read · --backlog reads them`);
+    if (waiting > 0) console.log(`  older      ${plural(waiting, 'session')} not read`);
     if (state.usage.calls > 0) {
       const spend = withStore(config.archive, readSpend);
       const usd = spend?.usdMicros === undefined ? '' : ` · ${dollars(spend.usdMicros)}`;
@@ -206,6 +206,6 @@ export function cmdJudge(a: Argv): number {
   // Enabling is also the explicit act that releases a hold after repeated paid failures.
   releaseHold(config.archive, 'judge');
   console.log('\n  judge enabled. it runs detached, after your turn ends.');
-  console.log('  `vibesenpai judge --disable --apply` stops it.');
+  console.log('  /vibesenpai:judge off stops it.');
   return 0;
 }

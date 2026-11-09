@@ -1,7 +1,7 @@
 flowchart LR
   P("previous request<br/>read 20k+ from cache?") -- yes --> H("this one read under half,<br/>and wrote to cache?")
   H -- yes --> CP("a compaction<br/>in between?")
-  CP -- no --> RB["Cache rebuilt<br/>shown beside findings"]
+  CP -- no --> RB["a rebuild<br/>listed under Cache rebuilds"]
   P -- no --> N["not a rebuild"]
   H -- no --> N
   CP -- yes --> N

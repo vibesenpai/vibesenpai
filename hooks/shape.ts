@@ -127,7 +127,9 @@ const count = (b: Block): number => b.items.reduce((n, i) => n + i.occurrences, 
 export const blockCount = count
 
 /** `misread_intent` → `misread intent`. */
-export const words = (dimension: string): string => dimension.replace(/_/g, ' ')
+// Names a reader sees; the key stays `redundant_call`.
+const NAMES: Record<string, string> = { redundant_call: 'repeated call' }
+export const words = (dimension: string): string => NAMES[dimension] ?? dimension.replace(/_/g, ' ')
 
 /** Cut to `max` characters on one line, with an ellipsis when cut. */
 export function clip(s: string, max: number): string {

@@ -186,8 +186,8 @@ export function cmdDoctor(a: Argv): number {
   console.log(`  network    ${judgeOn ? 'the judge is ON and sends session content' : 'no network calls, with one opt-in exception'}`);
   if (judgeOn) {
     console.log('             redacted transcript text leaves this machine when the judge');
-    console.log('             runs, and only when you run a command. --disable to stop it.');
-    console.log('             turn it off:  vibesenpai judge --disable --apply');
+    console.log('             runs, and only when you run a command.');
+    console.log('             turn it off:  /vibesenpai:judge off');
   } else {
     console.log('             the judge would send redacted session content to a model, and');
     console.log('             it is OFF. Nothing else reaches the network during analysis;');

@@ -10,7 +10,7 @@ and nothing had changed in between. The finding lists the repeated calls.
 
 | | |
 |---|---|
-| In the pane | Redundant call |
+| In the pane | Repeated call |
 | Key | `redundant_call` |
 | Tier | free check |
 | On by default | no. It is in the `standard` preset; the default is `core`. Set `VIBESENPAI_PRESET=standard` or `"preset": "standard"` in the config file ([Reference](/vibesenpai/reference/)). |
@@ -31,14 +31,12 @@ What it is not:
 - **Not an edit.** An edit's output is the file's new contents, so the same
   output does not mean nothing changed. Edit tools are left out.
 
-It is off by default because it is rare, not because it is imprecise. Over
-1,139 sessions from the public SWE-chat corpus, it appears in 0.4% of sessions
-(docs/findings-frequency.md).
+Off by default, because it is rare ([How it was measured](/vibesenpai/architecture/measurements/#the-free-checks)).
 
 ## Example conversation
 
 :::note[Illustrative]
-The demo data has no redundant call, even with the `standard` preset on. This
+The public test data has no repeated call, even with the `standard` preset on. This
 sequence was written for this page in the shape of a real transcript.
 :::
 
@@ -71,11 +69,9 @@ its output, its time, and the edits and prompts around it.
 A command that clips its own output, such as `| head -30`, leaves only the start
 to compare. Such a finding is downgraded to `high`, never dropped.
 
-![How a redundant call is found](../../../diagrams/redundant-call.svg)
+![How a repeated call is found](../../../diagrams/redundant-call.svg)
 
 ## Applicable fixes
 
-**There is no fix for this dimension.** Re-reading a file is cheap and often
-correct, so there is nothing applicable to offer. The pane shows the finding
-with no fix. The HTML report says: "No artifact exists for this one. Saying so
-is better than manufacturing a tip that would not survive being asked "why"."
+There is no fix: re-reading can be correct, so nothing is offered. The pane
+shows the finding with no fix, and the HTML report prints that sentence.

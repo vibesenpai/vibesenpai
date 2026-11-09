@@ -26,17 +26,14 @@ In Claude Code:
 /plugin install vibesenpai@vibesenpai
 ```
 
-It needs Node 22.13 or later, which Claude Code already uses, and nothing else.
-
-> **Not published yet.** The plugin runs from a clone, but it has not been
-> released through `/plugin install`. Until it is,
-> [Contributing](#contributing) has the from-source path.
+It needs Node 22.13 or later on your PATH, and Claude Code 2.1.224 or later.
 
 ## Getting started
 
 1. **Keep working.** The free checks read every session. Model reads run in the
-   background after a turn ends, within 2M tokens a day on your own Claude Code
-   login. A one-time notice at session start says so.
+   background after a turn ends, within about 2M tokens a day, on your own
+   Claude Code account (plan or API key). A one-time notice at session start
+   says so.
 2. **Open the pane.** `/vibesenpai:insights` opens it beside the chat. Each
    finding leads with your own words and the turns where it went wrong.
 3. **Apply a fix you agree with.** Apply drafts the change into your prompt box.
@@ -59,11 +56,11 @@ now**; or `claude plugin update vibesenpai@vibesenpai` from a terminal.
 
 Your transcripts are read where Claude Code keeps them and are never copied.
 With model reads on, a redacted, length-capped copy of session text goes to
-Claude Haiku through your own Claude Code login, and the send stops if
-redaction left anything behind. Session text includes what the agent's tools
-returned, such as files it read and command output, so code from a session can
-be part of it. Your repository is never opened, and your files are never
-written. [The full terms](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/).
+Claude Haiku on your own Claude Code account (plan or API key), and the send
+stops if redaction left anything behind. Session text includes what the agent's
+tools returned, such as files it read and command output, so code from a
+session can be part of it. vibesenpai never opens your repository or writes
+your files; a fix is made by the agent, after you press Enter. [The full terms](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/).
 
 ## Contributing
 
@@ -78,8 +75,9 @@ npm test                       # the whole suite, no network
 npm run cli -- insights        # run against your own sessions
 ```
 
-There are no runtime dependencies, on purpose. `npm run verify:corpus` is the
-gate that catches drift; it fetches the public corpus it needs.
+There are no runtime dependencies, on purpose. `npm run verify:corpus` fails if
+any published count changes or anything leaks; it fetches the public corpus it
+needs.
 
 ## License
 

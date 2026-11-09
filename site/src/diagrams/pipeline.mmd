@@ -14,10 +14,10 @@ flowchart LR
 
   P -. "redacted here,<br/>at construction" .-> P
 
-  C["catalog<br/><small>offsets + hashes</small>"]
+  C["index.json<br/><small>optional: offsets + hashes</small>"]
   R -. "scan / doctor only" .-> C
 
-  J["the judge<br/><small>background, from the Stop hook</small>"]
+  J["the model reads<br/><small>background, from the Stop hook</small>"]
   P -- "redacted text,<br/>within limits" --> J
   S[("store.db<br/><small>derived, redacted</small>")]
   J --> S --> F

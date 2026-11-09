@@ -1,10 +1,10 @@
 ---
 title: /vibesenpai:insights
-description: Opens the pane beside the chat, with what has been found, the fixes, and the background jobs' health.
+description: Opens the pane beside the chat, with what has been found, the fixes, and the health of the history pass and the model reads.
 ---
 
 Opens the insights pane beside the chat: your findings, the fixes you can apply, and the health
-of the background jobs.
+of the history pass (which runs the free checks) and the model reads.
 
 ```
 /vibesenpai:insights
@@ -14,7 +14,7 @@ It takes no arguments.
 
 ## What it does
 
-It shows what the background passes have already found. It sends nothing to a model and
+It shows what the history pass and the model reads have already found. It sends nothing to a model and
 spends no tokens; the model reads run only when a turn ends.
 
 ![The session-start summary from vibesenpai, then /vibesenpai:insights and the reply: Insights opened beside the chat.](../../../assets/docs/insights-open.png)
@@ -24,15 +24,15 @@ there is something new. [A tour of the pane](/vibesenpai/start/pane/) describes 
 
 ## Where no pane can open
 
-Claude Code cannot always draw a pane. Then the command prints a text version instead:
+If Claude Code cannot place a pane, the command prints a text version instead:
 
 1. the session you are in
 2. your history
 3. how far the model reads have got
 
 From a demo run over the public test data of
-[claude-code-log](https://github.com/daaain/claude-code-log) and
-[claude-code-sessions](https://github.com/frederick-douglas-pearce/claude-code-sessions) (both MIT):
+[claude-code-log](https://github.com/daaain/claude-code-log) (MIT), after the model reads had
+finished:
 
 ```
   This session · 0 edits

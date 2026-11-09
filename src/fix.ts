@@ -316,9 +316,7 @@ export function recommend(
       evidence: `${plural(n, 'time')} across your sessions`,
       because:
         dimension === 'other'
-          ? 'This is the escape hatch: a real problem none of the four ' +
-            'dimensions describes. There is nothing to recommend yet — the ' +
-            'point is to collect these until a pattern is visible' +
+          ? 'There is no fix for the kind; an `other` finding may still have its own fix' +
             (descriptors.length > 0 ? `. So far: ${descriptors.join('; ')}` : '.')
           : 'No mechanism exists for this one. The finding still stands.',
     };
@@ -340,8 +338,9 @@ export function recommend(
       dimension: target.dimension,
       evidence: `${plural(target.occurrences, 'occurrence')} across ${sessions}`,
       because:
-        'No artifact exists for this one. Saying so is better than manufacturing a tip ' +
-        'that would not survive being asked "why".',
+        target.dimension === 'redundant_call'
+          ? 'There is no fix: re-reading can be correct, so nothing is offered.'
+          : 'There is no fix for the kind; an `other` finding may still have its own fix.',
     };
   }
 

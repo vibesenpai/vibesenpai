@@ -15,7 +15,7 @@ const values = [
     points: [
       ['Your words first, then the agent’s', `${base}/start/pane/`],
       ['The conversation around the cited turn', `${base}/start/first-finding/`],
-      ['No grades and no percentages', `${base}/start/what-it-is/`],
+      ['No grades of you or your agent', `${base}/start/what-it-is/`],
     ],
     shot: 'finding',
     alt: 'The vibesenpai pane beside the chat, with one finding open: the developer’s words, the cited turns, and the conversation around them.',
@@ -26,8 +26,8 @@ const values = [
     body: 'A finding comes with a change for your agent: a rule, a permission prompt, a guard or a test. Apply drafts it into your prompt box, and your Enter is the yes.',
     points: [
       ['Built from the finding’s own evidence', `${base}/start/fixes/`],
-      ['Claude Code’s permission prompt makes the change', `${base}/start/fixes/`],
-      ['Nothing is ever written for you', `${base}/start/sends-and-costs/`],
+      ['The agent makes the change, under Claude Code’s permission prompt', `${base}/start/fixes/`],
+      ['vibesenpai never writes your files itself', `${base}/start/sends-and-costs/`],
     ],
     shot: 'apply',
     alt: 'A fix drafted into the Claude Code prompt box after pressing Apply in the pane.',
@@ -47,9 +47,9 @@ const values = [
   {
     id: 'background',
     title: 'Runs while you work',
-    body: 'The free checks read every session. Model reads run in the background after a turn ends, within 2M tokens a day, and stop with one command.',
+    body: 'The free checks read every session. Model reads run in the background after a turn ends, within about 2M tokens a day, and stop with one command.',
     points: [
-      ['Nothing appears until you open it', `${base}/commands/insights/`],
+      ['A short summary at session start; the rest waits until you open the pane', `${base}/commands/insights/`],
       ['Spend and progress on the Health tab', `${base}/commands/judge/`],
       ['/vibesenpai:judge off stops the model reads', `${base}/commands/judge/`],
     ],
@@ -75,7 +75,7 @@ const dimensions = {
     ['Constraint violation', 'constraint-violation', 'An instruction you stated was not followed.'],
     ['Misread intent', 'misread-intent', 'An ambiguous request filled the wrong way.'],
     ['Inaccurate self report', 'inaccurate-self-report', 'Work or success claimed that did not happen.'],
-    ['Overreach', 'overreach', 'Work nobody asked for. Shipped, and measured as not working yet.'],
+    ['Overreach', 'overreach', 'Work nobody asked for, that you pushed back on.'],
     ['Other', 'other', 'A real problem outside the four, named in a few words.'],
   ],
   free: [
@@ -87,15 +87,15 @@ const dimensions = {
 
 const terms = [
   ['Reads your sessions in place.', 'Transcripts are never copied. What it keeps is redacted when it is written.'],
-  ['Sends only redacted text, on your account.', 'Model reads go to Claude Haiku through your own Claude Code login. The send stops if anything redaction should have removed is still there.'],
-  ['Never writes your files.', 'A fix is a request in your prompt box. The agent makes the change under Claude Code’s own permission prompt.'],
+  ['Sends only redacted text, on your account.', 'Model reads go to Claude Haiku on your own Claude Code account (plan or API key). The send stops if anything redaction should have removed is still there.'],
+  ['Never writes your files.', 'A fix is a request in your prompt box. The agent makes the change, under Claude Code’s permission prompt.'],
   ['Stops with one command.', '/vibesenpai:judge off stops the model reads. /plugin disable vibesenpai stops everything.'],
 ];
 
 const faq = [
-  ['Does it send my code anywhere?', 'It never opens your repository, but a session’s text includes what the agent’s tools returned, such as files it read and command output. With model reads on, which is the default, a redacted and length-capped copy of that text goes to Claude Haiku through your own Claude Code login. With them off, nothing leaves your machine.'],
-  ['What does it cost?', 'The free checks cost nothing. Model reads use about 60,000 tokens a session on your plan or API key, and never more than 2 million a day.'],
-  ['Which agents does it read?', 'Claude Code. Other harnesses are not supported yet.'],
+  ['Does it send my code anywhere?', 'It never opens your repository, but a session’s text includes what the agent’s tools returned, such as files it read and command output. With model reads on, which is the default, a redacted and length-capped copy of that text goes to Claude Haiku on your own Claude Code account (plan or API key). It cannot judge code the agent never looked at. With model reads off, nothing leaves your machine.'],
+  ['What does it cost?', 'The free checks cost nothing. Model reads use about 60,000 tokens a session on your own Claude Code account (plan or API key), within about 2 million tokens a day.'],
+  ['Which agents does it read?', 'Claude Code only.'],
   ['How do I turn it off?', '/vibesenpai:judge off stops the model reads and keeps the free checks. /plugin disable vibesenpai turns everything off.'],
 ];
 ---
@@ -191,7 +191,7 @@ const faq = [
   </section>
 
   <section class="closing reveal">
-    <h2>See what your last session cost you.</h2>
+    <h2>See where your last session went wrong.</h2>
     <div class="install">
       <pre><code>{install}</code></pre>
       <button type="button" data-copy={install}>Copy</button>

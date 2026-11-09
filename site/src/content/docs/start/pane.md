@@ -6,8 +6,12 @@ description: What each part of the insights pane shows, and what each button doe
 `/vibesenpai:insights` opens a pane beside the chat. This page walks through what each part of
 it shows and what each button does.
 
-Opening the pane spends nothing: it shows what the background passes have already worked
-out. Where Claude Code cannot draw a pane, the command prints a
+Opening the pane spends nothing. It shows what two background jobs have already worked out:
+
+- **The history pass** runs the free checks over your sessions, at most every 10 minutes.
+- **The judge** is what does the model reads, after a turn ends.
+
+If Claude Code cannot place a pane, the command prints a
 [text version](/vibesenpai/commands/insights/) instead.
 
 The first time it opens, it says `Reading your history` with a seconds counter, and
@@ -22,7 +26,8 @@ The first time it opens, it says `Reading your history` with a seconds counter, 
 - **When it last updated**, as `updated 3m ago`, with **↻** (or `r`) to refresh. An open pane
   also checks for new results every 30 seconds and after each turn.
 - **A failing job**, if there is one, in one line: `The history pass is retrying: <reason>` or
-  `The judge is held: <reason>`.
+  `The judge is held: <reason>`. *Held* means the model reads stopped after 3 failed paid calls
+  in a row; they stay stopped until you run `/vibesenpai:judge on`.
 - **Three tabs:** Findings, Fixes, Health. `⇥` moves between buttons; `⏎` presses one.
 
 ## Findings tab
@@ -40,11 +45,11 @@ From top to bottom:
 3. **What went wrong, by kind.** One block per kind of finding, most frequent first, each with
    `N times in M sessions`. Inside, `▸ N findings` lists them three at a time. The kind's fix,
    if it has one, is below the list.
-4. **Cache rebuilt.** When the prompt cache was thrown away and written again from scratch:
+4. **Cache rebuilds.** When the prompt cache was thrown away and written again from scratch:
    `N times · N tokens written again`. Opened, it lists the three largest.
    ([Cache rebuilds](/vibesenpai/dimensions/cache-rebuilds/))
 5. **Open full report** writes and opens the [HTML report](/vibesenpai/commands/report/).
-   **Hide all** hides every finding; they still count.
+   **Hide all** hides every finding and takes them out of the counts.
 
 When nothing has been flagged, the tab says `Nothing flagged in N sessions read.` That is a
 result, not an unfinished pass.
@@ -55,7 +60,7 @@ A row's headline is **your own words**, in italics: your reaction if the finding
 otherwise the request the agent was answering. Only when neither exists does it show the
 agent's words or the file involved, and those are never styled as yours.
 
-Under the headline: other kinds the finding also is (`also overreach`), the day, the session,
+Under the headline: any secondary kinds, shown as `also overreach`, then the day, the session,
 and the time of the first cited turn.
 
 ### An open finding
@@ -73,7 +78,6 @@ Below the conversation, where the finding has them:
 
 | field | what |
 |---|---|
-| **Established** | where the expectation was set before the agent acted: an earlier prompt, or a loaded instruction |
 | **Why** | the model's one-sentence account of what went wrong |
 | **Reasons** | for a free check, why Claude Code refused each time, as `2× not read first` |
 | **Cost** | for a free check, as `1.2k+ tokens written and discarded` |
@@ -83,15 +87,16 @@ Then the **fix**: what kind of change it is, the change itself, where it lands, 
 
 Last, three answers: **Finding is wrong**, **Not the agent's fault** and **Hide**. Each takes
 effect at once and offers **Undo**. [Your first finding](/vibesenpai/start/first-finding/#your-answers)
-says what each one records.
+says when to use each.
 
 ## Fixes tab
 
 ![The Fixes tab's Waiting list: five fixes, two ticked, and Apply 2.](../../../assets/docs/fixes-waiting.png)
 
-**Waiting** lists every fix on offer in this project that is not in effect yet. Each shows who
+**Waiting** lists every fix on offer in this project that is not in effect yet. Each shows what
 it is for (`For overreach, from 3 findings in 2 sessions.`), the change, and where it lands.
-Tick several and press **Apply 2** (or `a`) to draft them as one request.
+Tick several and press **Apply N** (or `a`), where N is how many you ticked, to draft them as
+one request.
 
 ![After Apply: the request drafted in Claude Code's prompt box, ending with its fix marker, waiting for Enter.](../../../assets/docs/apply-request.png)
 
@@ -109,11 +114,11 @@ which sessions each count covers.
 
 | row | what |
 |---|---|
-| **History pass** | the free checks' background job: `ok`, `running`, `retrying · <reason>` or `not run yet` |
-| **Judge** | the model reads' job, in the same words or `held · <reason>`, and `N of M sessions read` |
+| **History pass** | the job that runs the free checks: `ok`, `running`, `retrying · <reason>` or `not run yet` |
+| **Judge** | the job that does the model reads, in the same words or `held · <reason>`, and `N of M sessions read` |
 | **Today** | tokens used today against the daily limit, as `N of 2.0M tokens` |
 | **Spent** | all model reads so far: calls, tokens in and out, and dollars |
-| **Older** | past sessions older than the catch-up, which are not read |
+| **Older** | past sessions the model reads skip. The first time, they read your 200 most recent past sessions (the catch-up); older ones are not read automatically |
 | **Model reads** | `on` or `off`, with the command that changes it |
 | **Dismissed** | how many findings are hidden, with **Restore all** |
 

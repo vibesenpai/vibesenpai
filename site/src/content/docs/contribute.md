@@ -51,8 +51,8 @@ So the judge's accuracy figures need that download to reproduce.
   [The two tiers](/vibesenpai/architecture/two-tiers/)
 - **Never copy raw harness data.** Transcripts are read in place, and what is
   derived is redacted as it is built.
-- **Never write a project file or the user's config.** Apply in the pane drafts
-  a request into Claude Code's prompt box; the developer's Enter is the yes, and
+- **Never write a project file or your config.** Apply in the pane drafts
+  a request into Claude Code's prompt box; your Enter is the yes, and
   the agent makes the change under Claude Code's own permission prompt. Every
   request ends with `(vibesenpai fix <id>)`. A fix counts as applied only when
   that marker is seen in a session, never because a button was pressed.
@@ -70,9 +70,8 @@ So the judge's accuracy figures need that download to reproduce.
 4. Run `verify:corpus` and update `scripts/corpus.json` with the new counts.
 5. Read its findings on real sessions.
 
-Step 5 is required. Three detectors once passed every test and, across 1,139
-public sessions, produced 5 true positives against about 25 false positives
-([GRAVEYARD.md](https://github.com/vibesenpai/vibesenpai/blob/main/GRAVEYARD.md)).
+Step 5 is required. Three detectors once passed every test and were still
+mostly wrong on real sessions ([How it was measured](/vibesenpai/architecture/measurements/#the-graveyard)).
 
 ## How is a release made?
 

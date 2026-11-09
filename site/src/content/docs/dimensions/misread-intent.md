@@ -1,6 +1,6 @@
 ---
 title: Misread intent
-description: The request left room, and the agent filled it with a reading the developer did not mean.
+description: The request left room, and the agent filled it with a reading you did not mean.
 ---
 
 Your request could be read more than one way, and the agent picked a reading you
@@ -37,7 +37,7 @@ What it is not:
 
 From the public test data of [claude-code-log](https://github.com/daaain/claude-code-log) (MIT).
 
-> **Developer**, turn 0: "…refactoring the timeline filtering so that we hide the group instead of all items that belong to a group as that would also collapse the row in the timeline."
+> **Developer**, the first prompt: "…refactoring the timeline filtering so that we hide the group instead of all items that belong to a group as that would also collapse the row in the timeline."
 >
 > **Agent**: reads the styles, then starts an edit that hides the group by
 > working through its items. The developer stops the tool call.
@@ -49,7 +49,7 @@ What the finding records:
 | | |
 |---|---|
 | Why | The developer asked to hide the vis-group rather than all items in it, but the agent started with a manual per-item approach, and the developer redirected it to the library's group.visible property. |
-| Established | turn 0, "refactoring the timeline filtering so that we hide the group instead of all items that belong to a group" |
+| Established | the first prompt, "refactoring the timeline filtering so that we hide the group instead of all items that belong to a group" |
 | Cited turn | 15 |
 
 The same session has a second misread five turns later. The agent planned to
@@ -57,11 +57,12 @@ loop over all items again, and the developer answered "I don't think we need to
 loop through all items, the group names should match the filters?"
 
 The pane shows your quote as the headline, then the conversation around the
-cited turn, then **Why**.
+cited turn, then **Why**. Where the expectation was established is not shown in
+the pane; the HTML report shows it.
 
 ## How it's detected
 
-A model reads a redacted copy of the session, finds the episode, anchors it to
+A model reads a redacted copy of the session, finds the moment, anchors it to
 a quote, and names its kind. The shared steps are on
 [The judge pipeline](/vibesenpai/architecture/judge/).
 
@@ -72,7 +73,7 @@ have existed before the agent acted:
 - a loaded instruction;
 - or your own words saying it was settled before ("as we did in the report").
 
-The code checks that quote against what was sent. With no source, or a quote
+That quote is then checked against what was sent. With no source, or a quote
 that cannot be found, the finding is dropped.
 
 ![How a misread intent is labelled and gated](../../../diagrams/misread-intent.svg)
@@ -86,11 +87,9 @@ Which fix the pane shows first is explained in
 
 Built from the finding's evidence. The first one that fits is offered.
 
-**Claude Code asks you before this command runs, in every mode:**
-- When: you forbade a command, and the agent ran it.
-- Adds: `"Bash(<command> *)"` to `permissions.ask`.
-- Lands in: `.claude/settings.local.json`.
-- Apply: yes.
+**Claude Code asks you before this command runs, in every mode:** when you
+forbade a command and the agent ran it
+([details](/vibesenpai/dimensions/#a-command-you-forbade)).
 
 **A test that fails when this rule is broken:**
 - When: the expectation was already in a loaded instruction file.

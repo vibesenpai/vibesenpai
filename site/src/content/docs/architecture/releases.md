@@ -28,7 +28,8 @@ plugin's usage back to its author."* Public install counts exist only for the
 A tag `v<version>` runs `.github/workflows/release.yml`:
 
 1. typecheck and the test suite
-2. a check that the tag matches the version in `plugin.json` and `package.json`
+2. a check that the tag matches the version in `.claude-plugin/plugin.json` and
+   `package.json`
 3. `scripts/build-release.sh` builds the zip of the runtime files
    (`marketplace.json` stays out, because it holds the zip's hash)
 4. a GitHub release is created with the zip attached
@@ -39,6 +40,9 @@ The hash is taken from the uploaded bytes, never from a rebuild, so a changed
 zip fails to install. If the last step fails, the entry keeps its previous
 source. The install command does not change.
 
+A release requires Claude Code 2.1.224 or later, the version that added the
+`archive` source.
+
 ## What does one download mean?
 
 | event | downloads the zip |
@@ -48,18 +52,9 @@ source. The install command does not change.
 | marketplace refresh | no: that clones the repo for `marketplace.json` |
 | updating to a new version | yes |
 | background auto-update | off by default for marketplaces other than Anthropic's |
-| update check with no new version | **open** |
 
 So the count is **first installs plus manual upgrades**, per release. GitHub
 does not deduplicate, so it is not a count of people.
-
-## What is still open?
-
-- **Whether an update check downloads the zip** to read `plugin.json`. This can
-  be observed after the first release: run an update with no new version, then
-  check the download count.
-- **What Claude Code before v2.1.224**, when the `archive` source arrived, does
-  with the entry. The marketplace format has no minimum-version field.
 
 The full reasoning, with the documentation quoted, is in
 [docs/distribution.md](https://github.com/vibesenpai/vibesenpai/blob/main/docs/distribution.md#releases-and-install-counts-2026-11-08).

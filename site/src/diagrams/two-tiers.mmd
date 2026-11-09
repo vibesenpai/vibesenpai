@@ -1,13 +1,13 @@
 flowchart TD
-  E["Event<br/><small>command · pattern · textSummary · failureKind · hashes</small>"]
+  E["Event<br/><small>command · pattern · textSummary · devCommand · failureKind · hashes</small>"]
 
-  E -- "Omit&lt;command, pattern, textSummary&gt;" --> S["StructuralEvent"]
-  E -- "full text" --> J["the judge"]
+  E -- "Omit&lt;command, pattern, textSummary, devCommand&gt;" --> S["StructuralEvent"]
+  E -- "full text" --> J["the model reads"]
 
-  S --> R1["edit_retry"]
-  S --> R2["redundant_call"]
+  S --> R1["Edit retry"]
+  S --> R2["Repeated call"]
 
-  R1 --> CERT["certain<br/><small>the harness said so</small>"]
+  R1 --> CERT["certain, or high if clipped<br/><small>the harness said so</small>"]
   R2 --> CERT
 
   J --> MOD["a model's reading<br/><small>not a fact</small>"]

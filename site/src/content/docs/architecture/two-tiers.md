@@ -1,19 +1,20 @@
 ---
 title: The two tiers
-description: The free checks read structure and the compiler enforces it. The judge reads conversation, and it is a separate claim.
+description: The free checks read only structure, and the compiler enforces it. In the model reads, a model reads the conversation.
 ---
 
 This page explains vibesenpai's two kinds of check: the free checks, which read
-only structure, and the judge, a model that reads the conversation.
+only structure, and the model reads, where a model reads the conversation. The
+judge is what does the model reads.
 
 ![The two tiers](../../../diagrams/two-tiers.svg)
 
 ## How do the two tiers differ?
 
-| | the free checks | the judge |
+| | the free checks | the model reads |
 |---|---|---|
 | reads | structure: tool results, failure kinds, hashes, timestamps | the conversation text |
-| confidence | `certain`: Claude Code recorded it | a model's reading |
+| confidence | `certain`, or `high` when a call clipped its own output: Claude Code recorded it | a model's reading |
 | costs | nothing | your own quota, in the background, within 2M tokens a day |
 
 Both show up the same way. The display does not say which tier a finding came
@@ -30,14 +31,12 @@ export type StructuralEvent = Omit<Event, 'command' | 'pattern' | 'textSummary' 
 ```
 
 Those four fields come from text: the shell command, the search pattern, a
-summary of prose or tool output, and a slash command the developer ran. `Omit`
-removes them, so `e.command` inside a detector **fails the build**. A test
+summary of prose or tool output, and a slash command you ran. `Omit`
+removes all four, so `e.command` inside a detector **fails the build**. A test
 asserts that `command`, `pattern` and `textSummary` stay unreachable.
 
-The rule exists because text-based detectors failed. Three of them, across
-1,139 public sessions, produced **5 true positives against about 25 false
-positives** ([GRAVEYARD.md](https://github.com/vibesenpai/vibesenpai/blob/main/GRAVEYARD.md)).
-Each failure had the same cause: the detector read text to decide something.
+The rule exists because detectors that read text did not work
+([Contribute](/vibesenpai/contribute/#how-do-i-add-a-detector)).
 
 ## What does a detector read instead?
 
@@ -49,21 +48,22 @@ values a detector may use:
 - `truncatesOwnOutput`
 - timestamps
 
-For example, `edit_retry` checks `failureKind !== 'tool'`; it never reads the
-error message.
+For example, Edit retry counts only `failureKind === 'tool'`; it never reads
+the error message to decide.
 
 **A harness string may name a finding; it may never produce one.** Labels are
 attached after a finding already exists. If Claude Code rewords an error
 message, the label goes missing and the finding still fires.
 
-## Why is there a judge at all?
+## Why are there model reads at all?
 
-Structure has little left to give. In the public SWE-chat sessions, Edit and Write account
-for **998 of about 1,400 tool refusals**, and `edit_retry` already covers both.
+Most failures that structure can show are already covered. In the public
+SWE-chat sessions, Edit and Write account for **998 of about 1,400 tool
+refusals**, and Edit retry already covers both.
 
 The remaining failures show in what was said, not in exit codes. For example,
-`inaccurate_self_report` failed as a structural check (**0 true positives, 5
-false**) and works as a judge dimension.
+an inaccurate self report cannot be found from structure, and is found by the
+model reads.
 
-A judge finding that cannot quote the text it came from is discarded.
-[How the judge works](/vibesenpai/architecture/judge/)
+A model finding that cannot quote the text it came from is discarded.
+[The judge pipeline](/vibesenpai/architecture/judge/)

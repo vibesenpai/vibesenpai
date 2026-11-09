@@ -78,7 +78,7 @@ describe('fix — choosing what to recommend', () => {
     );
     expect(r?.kind).toBe('REPORT');
     expect(r?.prompt).toBeUndefined();
-    expect(r?.because).toMatch(/no artifact/i);
+    expect(r?.because).toMatch(/^There is no fix/);
   });
 
   it('reports rather than guesses when the reason is unrecognised', () => {

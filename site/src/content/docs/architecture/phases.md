@@ -14,7 +14,7 @@ when a turn ends). Neither waits for analysis.
 ## Does a hook slow my session?
 
 No. Each hook has a 5-second timeout and exits 0 whatever happens (`|| true` in
-`hooks/hooks.json`). A hook checks which background jobs are due, starts them as
+[`hooks/hooks.json`](https://github.com/vibesenpai/vibesenpai/blob/main/hooks/hooks.json)). A hook checks which background jobs are due, starts them as
 separate processes, and exits.
 
 So what you see at session start is the **last completed pass**, not one
@@ -22,33 +22,35 @@ computed while you waited.
 
 ## What spends tokens?
 
-Only the judge, and only the `Stop` hook starts it.
+Only the model reads, and only the `Stop` hook starts them. The judge is what
+does the model reads.
 
 | phase | what it does | spends? |
 |---|---|---|
-| `SessionStart` | shows the last pass's summary as a `systemMessage`; starts the standing pass if stale | no |
-| `Stop` | starts the standing pass if stale, and the judge if due and within limits | **yes**, within limits |
+| `SessionStart` | shows the last pass's summary in a message to you, not the agent; starts the history pass if stale | no |
+| `Stop` | starts the history pass if stale, and the judge if due and within limits | **yes**, within limits |
 | `/vibesenpai:insights` | reads what the passes stored | no |
 | `/vibesenpai:report` | writes the HTML report from what the passes stored | no |
 | `/vibesenpai:judge on` / `off` | changes a setting | no |
 
-The standing pass computes the free checks over every session. The judge is
-the model pass.
+The history pass computes the free checks over every session. The judge does
+the model reads.
 
 The judge is due when the live session has about 50 new turns since it was last
 read, or when a past session in the catch-up has never been read. Two limits
-apply (`src/judge/limits.ts`):
+apply ([`src/judge/limits.ts`](https://github.com/vibesenpai/vibesenpai/blob/main/src/judge/limits.ts)):
 
-- **2M tokens a day.** If what is left today cannot cover even an empty batch,
-  no pass starts.
+- **2M tokens a day.** Every batch costs about 52,000 tokens of fixed overhead
+  before any session text. If less than that is left today, no pass starts.
 - **A catch-up of 200 past sessions**, newest first, fixed the first time the
   pass runs.
 
-[What is sent, and what it costs](/vibesenpai/start/sends-and-costs/)
+[What leaves your machine](/vibesenpai/start/sends-and-costs/)
 
 ## What happens when a job fails or hangs?
 
-Every background pass runs under a supervisor (`src/supervise/`):
+Every background pass runs under a supervisor
+([`src/supervise/`](https://github.com/vibesenpai/vibesenpai/tree/main/src/supervise)):
 
 - A pass holds a lease, sends a heartbeat, and stops itself at its deadline.
 - The next hook that runs that job reclaims a pass that died or hung. For the

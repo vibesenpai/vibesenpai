@@ -615,11 +615,11 @@ test('with no kind fix, a finding\'s fix from another project keeps Apply and sa
 test('a printed-only fix says why and offers no Apply', async ($, on) => {
   const calls: Calls = { argv: [], filled: [] }
   const others = (DATA.fixes ?? []).filter((f) => f.dimension !== 'misread_intent')
-  engine(on, { ...DATA, fixes: [...others, ownFix('Printed only: a Stop hook can hold a turn open up to 8 times in a row.')] }, calls)
+  engine(on, { ...DATA, fixes: [...others, ownFix('A Stop hook has no Apply: it needs your paths or test command filled in, and an unfinished one would block every turn.')] }, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'item:new:judged-new' })
-  expect(await ui.find({ type: 'Text', text: /Printed only: a Stop hook/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /A Stop hook has no Apply/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'apply:judged-new:a1b2c3' })).toBeUndefined()
   await ui.unmount()
 })

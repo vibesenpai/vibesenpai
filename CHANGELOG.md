@@ -61,8 +61,8 @@ Pre-alpha. Nothing has been released yet. Releases ship as a zip on a tagged Git
 
 ### Known limits
 
-- **`overreach` does not work** — 2 of 38 against labelled data, across two
-  models and three pipeline versions. It ships marked as such.
+- **The kinds overlap.** An overreach is usually also a misread or a broken rule, and the
+  model reads tend to name that as the main kind, with overreach as a secondary kind.
 - **No gold evaluation tier.** Every accuracy figure is agreement with
   model-generated labels (*silver*), not hand-labelled ground truth. There is
   no precision number for this tool, and we will not publish one until there is.

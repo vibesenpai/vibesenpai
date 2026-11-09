@@ -124,7 +124,7 @@ describe('the first spend is disclosed once', () => {
   });
 
   it('states the figures and both limits', () => {
-    expect(text).toMatch(/about 60k tokens a session/);
+    expect(text).not.toMatch(/tokens a session/);
     expect(text).toMatch(/at most 2\.0M tokens a day/);
     expect(text).toMatch(/up to 200 recent past sessions/);
   });

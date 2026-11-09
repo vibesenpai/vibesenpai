@@ -11,9 +11,9 @@ The pane lists each rebuild and the tokens it wrote.
 
 | | |
 |---|---|
-| In the pane | Cache rebuilt |
+| In the pane | Cache rebuilds |
 | Key | none: it is not a detector |
-| Tier | free check, computed from token figures Claude Code records |
+| Tier | a statistic, computed by the free checks from token figures Claude Code records |
 | On by default | yes, computed for every session; listed when a rebuild happened |
 | Confidence | none. It is a fact about the session, never a finding or a score. |
 
@@ -21,12 +21,9 @@ The pane lists each rebuild and the tokens it wrote.
 
 Each model request reads the conversation so far from the prompt cache and
 writes anything new to it. A rebuild is a request that found the cache gone and
-wrote the whole prefix again.
+wrote the whole conversation so far again.
 
-Most cache figures are ordinary: totals grow with every session, and nearly
-every request reads from cache. A rebuild is different, so it is the one cache
-figure shown, and only when one happened
-([Decisions](/vibesenpai/architecture/decisions/), D66).
+Only rebuilds are shown; ordinary cache use is not.
 
 What it is not:
 
@@ -48,7 +45,7 @@ From the public test data of [claude-code-log](https://github.com/daaain/claude-
 > previous one. The previous request had read 65,720 tokens from cache. This one
 > found them gone and wrote 54,357.
 
-In the pane, under **Cache rebuilt**, the rebuild is listed as:
+In the pane, under **Cache rebuilds**, the rebuild is listed as:
 
 ```
 turn 134 · a7da6a22 · 69 min after the previous request · 54,357 written
@@ -77,8 +74,7 @@ the previous request.
 
 ## Applicable fixes
 
-**There is no fix.** The only response to a rebuild after a long gap would be to
-work in shorter sessions, and that is advice, which this tool does not give.
+There is no fix: nothing Claude Code loads or enforces prevents a rebuild.
 Claude Code's one-hour cache setting (`ENABLE_PROMPT_CACHING_1H`) is not offered
 either: Claude Code lists it for API key, Bedrock, Vertex and Foundry users,
 not subscriptions.

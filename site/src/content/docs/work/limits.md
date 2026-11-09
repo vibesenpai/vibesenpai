@@ -1,41 +1,41 @@
 ---
 title: Limits
-description: What this tool cannot do, and the one dimension that does not work.
+description: What this tool cannot do, and how far to trust what it finds.
 ---
 
 This page lists what the tool cannot see or measure, and where its findings
 are weakest.
 
-## Which dimension does not work?
+## How accurate are the model reads?
 
-`overreach`. Against labelled data it scores **1, 1 and 2 of 38** across three
-experiment arms and two models
-([GRAVEYARD.md](https://github.com/vibesenpai/vibesenpai/blob/main/GRAVEYARD.md)).
-That result is settled, not provisional.
+Model findings can be wrong. They are checked against a labelled research set,
+and they agree with it on most sessions, not all
+([How it was measured](/vibesenpai/architecture/measurements/)). That is why every finding shows its turns, and
+why **Finding is wrong** exists.
 
-It still ships, because removing a dimension is a product decision that has not
-been made. An `overreach` finding is a pointer to a turn, not a conclusion.
-
-## How accurate is the judge?
-
-There is no gold figure. Every accuracy number on this site is **silver
-agreement**: agreement with labels that a model produced, checked by people on a
-sample. Until someone hand-labels a real set, there is no precision number, and
-none is invented.
+The free checks are different: their findings are facts Claude Code recorded,
+such as a refused edit.
 
 ## Which harnesses does it read?
 
-Claude Code only. The parser layer is a registry built for more, and it holds
-one parser.
+Claude Code only.
+
+## How far back can it see?
+
+Only as far as Claude Code keeps transcripts. No copy is kept, so when Claude
+Code deletes a session's transcript, that session is gone here too.
 
 ## Can it see my code?
 
-No. The judge reads the conversation and the tool calls in it. It does not read
-your code, your diffs or your test results.
+Not directly. It never opens your repository; it sees only what the agent's
+tools returned in the session (files it read, command output), so it cannot
+judge code the agent never looked at.
 
-So "the agent misunderstood the architecture" is not something it can assert.
-Three of the seven symptom categories in the research taxonomy it follows are
-not implemented for that reason.
+The model reads follow the taxonomy of
+[How Coding Agents Fail Their Users](https://arxiv.org/abs/2605.29442). Three
+of its seven categories are not covered: wrong project diagnosis, faulty
+implementation and operational execution error. The last two need the diff or
+the full command text, which the model reads are not sent.
 
 ## Is a permission fix a security boundary?
 
@@ -53,8 +53,8 @@ A rule for `pnpm add` does not match:
 Claude Code's own documentation says a Bash rule "isn't a security boundary".
 
 A `Stop` hook that checks `git diff` sees every write, including the shell's.
-That fix is printed to copy and has no Apply: a hook that exits 2 with an
-unfilled placeholder would block every turn.
+That fix is printed to copy. A Stop hook has no Apply: it needs your paths or
+test command filled in, and an unfinished one would block every turn.
 
 ## Can a finding be wrong?
 

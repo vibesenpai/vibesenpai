@@ -1,18 +1,17 @@
 ---
 title: Overreach
-description: Substantial work beyond what was asked, which the developer pushed back on. It does not work yet.
+description: Substantial work beyond what was asked, which you pushed back on.
 ---
 
-The agent did a lot more than you asked, and you pushed back. This dimension does
-not work reliably yet: an overreach finding points at turns worth reading; it is
-not a conclusion.
+The agent did a lot more than you asked, and you pushed back.
 
-:::caution[It does not work yet]
-Against hand-labelled data, overreach agreed on 1, 1 and 2 of 38 episodes,
-across three pipeline versions and two models
-([the graveyard](/vibesenpai/work/graveyard/)). It still runs, because retiring
-a dimension is a decision nobody has made yet. See
-[Limits](/vibesenpai/work/limits/).
+:::note[Often a second kind]
+Extra work usually comes with something else: a request read the wrong way, or
+a rule that was ignored. So an overreach is often shown as
+[misread intent](/vibesenpai/dimensions/misread-intent/) or
+[constraint violation](/vibesenpai/dimensions/constraint-violation/), with
+`also overreach` beside it. The main kind is not the only one
+([more](/vibesenpai/dimensions/#one-finding-more-than-one-kind)).
 :::
 
 ## The dimension
@@ -23,13 +22,13 @@ a dimension is a decision nobody has made yet. See
 | Key | `overreach` |
 | Tier | model read |
 | On by default | yes, with the model reads (`/vibesenpai:judge off` turns them off) |
-| Confidence | the model's own rating is stored per finding; measured agreement is 2 of 38 at best |
+| Confidence | the model's own rating, stored with each finding |
 
 ## Description
 
 The agent did substantial work beyond what was asked, and you pushed back on
 it. The problem is the agent acting without being asked. Your push-back is
-required for this kind, though the other kinds no longer need it.
+required for this kind only.
 
 What it is not:
 
@@ -45,7 +44,7 @@ What it is not:
 ## Example conversation
 
 :::note[Illustrative]
-The demo data has no overreach finding. This exchange was written for this page
+The public test data has no overreach finding. This exchange was written for this page
 in the shape of a real transcript.
 :::
 
@@ -65,7 +64,7 @@ What the finding records:
 
 ## How it's detected
 
-A model reads a redacted copy of the session, finds the episode, anchors it to
+A model reads a redacted copy of the session, finds the moment, anchors it to
 a quote, and names its kind. The shared steps are on
 [The judge pipeline](/vibesenpai/architecture/judge/).
 
@@ -81,11 +80,9 @@ Which fix the pane shows first is explained in
 
 ### The finding's own fix
 
-**Claude Code asks you before this command runs, in every mode:**
-- When: you forbade a command, and the agent ran it.
-- Adds: `"Bash(<command> *)"` to `permissions.ask`.
-- Lands in: `.claude/settings.local.json`.
-- Apply: yes.
+**Claude Code asks you before this command runs, in every mode:** when you
+forbade a command and the agent ran it
+([details](/vibesenpai/dimensions/#a-command-you-forbade)).
 
 **Claude Code refuses an edit to this path and tells the agent why:**
 - When: the agent wrote to a path outside the project.
@@ -124,10 +121,10 @@ These have no Apply. They appear in `/vibesenpai:report`.
 
   When the conversation was compacted before the cited turn, this is replaced by
   a `SessionStart` hook with the `compact` matcher that runs
-  `cat .claude/standing.md`.
+  `cat .claude/standing.md` (a file you create with your standing instructions).
 - **A prompt for one session:** "For the rest of this session: do only what was
   asked. If you think something adjacent needs doing, say so and wait rather
   than doing it."
 
-A `Stop` hook stays printed only: one that blocks with an unfilled placeholder
-would stop every turn.
+A Stop hook has no Apply: it needs your paths or test command filled in, and an
+unfinished one would block every turn.

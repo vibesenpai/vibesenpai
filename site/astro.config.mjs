@@ -90,6 +90,7 @@ export default defineConfig({
             { label: 'Reading a transcript', slug: 'architecture/reading' },
             { label: 'The two tiers', slug: 'architecture/two-tiers' },
             { label: 'The judge pipeline', slug: 'architecture/judge' },
+            { label: 'How it was measured', slug: 'architecture/measurements' },
             { label: 'Design decisions', slug: 'architecture/decisions' },
             { label: 'Releases and install counts', slug: 'architecture/releases' },
           ],

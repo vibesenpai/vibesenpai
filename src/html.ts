@@ -275,7 +275,7 @@ function fixBlock(x: FindingFix, shared?: SharedFix): string {
   const scope = x.paths === undefined ? '' : ` · for ${x.paths.join(', ')}`;
   const projects = (shared?.projects ?? [x.project]).map(projectLabel).join(' and ');
   const where = !x.applicable
-    ? 'Printed only: a Stop hook can hold a turn open up to 8 times in a row.'
+    ? 'A Stop hook has no Apply: it needs your paths or test command filled in, and an unfinished one would block every turn.'
     : x.kind === 'check'
       ? `The agent shows you the test before adding it, in ${projects}.`
       : `Added to ${destination} in ${projects}${scope}`;

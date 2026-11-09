@@ -27,11 +27,8 @@ What it is not:
 
 - **Not a wrong prediction.** "This should fix it", when it does not, is about
   the future, not about work already done.
-- **Not a narrow claim beside an unrelated failure.** "All 118 unit tests pass",
-  while a different command failed, is an honest report. A text-matching check
-  for this kind found 0 true positives and 5 false positives, all honest
-  reports. That is why it is a model read now
-  ([the graveyard](/vibesenpai/work/graveyard/)).
+- **Not a narrow claim beside an unrelated failure.** "All 118 unit tests pass"
+  while another command failed is honest.
 - **Not [misread intent](/vibesenpai/dimensions/misread-intent/).** Building the
   wrong thing and saying so accurately is a misread.
 
@@ -64,7 +61,7 @@ around the cited turns, then **Why**.
 
 ## How it's detected
 
-A model reads a redacted copy of the session, finds the episode, anchors it to
+A model reads a redacted copy of the session, finds the moment, anchors it to
 a quote, and names its kind. The shared steps are on
 [The judge pipeline](/vibesenpai/architecture/judge/).
 
@@ -85,19 +82,17 @@ Which fix the pane shows first is explained in
 
 ### The finding's own fix
 
-**Claude Code asks you before this command runs, in every mode:**
-- When: you forbade a command, and the agent ran it.
-- Adds: `"Bash(<command> *)"` to `permissions.ask`.
-- Lands in: `.claude/settings.local.json`.
-- Apply: yes.
+**Claude Code asks you before this command runs, in every mode:** when you
+forbade a command and the agent ran it
+([details](/vibesenpai/dimensions/#a-command-you-forbade)).
 
 **A check that runs each time the agent finishes a turn:**
 - When: the claim came after a failed call that nothing later fixed.
-- Shows: the failed call, by tool and file. The HTML report prints the `Stop`
-  hook below.
-- Lands in: `.claude/settings.local.json`, if you add it.
-- Apply: no, it is printed only: "a Stop hook can hold a turn open up to 8 times
-  in a row." The pane shows the kind's fix in its place.
+- Shows: the failed call, by tool and file, and the `Stop` hook below.
+- Lands in: `.claude/settings.local.json`, if you add it yourself.
+- Apply: no. A Stop hook has no Apply: it needs your paths or test command
+  filled in, and an unfinished one would block every turn. The pane shows the
+  kind's fix in its place; the HTML report prints this one.
 
 ### The kind's fix
 
@@ -106,9 +101,9 @@ Which fix the pane shows first is explained in
 - Lands in: `.claude/rules/vibesenpai.md`, with one pointer line in `CLAUDE.md`.
 - Apply: yes.
 
-### Printed only
+### Printed in the HTML report only
 
-These have no Apply.
+These have no Apply. They appear in `/vibesenpai:report`.
 
 - **A `Stop` hook that runs the check instead of trusting the claim.** The test
   command is a placeholder for you to fill in:
@@ -118,9 +113,6 @@ These have no Apply.
       "command": "<your test command> || { echo 'tests are not passing' >&2; exit 2; }" }] }] } }
   ```
 
-- **A prompt for one session**, in the HTML report (`/vibesenpai:report`): "For
-  the rest of this session: do not report work as done or passing unless a
-  command in this session shows it. Quote the output."
-
-A `Stop` hook stays printed only: one that blocks with an unfilled placeholder
-would stop every turn.
+- **A prompt for one session:** "For the rest of this session: do not report
+  work as done or passing unless a command in this session shows it. Quote the
+  output."

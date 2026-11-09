@@ -674,7 +674,7 @@ export function sessionCosts(db: Db): Map<string, number> {
 }
 
 export type DismissScope = 'subject' | 'finding' | 'judged';
-/** `wrong` leaves every count; `suggestion`, `noise` and `cleared` are hidden but still counted. */
+/** Every reason hides the finding and leaves the counts; the reason is kept as a record. */
 export type DismissReason = 'wrong' | 'suggestion' | 'noise' | 'cleared';
 
 export type Verdict = 'mistake' | 'suggestion' | 'wrong';
