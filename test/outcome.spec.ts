@@ -110,6 +110,24 @@ describe('the store keeps the earliest sighting per project', () => {
     expect(readFixApplied(db).map((r) => [r.project, r.sessionId]).sort()).toEqual([['p', 'early'], ['q', 'other']]);
     db.close();
   });
+
+  it('keeps a rule load per session, so one after the request is found though an earlier one exists', async () => {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { openStore, putRuleLoaded, readRuleLoaded, putFixApplied, readFixApplied } = await import('../src/store.ts');
+    const db = openStore(mkdtempSync(join(tmpdir(), 'as-rule-')));
+    const hash = ruleHash(RULE);
+    putRuleLoaded(db, [{ key: hash, project: 'p', sessionId: 'before', at: '2026-10-01T00:00:00.000Z' }]);
+    putFixApplied(db, [{ key: 'a1b2c3', project: 'p', sessionId: 'apply', at: '2026-10-10T00:00:00.000Z' }]);
+    putRuleLoaded(db, [{ key: hash, project: 'p', sessionId: 'after', at: '2026-10-12T00:00:00.000Z' }]);
+    putRuleLoaded(db, [{ key: hash, project: 'p', sessionId: 'after', at: '2026-10-12T05:00:00.000Z' }]);
+    const loaded = readRuleLoaded(db);
+    expect(loaded.map((r) => [r.sessionId, r.at]).sort()).toEqual([['after', '2026-10-12T00:00:00.000Z'], ['before', '2026-10-01T00:00:00.000Z']]);
+    const [f] = fixStates([plan], readFixApplied(db), loaded, [], 'p', () => true);
+    expect(f?.inEffect).toBe(true);
+    db.close();
+  });
 });
 
 describe('who wrote a quote', () => {

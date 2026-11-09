@@ -75,8 +75,10 @@ export type PaneFixState = {
   whereLine?: string;
   /** What to show in place of `text`, where the change is not one line. */
   shown?: string;
-  /** Why it has no Apply here: another project, or printed only. */
+  /** Why it has no Apply: printed only. */
   refusal?: string;
+  /** The project it was built in, when that is not this one: Apply still adds it here. */
+  elsewhere?: string;
   applied?: { at: string; sessionId: string };
   inEffect?: boolean;
   before?: PaneWindow;

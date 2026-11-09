@@ -200,9 +200,9 @@ test('the Fixes tab applies several as one request, and says how an applied one 
   expect(await ui.find({ type: 'Text', text: /Applied Oct 21/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /4 times in 9 sessions/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1 time in 4 sessions/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Came back in 9b0e44d1, turn 88/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Came back/ })).toBeUndefined()
   // Requested but never loaded: still offered, since the developer may have said no.
-  expect(await ui.find({ type: 'Text', text: /^Requested Oct 22 · not in effect yet: rules load in a new session, or after \/compact$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /requested Oct 22, in effect from your next session/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'pick:3704ae' })).toBeDefined()
   await ui.unmount()
 })
@@ -563,11 +563,12 @@ test('time words round a measured estimate and name the finishing day', () => {
 })
 
 /** A finding's own fix (D67): a permission for `judged-new`, applicable here unless `refusal` is set. */
-const ownFix = (refusal?: string): NonNullable<PaneData['fixes']>[number] => ({
+const ownFix = (refusal?: string, elsewhere?: string): NonNullable<PaneData['fixes']>[number] => ({
   fixId: 'a1b2c3', dimension: 'misread_intent', target: 'project-permissions', text: 'git push', key: 'action:git push',
   destination: '.claude/settings.local.json', request: 'unused', findingIds: ['judged-new'],
   kindLine: 'Claude Code asks you before this command runs, in every mode:', whereLine: 'Added to .claude/settings.local.json',
   ...(refusal !== undefined ? { refusal } : {}),
+  ...(elsewhere !== undefined ? { elsewhere } : {}),
 })
 
 test('a finding with its own fix shows that fix in place of its dimension\'s, and Apply drafts it', async ($, on) => {
@@ -581,24 +582,48 @@ test('a finding with its own fix shows that fix in place of its dimension\'s, an
   await ui.press({ key: 'apply:judged-new:a1b2c3' })
   expect(calls.filled.at(-1)).toMatch(/git push[\s\S]*\(vibesenpai fix a1b2c3\)$/)
   await ui.press({ key: 'tab:fixes' })
-  expect(await ui.find({ type: 'Text', text: /For misread intent, from one finding\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /from one finding/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('a finding\'s fix from another project says why and offers no Apply, here or on the Fixes tab', async ($, on) => {
+test('a finding\'s fix from another project gives way to its kind\'s fix, which keeps Apply', async ($, on) => {
   const calls: Calls = { argv: [], filled: [] }
-  engine(on, { ...DATA, fixes: [...(DATA.fixes ?? []), ownFix('This happened in agentsensei. Apply it from a session there.')] }, calls)
+  engine(on, { ...DATA, fixes: [...(DATA.fixes ?? []), ownFix(undefined, 'agentsensei')] }, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'item:new:judged-new' })
-  expect(await ui.find({ type: 'Text', text: /This happened in agentsensei\. Apply it from a session there\./ })).toBeDefined()
-  expect(await ui.find({ type: 'Button', key: 'apply:judged-new:a1b2c3' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'apply:judged-new:16ae85' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /git push/ })).toBeUndefined()
   await ui.press({ key: 'tab:fixes' })
   expect(await ui.find({ type: 'Text', text: /from one finding/ })).toBeUndefined()
   await ui.unmount()
 })
 
-// A test hook's refusal reaches the plugin without its cause (the kit's contract), so `no_composer` is not reachable here.
+test('with no kind fix, a finding\'s fix from another project keeps Apply and says where it came from', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  const others = (DATA.fixes ?? []).filter((f) => f.dimension !== 'misread_intent')
+  engine(on, { ...DATA, fixes: [...others, ownFix(undefined, 'agentsensei')] }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  expect(await ui.find({ type: 'Text', text: /Built from a session in agentsensei\. Apply adds it to this project\./ })).toBeDefined()
+  await ui.press({ key: 'apply:judged-new:a1b2c3' })
+  expect(calls.filled.at(-1)).toMatch(/\(vibesenpai fix a1b2c3\)$/)
+  await ui.unmount()
+})
+
+test('a printed-only fix says why and offers no Apply', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  const others = (DATA.fixes ?? []).filter((f) => f.dimension !== 'misread_intent')
+  engine(on, { ...DATA, fixes: [...others, ownFix('Printed only: a Stop hook can hold a turn open up to 8 times in a row.')] }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item:new:judged-new' })
+  expect(await ui.find({ type: 'Text', text: /Printed only: a Stop hook/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'apply:judged-new:a1b2c3' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('a refused Apply goes to the clipboard and never names a command', async ($, on) => {
   const calls: Calls = { argv: [], filled: [], refuse: 'no_composer' }
   engine(on, DATA, calls)
@@ -634,5 +659,36 @@ test('Hide all hides every finding through the CLI, and Restore all on Health br
   await ui.press({ key: 'restore-all' })
   expect(calls.argv.some((a) => a.slice(-3).join(' ') === 'dismiss --undo all')).toBe(true)
   expect(await ui.find({ type: 'Text', text: /Every hidden finding is back\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a sent fix request is recorded a few seconds after its turn ends, and the note bar says so', async ($, on) => {
+  const clock = mock.clock(on)
+  const calls: Calls = { argv: [], filled: [] }
+  on('prompt.submit', (_, e) => ({ text: (e as { text: string }).text }) as never)
+  on('turn.complete', () => ({ text: '' }) as never)
+  engine(on, { ...DATA, fixes: [{ ...(DATA.fixes ?? [])[0]!, applied: { at: new Date().toISOString(), sessionId: 's' }, inEffect: false }] }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await $.prompt.submit({ text: 'Add this line to .claude/rules/vibesenpai.md …\n(vibesenpai fix 16ae85)' } as never)
+  await ($ as never as { turn: { complete: (e: object) => Promise<unknown> } }).turn.complete({ answer: 'Added the line.' })
+  expect(await ui.find({ type: 'Text', text: /Recording the fix you applied…/ })).toBeDefined()
+  expect(calls.argv.some((a) => a.includes('standing'))).toBe(false)
+  await clock.advance(5_000)
+  expect(calls.argv.some((a) => a.slice(-2).join(' ') === 'standing --refresh')).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /✓ Fix recorded as applied\. Rules take effect in your next session, or after \/compact\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an applied fix with no sessions since says so in words, not as zero of zero', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  const applied = { ...(DATA.fixes ?? [])[2]!, before: { times: 0, sessions: 2 }, since: { times: 0, sessions: 0 } }
+  const { cameBack: _, ...noReturn } = applied
+  engine(on, { ...DATA, fixes: [noReturn] }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:fixes' })
+  expect(await ui.find({ type: 'Text', text: /Before 0 times in 2 sessions · Since: no sessions yet/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /0 times in 0 sessions/ })).toBeUndefined()
   await ui.unmount()
 })

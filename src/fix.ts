@@ -345,9 +345,12 @@ export function recommend(
     };
   }
 
-  // The dominant reason picks the artifact; ties break by key so re-runs agree.
+  // The dominant reason with a useful artifact picks it; ties break by key so re-runs agree.
+  // `not-read-first` is passed over while another reason has one: its rule would be ceremonial.
   const ranked = Object.entries(s.reasons).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const top = ranked.find(([key]) => ARTIFACTS[key] !== undefined);
+  const top =
+    ranked.find(([key]) => ARTIFACTS[key] !== undefined && key !== 'not-read-first') ??
+    ranked.find(([key]) => key === 'not-read-first');
 
   if (top === undefined) {
     return {
@@ -396,7 +399,10 @@ export function recommend(
     key: reason,
     prompt: artifact.prompt,
     rule: artifact.rule,
-    because: `${reasonLabel(reason)} is the most common reason, at ${n} of ${target.occurrences}.`,
+    because:
+      reason === ranked[0]?.[0]
+        ? `${reasonLabel(reason)} is the most common reason, at ${n} of ${target.occurrences}.`
+        : `${reasonLabel(reason)} is the most common reason there is a fix for, at ${n} of ${target.occurrences}.`,
     ...(cost !== undefined && cost.written + cost.received > 0 ? { cost } : {}),
   };
 }

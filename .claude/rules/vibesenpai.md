@@ -3,3 +3,4 @@
 - Never report work as done or passing unless a command in this session shows it; quote the output.
 - Re-read right before editing if anything may have changed the file.
 - Do only what was asked. If something adjacent needs doing, say so and wait.
+- Standing instruction from the developer: "I want Dimensions to be it's own sub section. With a dedicated page for each of them that explains: 1) The Dimension 2) Description 3) Example conversation 4) How it's detected (with additional mermaid / arch diagrams) 5) Applicable Fixes"

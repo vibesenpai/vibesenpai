@@ -117,7 +117,9 @@ CREATE TABLE IF NOT EXISTS label (
 
 /**
  * Fixes, by our own ids and hashes of our own rule text: when one was applied (its marker seen in a
- * developer prompt) and when its rule was first seen loaded. The earliest sighting per project wins.
+ * developer prompt; the earliest per project wins), and every session its rule was seen loaded in (the
+ * earliest per session), so a load after the request can be found. `rule_loaded` kept only the first
+ * load ever, which hid every later one; it is no longer read.
  */
 const FIX_DDL = `
 CREATE TABLE IF NOT EXISTS fix_applied (
@@ -127,12 +129,12 @@ CREATE TABLE IF NOT EXISTS fix_applied (
   at         TEXT NOT NULL,
   PRIMARY KEY (fix_id, project)
 );
-CREATE TABLE IF NOT EXISTS rule_loaded (
+CREATE TABLE IF NOT EXISTS rule_seen (
   rule_hash  TEXT NOT NULL,
   project    TEXT NOT NULL,
   session_id TEXT NOT NULL,
   at         TEXT NOT NULL,
-  PRIMARY KEY (rule_hash, project)
+  PRIMARY KEY (rule_hash, project, session_id)
 );
 `;
 
@@ -759,24 +761,25 @@ export function withStore<T>(archive: string, fn: (db: Db) => T): T | undefined 
 /** A fix seen applied, or its rule seen loaded: `key` is a fix id or a rule hash. */
 export type FixSighting = { key: string; project: string; sessionId: string; at: string };
 
-function putSightings(db: Db, table: 'fix_applied' | 'rule_loaded', col: 'fix_id' | 'rule_hash', rows: FixSighting[]): void {
+function putSightings(db: Db, table: 'fix_applied' | 'rule_seen', col: 'fix_id' | 'rule_hash', rows: FixSighting[]): void {
+  const keyCols = table === 'rule_seen' ? `${col}, project, session_id` : `${col}, project`;
   const put = db.prepare(
     `INSERT INTO ${table}(${col}, project, session_id, at) VALUES (?, ?, ?, ?) ` +
-      `ON CONFLICT(${col}, project) DO UPDATE SET session_id = excluded.session_id, at = excluded.at ` +
+      `ON CONFLICT(${keyCols}) DO UPDATE SET session_id = excluded.session_id, at = excluded.at ` +
       `WHERE excluded.at < ${table}.at`,
   );
   for (const r of rows) put.run(r.key, r.project, r.sessionId, r.at);
 }
 
-function readSightings(db: Db, table: 'fix_applied' | 'rule_loaded', col: 'fix_id' | 'rule_hash'): FixSighting[] {
+function readSightings(db: Db, table: 'fix_applied' | 'rule_seen', col: 'fix_id' | 'rule_hash'): FixSighting[] {
   return (db.prepare(`SELECT ${col} k, project, session_id, at FROM ${table}`).all() as { k: string; project: string; session_id: string; at: string }[])
     .map((r) => ({ key: r.k, project: r.project, sessionId: r.session_id, at: r.at }));
 }
 
 export const putFixApplied = (db: Db, rows: FixSighting[]): void => putSightings(db, 'fix_applied', 'fix_id', rows);
-export const putRuleLoaded = (db: Db, rows: FixSighting[]): void => putSightings(db, 'rule_loaded', 'rule_hash', rows);
+export const putRuleLoaded = (db: Db, rows: FixSighting[]): void => putSightings(db, 'rule_seen', 'rule_hash', rows);
 export const readFixApplied = (db: Db): FixSighting[] => readSightings(db, 'fix_applied', 'fix_id');
-export const readRuleLoaded = (db: Db): FixSighting[] => readSightings(db, 'rule_loaded', 'rule_hash');
+export const readRuleLoaded = (db: Db): FixSighting[] => readSightings(db, 'rule_seen', 'rule_hash');
 
 /** Each session's project key and first timestamp, for counting before and after a fix. */
 export function sessionSpans(db: Db): Map<string, { project: string; firstTs?: string }> {

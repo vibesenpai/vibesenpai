@@ -209,7 +209,8 @@ export function fixesView(data: PaneData): { waiting: PaneFixState[]; applied: P
   const all = data.fixes ?? []
   return {
     // Requested but never loaded stays offered: the developer may have declined it. One with no Apply here is not.
-    waiting: all.filter((f) => f.refusal === undefined && (f.applied === undefined || f.inEffect === false)),
+    // Only this project's: a fix from another project is offered under its finding, with a warning.
+    waiting: all.filter((f) => f.refusal === undefined && f.elsewhere === undefined && (f.applied === undefined || f.inEffect === false)),
     applied: all.filter((f) => f.applied !== undefined && f.inEffect !== false).sort((a, b) => (b.applied?.at ?? '').localeCompare(a.applied?.at ?? '')),
   }
 }
@@ -248,6 +249,17 @@ export const fixWhere = (f: PaneFixState): string => f.whereLine ?? (f.target ==
 
 /** The fix's own words, without the list dash a rules file needs. */
 export const fixWords = (f: PaneFixState): string => (f.shown ?? f.text).replace(/^-\s*/, '')
+
+/** A rule built from the developer's words, shown as those words: the prefix the rules file needs is noise here. */
+export const fixQuote = (f: PaneFixState): string => fixWords(f).replace(/^Standing instruction from the developer:\s*/, '')
+
+/** Before and since in one line; a window with no sessions yet says so instead of "0 times in 0 sessions". */
+export function outcomeText(f: PaneFixState): string {
+  const parts: string[] = []
+  if (f.before !== undefined) parts.push(`Before ${windowText(f.before)}`)
+  if (f.since !== undefined) parts.push(f.since.sessions === 0 ? 'Since: no sessions yet' : `Since ${windowText(f.since)}`)
+  return parts.join(' · ')
+}
 
 /** Word-wrapped to `max` columns, so each line can carry its own prefix (a bar the layout cannot repeat). */
 export function wrapLines(text: string, max: number): string[] {

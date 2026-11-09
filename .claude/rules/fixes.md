@@ -11,8 +11,9 @@
   `.claude/rules/vibesenpai.md` with one pointer line in `CLAUDE.md`; no CLAUDE.md word budget.
 - Every request ends with `(vibesenpai fix <id>)` (`src/fix-marker.ts`). The parser sets
   `Event.fixApplied` from a developer prompt or a developer command's output carrying it;
-  `compute-standing` stores the earliest sighting per project (`fix_applied`) and whether our rule
-  text was seen loaded (`rule_loaded`, a hash of our own text). Applied is never set by a button.
+  `compute-standing` stores the earliest sighting per project (`fix_applied`) and every session our
+  rule text was seen loaded in (`rule_seen`, a hash of our own text, per session: keeping only the first
+  load ever hid every load after a request). Applied is never set by a button.
 - A fix id hashes what the fix is for (target, dimension, reason), never its wording.
 - Before / since are counts in one project, never rates. A rule counts from when it was first seen
   loaded, not when it was requested. Rules load at session start or on compaction, with no reload
@@ -24,5 +25,6 @@
   fallback. Its key is what it is for (`action:git push`, `path:…`, `instr:<hash>`, `quote:<hash>`)
   and its outcome counts that key; a `quote:` key counts the dimension and says "same kind".
 - Targets: `project-permissions`, `project-hooks` (a PreToolUse guard; a Stop hook stays printed),
-  `scoped-instructions`, `project-check`, `project-agent`. A fix from another project is shown with no
-  Apply: it would land in the wrong repo.
+  `scoped-instructions`, `project-check`, `project-agent`. A finding's own fix from another project
+  gives way to its kind's fix, and is not mentioned; with none, it is offered with Apply and says it was built elsewhere
+  and lands in this project. Only a printed-only Stop hook has no Apply.

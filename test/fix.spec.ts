@@ -110,6 +110,13 @@ describe('fix — choosing what to recommend', () => {
     expect(r?.rule).toBeUndefined();
     expect(r?.because).toMatch(/already refuses/i);
   });
+
+  it('passes over `not-read-first` to the most common reason that has a fix', () => {
+    const r = recommend(base({ reasons: { 'not-read-first': 8, 'string-not-found': 2, 'ambiguous-target': 1 } }));
+    expect(r?.kind).toBe('PROMPT');
+    expect(r?.key).toBe('string-not-found');
+    expect(r?.because).toMatch(/most common reason there is a fix for, at 2 of/);
+  });
 });
 
 describe('fix — a judge finding outranks a rule finding when it has a mechanism', () => {

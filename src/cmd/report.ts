@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { bold, dim } from '../style.ts';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { lookupSession, MIN_ID_PREFIX, type SessionLookup, sessionSizes } from '../read.ts';
+import { lookupSession, MIN_ID_PREFIX, projectLabel, type SessionLookup, sessionSizes } from '../read.ts';
 import { gatherReport, type ReportData } from '../gather.ts';
 import { findingsFor, readJudgeState } from '../judge/state.ts';
 import { estimateQueueSeconds, pendingWork, progressLine } from '../judge/schedule.ts';
@@ -279,7 +279,7 @@ function writeHtmlReport(
 }
 
 /** What the pane shows of a fix beyond its state: whose it is, its kind in words, and why it has no Apply. */
-type FixMeta = { findingIds?: string[]; shared?: { findings: number; sessions: number }; kindLine?: string; whereLine?: string; shown?: string; refusal?: string };
+type FixMeta = { findingIds?: string[]; shared?: { findings: number; sessions: number }; kindLine?: string; whereLine?: string; shown?: string; refusal?: string; elsewhere?: string };
 type PaneFixOut = FixState & FixMeta & { destination: string; request: string };
 
 /**
@@ -355,10 +355,11 @@ function ownFixes(archive: string, project: string): { plans: ApplyPlan[]; meta:
       whereLine: whereLine(fix, shown.destination),
       ...(fix.kind === 'agent' ? { shown: shown.body } : {}),
     };
-    const plan = projects.includes(project) ? findingPlan(fix) : undefined;
+    // A fix from another project can still be applied here, said beside its Apply; a printed-only one cannot.
+    const plan = findingPlan(fix);
     if (plan !== undefined) {
       plans.push(plan);
-      meta.set(fixId, m);
+      meta.set(fixId, projects.includes(project) ? m : { ...m, elsewhere: projects.map(projectLabel).join(' and ') });
     } else {
       refused.push({ fixId, dimension: fix.dimension, target: fix.target, text: fix.text, key: fix.key, destination: shown.destination, request: '', ...m, refusal: applyRefusal(fix, projects) });
     }

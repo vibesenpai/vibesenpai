@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState } from '../types'
-import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, finishDay, fixKind, fixOrigin, loadsLater, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
+import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, finishDay, fixKind, fixOrigin, fixQuote, loadsLater, outcomeText, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
 import { applyRequest } from '../src/harness/claude-code.ts'
 import { MARK_PNG, MARK_SVG } from './logo.ts'
 
@@ -76,6 +76,30 @@ async function refresh($: EngineInterface): Promise<void> {
   try {
     await load($)
     await update($, answered, () => ({}))
+  } finally {
+    await update($, busy, () => false)
+  }
+}
+
+/** Set when a prompt carrying a fix marker is sent; the turn that makes the change records it when it ends. */
+let fixSent = false
+const FIX_SENT = /\(vibesenpai fix [0-9a-f]{6}/
+/** Long enough for the transcript to hold the whole turn before the history pass reads it. */
+const RECORD_DELAY_MS = 3_000
+const RECORDING = 'Recording the fix you applied…'
+
+/** Records an applied fix now rather than at the next history pass, and says how it went in the note bar. */
+async function recordApplied($: EngineInterface): Promise<void> {
+  try {
+    const r = await $.process.run(cli($, ['standing', '--refresh']), { env: ENV, timeoutMs: 120_000 })
+    await load($)
+    const data = (await read($, snapshot)) as PaneData | null
+    const recent = (data?.fixes ?? []).filter((f) => f.applied !== undefined && Date.now() - Date.parse(f.applied.at) < 15 * 60_000)
+    const n = recent.length
+    await update($, note, () =>
+      r.exitCode !== 0 || n === 0
+        ? 'The fix is not recorded yet. ↻ checks again.'
+        : `✓ ${n === 1 ? 'Fix' : `${n} fixes`} recorded as applied.${recent.some((f) => f.inEffect === false) ? ' Rules take effect in your next session, or after /compact.' : ''}`)
   } finally {
     await update($, busy, () => false)
   }
@@ -285,10 +309,34 @@ export const register: Register = on => {
   on('command.run', { command: 'vibesenpai:insights' }, async ($, e, next) => ((await show($)) ? { text: 'Insights opened beside the chat.' } : next(e)))
 
   // After each turn, re-read only if a background pass changed something.
+  // Only notes that a fix request was sent; the prompt passes on unchanged.
+  on('prompt.submit', async ($, e, next) => {
+    const result = await next(e)
+    if (FIX_SENT.test(e.text)) fixSent = true
+    return result
+  })
+
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     const data = (await read($, snapshot)) as PaneData | null
-    if (data !== null && (await fingerprint($, data.archive)) !== ((await read($, stamp)) as string)) await load($)
+    if (data !== null && fixSent) {
+      fixSent = false
+      // Said at once, with the spinner, so the wait before the pass is visibly work.
+      await update($, note, () => RECORDING)
+      await update($, busy, () => true)
+      animate($, true)
+      $.clock.after(RECORD_DELAY_MS, async () => {
+        try {
+          await recordApplied($)
+        } catch {
+          // The next history pass records it; the note and the spinner must not stay.
+          await update($, note, () => 'The fix is not recorded yet. ↻ checks again.').catch(() => {})
+          animate($, false)
+        }
+      })
+    } else if (data !== null && (await fingerprint($, data.archive)) !== ((await read($, stamp)) as string)) {
+      await load($)
+    }
     return result
   })
 
@@ -373,12 +421,16 @@ export const register: Register = on => {
     )
     const showCard = behind && !modelFound
 
-    // Three weights of button. Primary is solid and there is at most one per section: the action to take.
-    // Secondary is the surface's bracketed button, for a choice. Tertiary is a dim link.
+    // Actions are solid. Primary, in the accent colour, is the one action to take, at most one per section;
+    // secondary, neutral, is every other action. A dim link only opens or shows something.
     const primary = (key: string, label: string, onPress: () => void, hotkey?: string) => (
       <Button key={key} plain label={label} {...(hotkey !== undefined ? { hotkey } : {})} onPress={onPress}>
         <Text backgroundColor="claude" color="inverseText" weight="bold"> {label} </Text>
-        {hotkey !== undefined && <Text dimColor> {hotkey}</Text>}
+      </Button>
+    )
+    const secondary = (key: string, label: string, onPress: () => void) => (
+      <Button key={key} plain label={label} onPress={onPress}>
+        <Text backgroundColor="subtle" color="text"> {label} </Text>
       </Button>
     )
     const tertiary = (key: string, label: string, onPress: () => void) => (
@@ -395,9 +447,14 @@ export const register: Register = on => {
     const answers = (await read($, answered)) as Record<string, Answer>
     const answerOf = (i: Item): Answer | undefined => (i.dismissId === undefined ? undefined : answers[i.dismissId] ?? data.labels?.[i.dismissId])
     // A finding's own fix first (D67); its dimension's is the fallback.
-    const fixFor = (i: Item) =>
-      (i.dismissId !== undefined ? data.fixes?.find((f) => f.findingIds?.includes(i.dismissId as string)) : undefined)
-        ?? data.fixes?.find((f) => f.dimension === i.dimension && f.findingIds === undefined)
+    const ownFix = (i: Item) => (i.dismissId !== undefined ? data.fixes?.find((f) => f.findingIds?.includes(i.dismissId as string)) : undefined)
+    const kindFix = (i: Item) => data.fixes?.find((f) => f.dimension === i.dimension && f.findingIds === undefined)
+    // A finding's own fix first (D67) when it is this project's; else its kind's fix, which fits anywhere;
+    // else the own fix, from another project or printed only, saying which.
+    const fixFor = (i: Item) => {
+      const own = ownFix(i)
+      return own !== undefined && own.refusal === undefined && own.elsewhere === undefined ? own : kindFix(i) ?? own
+    }
     // What an answer did, in place, with Undo. A finding marked a mistake keeps its fix.
     const answerResult = (i: Item, a: Answer) => {
       const fix = fixFor(i)
@@ -406,7 +463,7 @@ export const register: Register = on => {
           <Text color="success">✓ {SAID[a]}</Text>
           {a === 'mistake' && fix !== undefined && <Box marginTop={1}>{fixSection(fix, `${i.key}:`)}</Box>}
           <Box marginTop={1}>
-            {tertiary(`undo:${i.key}`, 'Undo', () => undo($, i, a))}
+            {secondary(`undo:${i.key}`, 'Undo', () => undo($, i, a))}
           </Box>
         </Box>
       )
@@ -507,12 +564,12 @@ export const register: Register = on => {
             <Box flexDirection="column" gap={1}>
               {fixFor(i) !== undefined && fixSection(fixFor(i)!, `${i.key}:`)}
               <Box flexDirection="row" gap={1} flexWrap="wrap" alignItems="center">
-                <Button key={`wrong:${i.key}`} label="Finding is wrong" onPress={() => labelAs($, i, 'wrong')} />
+                {secondary(`wrong:${i.key}`, 'Finding is wrong', () => labelAs($, i, 'wrong'))}
                 {i.quote !== undefined && i.quoteBy === 'developer' && (
-                  <Button key={`suggestion:${i.key}`} label="Not the agent's fault" onPress={() => labelAs($, i, 'suggestion')} />
+                  secondary(`suggestion:${i.key}`, "Not the agent's fault", () => labelAs($, i, 'suggestion'))
                 )}
                 <Box marginLeft={2}>
-                  {tertiary(`dismiss:${i.key}`, 'Hide', () => dismiss($, i))}
+                  {secondary(`dismiss:${i.key}`, 'Hide', () => dismiss($, i))}
                 </Box>
               </Box>
             </Box>
@@ -570,7 +627,6 @@ export const register: Register = on => {
       )
     }
     const outcomeLine = (f: PaneFixState) => sayLines(f.fixId, width - 10)
-    const requested = (f: PaneFixState) => f.applied !== undefined && f.inEffect === false && <Text dimColor>Requested {day(f.applied.at)} · not in effect yet: rules load in a new session, or after /compact</Text>
     // Once pressed, a fix folds to one line saying how far it got: drafted, requested, applied.
     const fixDone = (f: PaneFixState): string | undefined =>
       f.applied !== undefined && f.inEffect !== false ? `Fix applied ${day(f.applied.at)}`
@@ -587,7 +643,7 @@ export const register: Register = on => {
             {f.applied === undefined && loadsLater(f) && <Text dimColor>{LOADS}</Text>}
             {/* Requested but never loaded may have been declined, so it can be asked for again. */}
             {f.applied !== undefined && f.inEffect === false && (
-              tertiary(`apply:${scope}${f.fixId}`, 'Apply again', () => apply($, [f]))
+              secondary(`apply:${scope}${f.fixId}`, 'Apply again', () => apply($, [f]))
             )}
           </Box>
         )
@@ -599,6 +655,7 @@ export const register: Register = on => {
           ? [<Text dimColor>{f.refusal}</Text>]
           : [
             <Text dimColor>{fixWhere(f)}</Text>,
+            ...(f.elsewhere !== undefined ? [<Text dimColor>Built from a session in {f.elsewhere}. Apply adds it to this project.</Text>] : []),
             <Box marginTop={1}>{primary(`apply:${scope}${f.fixId}`, 'Apply', () => apply($, [f]))}</Box>,
             outcomeLine(f),
           ]),
@@ -661,8 +718,8 @@ export const register: Register = on => {
             </Box>
           )}
           <Box flexDirection="row" gap={1} marginTop={1}>
-            <Button key="report" label="Open full report" onPress={async () => { await $.process.run(cli($, ['report', '--html', '--open']), { env: ENV, timeoutMs: 120_000 }) }} />
-            {v.blocks.length > 0 && <Box marginLeft={2}>{tertiary('hide-all', 'Hide all', () => hideAll($))}</Box>}
+            {secondary('report', 'Open full report', async () => { await $.process.run(cli($, ['report', '--html', '--open']), { env: ENV, timeoutMs: 120_000 }) })}
+            {v.blocks.length > 0 && <Box marginLeft={2}>{secondary('hide-all', 'Hide all', () => hideAll($))}</Box>}
           </Box>
           {active === 'findings' && sayLines(BULK, width)}
         </Box>
@@ -678,16 +735,16 @@ export const register: Register = on => {
           {f.waiting.length === 0 &&<Text dimColor>Every fix on offer is applied in this project.</Text>}
           {f.waiting.map((x) => {
             const isPicked = picks.includes(x.fixId)
+            const status = [fixWhere(x), ...(x.applied !== undefined && x.inEffect === false ? [`requested ${day(x.applied.at)}, in effect from your next session`] : [])].join(' · ')
             return (
               <Box key={`waiting:${x.fixId}`} flexDirection="row" paddingLeft={2}>
                 <Button key={`pick:${x.fixId}`} plain label={`${isPicked ? '[x]' : '[ ]'} ${x.text}`} onPress={() => update($, picked, (p) => (isPicked ? p.filter((k) => k !== x.fixId) : [...p, x.fixId]))}>
                   <Text {...(isPicked ? { color: 'claude' } : {})}>{isPicked ? '[x]' : '[ ]'} </Text>
                 </Button>
                 <Box flexDirection="column" flexShrink={1}>
-                  <Text dimColor>{fixOrigin(x)} {fixKind(x)}</Text>
-                  {prompt(fixWords(x), width - 8)}
-                  <Text dimColor>{fixWhere(x)}</Text>
-                  {requested(x)}
+                  <Text><Text weight="bold">{title(x.dimension)}</Text><Text dimColor>{x.findingIds !== undefined ? ` · ${fixOrigin(x).replace(/^For [^,]*, |\.$/g, '')}` : ''} · {fixKind(x).replace(/:$/, '')}</Text></Text>
+                  {prompt(clip(fixQuote(x), (width - 10) * 2), width - 8)}
+                  <Text dimColor>{status}</Text>
                   {x.applied === undefined && draftedIds.includes(x.fixId) && <Text color="success">✓ Drafted in your prompt box. Press Enter to apply it.</Text>}
                   {x.applied === undefined && draftedIds.includes(x.fixId) && loadsLater(x) && <Text dimColor>{LOADS}</Text>}
                   {outcomeLine(x)}
@@ -702,12 +759,10 @@ export const register: Register = on => {
           <Text weight="bold">Applied</Text>
           {f.applied.length === 0 && <Text dimColor>None yet. A fix counts as applied once its request is seen in a session.</Text>}
           {f.applied.map((x) => (
-            <Box key={`applied:${x.fixId}`} flexDirection="column" paddingLeft={2} marginTop={1}>
-              {prompt(fixWords(x), width - 8)}
-              <Text color="success">Applied {day(x.applied?.at ?? '')}{x.target === 'project-hooks' ? ' · hook' : ''}</Text>
-              {x.before !== undefined && <Text><Text dimColor>Before   </Text>{windowText(x.before)}</Text>}
-              {x.since !== undefined && <Text><Text dimColor>Since    </Text>{windowText(x.since)}</Text>}
-              {x.cameBack !== undefined && <Text>Came back in {x.cameBack.sessionId.slice(0, 8)}{x.cameBack.turn !== undefined ? `, turn ${x.cameBack.turn}` : ''}</Text>}
+            <Box key={`applied:${x.fixId}`} flexDirection="column" paddingLeft={2}>
+              <Text weight="bold">{title(x.dimension)}</Text>
+              {prompt(clip(fixQuote(x), (width - 10) * 2), width - 8)}
+              <Text><Text color="success">Applied {day(x.applied?.at ?? '')}{x.target === 'project-hooks' ? ' · hook' : ''}</Text><Text dimColor>{outcomeText(x) !== '' ? ` · ${outcomeText(x)}` : ''}</Text></Text>
             </Box>
           ))}
         </Box>
@@ -738,7 +793,7 @@ export const register: Register = on => {
           <Box flexDirection="row">
             <Box width={14} flexShrink={0}><Text dimColor>Dismissed</Text></Box>
             <Text>{data.dismissed ?? 0} finding{data.dismissed === 1 ? '' : 's'}</Text>
-            {(data.dismissed ?? 0) > 0 && <Box marginLeft={2}>{tertiary('restore-all', 'Restore all', () => restoreAll($))}</Box>}
+            {(data.dismissed ?? 0) > 0 && <Box marginLeft={2}>{secondary('restore-all', 'Restore all', () => restoreAll($))}</Box>}
           </Box>
           {sayLines(BULK, width)}
         </Box>
@@ -794,7 +849,7 @@ export const register: Register = on => {
           <Text color="claude">{strip.bottom}</Text>
         </Box>
 
-        {message !== '' && <Text color="suggestion">{message}</Text>}
+        {message !== '' && <Text color="suggestion">{message === RECORDING ? `${spin} ` : ''}{message}</Text>}
 
         {active === 'fixes' ? fixesTab() : active === 'health' ? healthTab() : findingsTab()}
 
