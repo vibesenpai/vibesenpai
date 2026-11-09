@@ -178,10 +178,6 @@ const faq = [
     <div class="lines">
       {terms.map(([head, body]) => <p><strong>{head}</strong> <span>{body}</span></p>)}
     </div>
-    <p class="measured">
-      Measured, not claimed: the edit-retry check fired on 380 of 1,139 real sessions, with no false positives in a hand check.
-      We also publish <a href={`${base}/work/graveyard/`}>the ten detectors we built and deleted</a>, with the numbers.
-    </p>
   </section>
 
   <section class="faq reveal">
@@ -200,7 +196,7 @@ const faq = [
       <pre><code>{install}</code></pre>
       <button type="button" data-copy={install}>Copy</button>
     </div>
-    <a class="primary" href={`${base}/start/install/`}>Get started</a>
+    <div class="next"><a class="primary" href={`${base}/start/install/`}>Get started</a></div>
   </section>
 </div>
 
@@ -300,7 +296,6 @@ const faq = [
   .lines { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 56px; margin-top: 24px; }
   .lines p { margin: 0; color: var(--vs-quiet); line-height: 1.6; }
   .lines strong { color: var(--vs-text); display: block; font-size: 19px; margin-bottom: 4px; }
-  .measured { margin-top: 40px; color: var(--vs-quiet); max-width: 72ch; }
 
   .faq { max-width: 780px; }
   .faq details { border-top: 1px solid var(--vs-line); padding: 18px 0; }
@@ -309,7 +304,8 @@ const faq = [
   .faq p { color: var(--vs-quiet); margin: 12px 0 0; }
 
   .closing { text-align: center; margin-bottom: 96px; }
-  .closing .install { margin: 8px 0 28px; }
+  .closing .install { margin: 8px 0 0; }
+  .closing .next { margin-top: 28px; }
 
   @media (max-width: 860px) {
     .pair, .value, .value.flip, .groups, .lines { grid-template-columns: 1fr; }
