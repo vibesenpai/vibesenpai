@@ -118,7 +118,7 @@ pass "model reads off for stage 2"
 mkdir -p "$work/project"
 (cd "$work/project" && git init -q)
 out=$(cd "$work/project" && claude -p 'Reply with the single word ok.' --output-format json </dev/null 2>"$work/p1.err") \
-  || { cat "$work/p1.err" >&2; fail "claude -p failed. If it asks to log in: CLAUDE_CONFIG_DIR=$profile claude, then /login"; }
+  || { cat "$work/p1.err" >&2; printf '%s\n' "$out" | tail -5 >&2; fail "claude -p failed. If it asks to log in: CLAUDE_CONFIG_DIR=$profile claude, then /login"; }
 sid=$(printf '%s' "$out" | json "j.session_id")
 [ -n "$sid" ] || fail "claude -p gave no session id"
 pass "a headless session ran ($sid)"
