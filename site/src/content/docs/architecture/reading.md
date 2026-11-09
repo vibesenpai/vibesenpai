@@ -3,68 +3,60 @@ title: Reading a transcript
 description: Why nothing is ever copied, and why walking the parentUuid tree would have been a silent bug.
 ---
 
-## Nothing is copied, and that is a security decision
+This page explains how vibesenpai reads Claude Code's transcript files: why it
+never copies them, where secrets are removed, and why it reads records in file
+order.
 
-Local-first usually means "nothing leaves the machine". Necessary, not
-sufficient — **the smallest attack surface is the one that does not exist.**
+## Why is nothing copied?
 
-A transcript can contain a leaked token: an API key pasted into a prompt, a
-`.env` echoed by a tool result. That exposure already exists in the harness's
-file. *Copying it creates a second one*, in a directory we chose, with a
-lifetime we chose, that you never asked for. If that copy is read by the wrong
-process, synced, or swept into a backup, the breach is **ours**, from data that
-was not ours to duplicate.
+A transcript can contain a secret: an API key pasted into a prompt, or a `.env`
+file printed by a tool. That exposure already exists in Claude Code's file.
 
-So transcripts are read with ranged reads and never opened for writing. `scan`
-prints `copied nothing` because it is literally true:
+A copy would create a second one, in a place and for a lifetime vibesenpai
+chose, which you never asked for. So:
 
-```
-scanned 16 transcripts · 16 new, 0 grown, 0 unchanged
-read 55.7 MB · copied nothing
-```
+- Transcripts are read in place, by byte range, and never opened for writing.
+- What is stored is derived: **byte offsets and hashes** to know what has been
+  read, and findings with their turn anchors and short quotes, **redacted when
+  written** (`store.db`, see [Reference](/vibesenpai/reference/)).
+- The conversation the pane shows around a finding is read from the transcript
+  each time, redacted, and not kept.
 
-What is stored is a catalog of **byte offsets and hashes** — enough to know
-what has already been read, not enough to reconstruct anything.
+**The cost:** no history beyond Claude Code's own retention. When Claude Code
+deletes a transcript, that session is gone here too. An opt-in copy
+was considered and rejected: it would bring back a copy writer, a cleanup loop
+and file-permission checks that not copying avoids.
 
-The cost is accepted rather than worked around: **no history beyond the
-harness's own retention.** When Claude Code deletes a transcript, that session
-is gone for us too. Copying was considered as an opt-in and rejected, because
-the escape hatch would have brought back the copy writer, the prune loop and
-the permission enforcement that not copying removes entirely.
+## When are secrets removed?
 
-## Redaction happens at construction
+At construction. The parser redacts as it builds events, so nothing
+downstream ever holds the unredacted text. Code built on top is safe by
+default, not by remembering to redact.
 
-Not before display, and not before sending. The parser redacts as it builds
-events, so nothing downstream ever holds the unredacted form. Everything built
-on top is safe by default rather than by remembering.
+Redaction covers secret-shaped text such as API keys, JWTs, bearer tokens and
+credentials in URLs. In a transcript, tool output is where such text usually
+appears.
 
-Measured across the corpus: **50% of real sessions carry secret-shaped content**
-at the fidelity the judge reads — API keys, JWTs, bearer tokens, URL
-credentials — and tool output is where it concentrates.
-
-## File order, not the tree
+## Why file order, not the tree?
 
 Every record carries a `parentUuid`, so a transcript looks like a tree. The
-obvious design is to walk it: reconstruct the live path and ignore branches
-left behind by rewinds.
+obvious design is to walk the longest path and ignore side branches, on the
+idea that side branches are what a rewind left behind.
 
-**Measured against real sessions, that would be a bug.**
+That would be a bug.
 
 ![A branch point with two live children](../../../diagrams/branch-point.svg)
 
-The longest path covers only **1,325 of 1,695** records, and walking it drops
-**46 real records — 39 of them `tool_result`s.**
+The branch above is not a rewind. It is two parallel tool calls, which is
+ordinary. Walking only the longest path drops one of them, including its
+`tool_result`.
 
-That is the part that matters. A `tool_result` is where the harness records
-whether a call failed and who refused it, and `edit_retry` reads exactly that.
-The bug would not have crashed. It would have produced confident wrong
-findings, quietly, forever.
+A `tool_result` is where Claude Code records whether a call failed and who
+refused it, and `edit_retry` reads exactly that. Dropping them would not crash
+anything. It would produce wrong findings with no visible error.
 
-The branch above is not a rewind at all — it is two parallel tool calls, which
-is ordinary. Treating every branch as a discarded timeline throws away work the
-agent actually did.
-
-So events are flattened in **file order**, and the tree is used for what it is
-good for: attributing subagent work. A subagent's work is a contiguous subtree,
-so the topmost sidechain ancestor identifies the invocation that spawned it —
-**712 of 712 sidechain events attributed, 96 distinct subagents.**
+So events are read in **file order**. The tree is used only for attributing
+subagent work (a sidechain, in Claude Code's terms): a subagent's records form
+one subtree, so its topmost ancestor identifies the call that started it. The
+pinned public corpus that `npm run verify:corpus` checks has 712 sidechain
+events (`scripts/corpus.json`).

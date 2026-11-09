@@ -1,125 +1,96 @@
 ---
 title: The graveyard
-description: Ten detectors built, measured, and deleted — with the evidence that killed each one.
+description: Detectors that were built or proposed, measured, and removed, with the number that removed each one.
 ---
 
-Ten detectors were built here, measured against real sessions, and deleted.
-This page exists because a tool that tells you what your agent got wrong should
-be able to say what it got wrong itself.
+This page lists detectors that were measured and removed, and the number that
+removed each. It also lists mistakes in how the judge was measured.
 
-The full record is in [`GRAVEYARD.md`](https://github.com/vibesenpai/vibesenpai/blob/main/GRAVEYARD.md).
-These are the ones worth reading.
+The measurements use 1,139 real Claude Code sessions from the public
+[SWE-chat](https://huggingface.co/datasets/SALT-NLP/SWE-chat) dataset. The full
+record is in
+[`GRAVEYARD.md`](https://github.com/vibesenpai/vibesenpai/blob/main/GRAVEYARD.md).
 
-## `stale_read` — 100% explained by something innocent
+## What is in the graveyard?
 
-The idea: the agent reads a file, something changes it, the agent acts on the
-stale copy.
+Three shipped detectors were removed. Ten more candidates and several probes
+were measured and never shipped. These five show the pattern.
 
-Measured on real sessions, **every single candidate** was explained by the
-agent's own prior edit. It had changed the file itself, so of course the read
-was stale. There was no case left over where something external had moved
-underneath it.
+### `stale_read`: every case had an innocent cause
 
-A detector whose entire population has an innocent explanation is not a
-detector with a precision problem. It is a detector with no subject.
+**Idea:** the agent reads a file, something else changes it, and the agent acts
+on the old copy.
 
-## `permission_denied` — the denials were people working normally
+**Result:** it matched 27.7% of sessions. All 2,078 candidates followed the
+agent's own earlier edit to that file. No case was left where something
+external had changed the file.
 
-18.1% of sessions had a denied tool call, which looked like a lot.
+A detector whose every match has an innocent cause has nothing to detect.
 
-Then the denials were read. On real interactive data they are `ExitPlanMode` and
-`AskUserQuestion`: a person rejecting a plan or answering a question. That is a
-person exercising control over their own machine, which is plan mode working
-rather than failing.
+### `permission_denied`: the denials were people deciding
 
-We could have shipped a finding that fired on one in five sessions. It would
-have been telling people off for saying no.
+**Idea:** a denied tool call is wasted work.
 
-## `inaccurate_self_report` as a rule — 0 true positives, 5 false
+**Result:** 18.1% of sessions had one. The denials were `ExitPlanMode` and
+`AskUserQuestion`: a person rejecting a plan or answering a question. That is
+plan mode working, not failing.
 
-This one is instructive because the dimension is real and the *approach* was
-wrong.
+### `inaccurate_self_report` as a rule: 0 true, 5 false
 
-Built on structure — look for a success claim near a failed tool result — it
-produced **zero true positives and five false positives**. Every one of the five
-was an agent honestly describing partial progress.
+**Idea:** a success claim near a failed tool result is a false report.
 
-It works now, and it is one of the better dimensions, because [the judge](/vibesenpai/architecture/judge/)
-reads what was actually said instead of pattern-matching around it. Same
-dimension, different tier, opposite outcome.
+**Result:** **0 true positives and 5 false positives.** Each of the five was an
+accurate report of partial progress.
 
-## `file_churn` — real, frequent, and not established as waste
+The dimension itself is real. It works as a
+[judge](/vibesenpai/architecture/judge/) dimension, because the judge reads what
+was said. Same dimension, different tier, opposite result.
 
-A file going through many versions in one session. **48% of sessions** edit
-some file five or more times, and 23% ten or more (GRAVEYARD.md, 1,139
-sessions). The frequency probe in `npm run measure` asks a narrower question
-of the same sessions, whether a file has more than five versions in Claude
-Code's file history, and finds **11%**.
+### `file_churn`: frequent, and not shown to be waste
 
-The problem was never detection. It was that nobody could show churn is waste.
-Iterating is how the work gets done. A finding that fires on that many
-sessions and cannot say whether the thing it found was bad is a number, not an
-insight.
+**Idea:** a file edited many times in one session is rework.
 
-## `reading_spiral` — killed by the wrong reason, then by the right one
+**Result:** 48% of sessions edit some file five or more times, and 23% ten or
+more. A narrower test, a file with more than five versions in Claude Code's file
+history, matches 11%
+([docs/findings-frequency.md](https://github.com/vibesenpai/vibesenpai/blob/main/docs/findings-frequency.md)).
 
-Documented as confounded by sidechains. When that was finally measured, the
-sidechain confound was **4 of 2,182 cases — 0%**. The documented reason was
-wrong.
+Detection was never the problem. No one could show that churn is waste:
+editing a file several times is how most work gets done.
 
-The real reason killed it anyway: 99% of the repeated reads were different
-calls, not the same call repeated. The detector was counting normal exploration.
+### `reading_spiral`: the documented reason was wrong
 
-Worth keeping because the first explanation was confidently wrong and nobody
-checked for weeks.
+**Idea:** reading the same file three or more times with no edit between is a
+loop. It matched 51% of sessions and was never built.
 
-## The method failures, which are the uncomfortable half
+| check | result |
+|---|---|
+| the documented confound, subagents reading in parallel | **4 of 2,182** |
+| were the repeated reads the same call? | **15 the same, 2,167 different** |
 
-Detectors failing is ordinary. These are mistakes in how things were measured,
-and they are here because they are more useful than the successes.
+The documented reason was wrong, and the measured one removed it anyway.
+Different reads of one file are an agent studying it: reading in pages, or
+searching for different things.
 
-### A result buried as a failure that was worth +11 points
+## What went wrong in measuring the judge?
 
-A change to the judge's rubric was measured, found to make things worse, and
-written up as a dead end. It was measured on 60 of 246 available sessions,
-against a baseline that had been **edited partway through the experiment**.
+These are mistakes in method, not in detectors. Each one comes from the judge's
+evaluation on 246 labelled sessions from a
+[research dataset](https://arxiv.org/abs/2605.29442).
 
-On the full set it is worth **+11 points of session-level agreement**. It had
-been working the whole time.
+| what was reported | what was true |
+|---|---|
+| a rubric change made results worse | measured on 60 of 246 sessions, against a baseline edited mid-run. On all 246 it adds **+11 points** of session-level agreement |
+| three runs of "identical code" scored 52%, 66% and 67%, so the judge is unstable | the prompt file was rewritten during the experiment. Runs 2 and 3 used the same code: **66% and 67%** |
+| a 60-session sample was enough | an early cost choice, never revisited. Scoring now reads the whole labelled set |
 
-### A "16-point variance band" that was a code change
+All three have one cause: the thing being measured changed during the
+measurement.
 
-Three runs of what was believed to be identical code scored 52%, 66% and 67%.
-That was written up as evidence that the judge's output is wildly unstable, and
-a recommendation to run every experiment three times.
+## Why is this public?
 
-`src/judge.ts` had been rewritten **during the experiment**. Run 1 read the old
-prompt; runs 2 and 3 read the new one. True same-code variance is run 2 against
-run 3: **66% versus 67%**.
-
-The fix was not "be more careful". A scoring run now records the commit it ran
-against, so a mid-experiment edit is self-evident rather than something someone
-has to notice.
-
-### Sampling 60 of 246 sessions for a dozen runs
-
-Nobody decided this. An early run picked 60 for cost, and every later run
-inherited it, so an entire measurement campaign ran at roughly twice the error
-bar it needed to — on data that was sitting on the same disk the whole time.
-
-Scoring now defaults to every labelled session. Sampling is something you ask
-for.
-
-## Why publish this
-
-Three reasons, in increasing order of honesty.
-
-It stops the same ideas being rebuilt. Every entry has the number that killed
-it, so "what about detecting file churn?" has an answer.
-
-It is the only evidence that the dimensions which *did* ship were not simply
-the first ten things someone thought of.
-
-And a tool whose entire premise is *"here is where your agent went wrong, with
-the evidence"* has no standing to be shy about its own. If this page did not
-exist, you would be right to wonder what was in it.
+- It stops the same ideas being rebuilt: each entry has the number that
+  removed it.
+- It shows that the dimensions that shipped were tested against alternatives.
+- A tool that shows an agent's mistakes with evidence shows its own the same
+  way.

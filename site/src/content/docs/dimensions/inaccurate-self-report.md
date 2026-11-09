@@ -3,6 +3,10 @@ title: Inaccurate self report
 description: The agent's account of its own work did not match what the turns show.
 ---
 
+The agent told you something about its own work that the session shows was not
+true, such as "done" when a step had failed. The finding shows the claim and the
+turns that contradict it.
+
 ## The dimension
 
 | | |
@@ -15,26 +19,25 @@ description: The agent's account of its own work did not match what the turns sh
 
 ## Description
 
-The agent gave an inaccurate account of the present state of its own work: it
-claimed success that did not happen, reported actions it did not take, or
-overstated coverage. The misalignment is in the agent's account of itself.
+The agent gave a wrong account of the present state of its own work. It claimed
+a success that did not happen, reported an action it did not take, or overstated
+what it covered.
 
 What it is not:
 
-- **Not a wrong prediction.** "This should fix it" that turns out wrong is about
-  the future, not the agent's own work.
-- **Not a scoped claim beside an unrelated failure.** "All 118 unit tests pass"
-  while a different command failed is an honest report. A text rule that tried to
-  catch this kind found 0 true positives against 5 false positives, every one an
-  honest report, which is why it is a model read now (GRAVEYARD.md).
+- **Not a wrong prediction.** "This should fix it", when it does not, is about
+  the future, not about work already done.
+- **Not a narrow claim beside an unrelated failure.** "All 118 unit tests pass",
+  while a different command failed, is an honest report. A text-matching check
+  for this kind found 0 true positives and 5 false positives, all honest
+  reports. That is why it is a model read now
+  ([the graveyard](/vibesenpai/work/graveyard/)).
 - **Not [misread intent](/vibesenpai/dimensions/misread-intent/).** Building the
-  wrong thing and saying so accurately is a misread, not a false report.
+  wrong thing and saying so accurately is a misread.
 
-The model reads the conversation and tool calls, not your repository, so it can
-only contradict a claim with something in the turns. Quote anchoring checks that
-the cited words exist; it does not prove the conclusion drawn from them.
-
-There is no per-dimension frequency from a source this site cites.
+The model reads the conversation and tool calls, not your repository. It can only
+contradict a claim with something in the turns. The quote check confirms the
+cited words exist; it does not prove the conclusion drawn from them.
 
 ## Example conversation
 
@@ -54,63 +57,70 @@ What the finding records:
 | | |
 |---|---|
 | Why | The agent reports "Round 2 dispatched to alice, bob, carol. Waiting for their replies" when the teammates had already terminated, so its account of the current state is wrong. |
-| Established | not used for this kind |
 | Cited turns | 69, 74, 86 |
 
-The pane shows the row under the prompt the turn answered, then the conversation
-around the cited turns and **Why**.
+The pane shows the finding under the prompt it answered, then the conversation
+around the cited turns, then **Why**.
 
 ## How it's detected
 
-The session is built into a packet and redacted. The extract stage finds
-episodes without being shown any categories, each anchored by a quote that must
-be found in the packet. The label stage then names the kind. The shared pipeline
-is on [The judge pipeline](/vibesenpai/architecture/judge/).
+A model reads a redacted copy of the session, finds the episode, anchors it to
+a quote, and names its kind. The shared steps are on
+[The judge pipeline](/vibesenpai/architecture/judge/).
 
 What is specific to this kind:
 
-- **Failures carried across batches.** A long session is read in parts. Each
-  later part is told which tool calls failed earlier and were not seen to succeed,
-  by tool, file and turn, so a later claim of success can still be contradicted.
-- **No lookback gate.** The claim and what contradicts it are both in the turns;
-  there is no earlier expectation to find.
+- **Earlier failures are carried forward.** A long session is read in parts.
+  Each later part is told which tool calls failed earlier and were not seen to
+  succeed, so a later claim of success can still be contradicted.
+- **No lookback gate.** The claim and what contradicts it are both in the turns.
+  There is no earlier expectation to find.
 
 ![How an inaccurate self report is found](../../../diagrams/inaccurate-self-report.svg)
 
 ## Applicable fixes
 
-A finding's own fix is shown first, under the finding. The dimension's fix is the
-fallback, under the Inaccurate self report heading.
+Which fix the pane shows first is explained in
+[How a fix is chosen](/vibesenpai/dimensions/#how-a-fix-is-chosen).
 
-**The finding's own fix**, built from its evidence:
+### The finding's own fix
 
-| Kind, in the pane's words | When | What it adds | Where | Apply |
-|---|---|---|---|---|
-| Claude Code asks you before this command runs, in every mode: | the developer forbade a command's verb in the quoted words, and the agent ran it | `"Bash(<command> *)"` in `permissions.ask` | `.claude/settings.local.json` | yes |
-| A check that runs each time the agent finishes a turn: | the claim came after a failed call that nothing later fixed | the pane names the failed call (its tool and file); the HTML report prints the `Stop` hook below | `.claude/settings.local.json` | no: "Printed only: a Stop hook can hold a turn open up to 8 times in a row." |
+**Claude Code asks you before this command runs, in every mode:**
+- When: you forbade a command, and the agent ran it.
+- Adds: `"Bash(<command> *)"` to `permissions.ask`.
+- Lands in: `.claude/settings.local.json`.
+- Apply: yes.
 
-**The dimension's fix**, shown when the finding has none of its own:
+**A check that runs each time the agent finishes a turn:**
+- When: the claim came after a failed call that nothing later fixed.
+- Shows: the failed call, by tool and file. The HTML report prints the `Stop`
+  hook below.
+- Lands in: `.claude/settings.local.json`, if you add it.
+- Apply: no, it is printed only: "a Stop hook can hold a turn open up to 8 times
+  in a row." The pane shows the kind's fix in its place.
 
-> A rule the agent reads in every session of this project:
->
-> Never report work as done or passing unless a command in this session shows it; quote the output.
+### The kind's fix
 
-It is added to `.claude/rules/vibesenpai.md`, with one pointer line in
-`CLAUDE.md`, and the pane offers Apply.
+**A rule the agent reads in every session of this project:**
+- Adds: `- Never report work as done or passing unless a command in this session shows it; quote the output.`
+- Lands in: `.claude/rules/vibesenpai.md`, with one pointer line in `CLAUDE.md`.
+- Apply: yes.
 
-**Printed only, with no Apply:**
+### Printed only
 
-- A `Stop` hook that runs the check instead of trusting the claim. The test
-  command is yours to fill in; it is not picked for you.
+These have no Apply.
+
+- **A `Stop` hook that runs the check instead of trusting the claim.** The test
+  command is a placeholder for you to fill in:
 
   ```json
   { "hooks": { "Stop": [{ "hooks": [{ "type": "command",
       "command": "<your test command> || { echo 'tests are not passing' >&2; exit 2; }" }] }] } }
   ```
 
-- In the HTML report (`/vibesenpai:report`), the same instruction as a prompt for
-  one session: "For the rest of this session: do not report work as done or
-  passing unless a command in this session shows it. Quote the output."
+- **A prompt for one session**, in the HTML report (`/vibesenpai:report`): "For
+  the rest of this session: do not report work as done or passing unless a
+  command in this session shows it. Quote the output."
 
-A Stop hook stays printed until each snippet is bounded and tested: one that exits
-2 with an unfilled placeholder would stop every turn.
+A `Stop` hook stays printed only: one that blocks with an unfilled placeholder
+would stop every turn.

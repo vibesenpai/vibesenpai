@@ -3,127 +3,100 @@ title: What leaves your machine, and what it costs
 description: Redacted session text, to the model on your own Claude Code login, after a turn ends, within 2M tokens a day.
 ---
 
-The model reads are **on from installation**, so what they send and spend is
-stated here, near the top.
+The model reads are on from installation. This page says what they send, where it goes, when,
+and how many tokens they use.
 
-## The short version
-
-> Your transcripts stay on disk. After a turn ends, **redacted session text
-> your provider already logged** goes to the model (Claude Haiku by default)
-> through your own Claude Code login. No third party, no service of ours.
+## In short
 
 | | |
 |---|---|
-| **read** | `~/.claude/projects/**`, in place: never modified, never copied |
-| **written** | the archive (default `~/.local/share/vibesenpai`): derived, redacted data only |
-| **sent** | redacted session text, to the model, on your account |
-| **when** | in the background, after a turn ends, from the `Stop` hook |
+| **read** | `~/.claude/projects/`, in place. Never changed, never copied |
+| **written** | the store (`~/.local/share/vibesenpai` by default): findings and settings, already redacted |
+| **sent** | redacted session text, to the model, on your own Claude Code account |
+| **when** | in the background, after a turn ends |
 | **how much** | about 60k tokens a session, at most 2M tokens a day |
+
+Your transcripts stay on disk. What is sent is text your provider has already seen in the
+session. No third party is involved, and there is no service of ours.
+
+## Whose account it runs on
+
+Yours. The model reads call the `claude` CLI you are already signed in to. They run on your
+plan, or on your API key if Claude Code uses one. If Claude Code is set up for Bedrock or
+Vertex, the text goes there.
+
+The model is Claude Haiku by default.
 
 ## What is sent
 
-The judge builds a packet from the session's text. Its shape is fixed in
-`src/judge/packet.ts`:
+For each session, a packet of its text:
 
-- **Your prompts are sent whole.** The developer's words are never cut.
-- **The agent's turns are merged, then capped once** by how long the session
-  is: 5,000 characters a turn in a session of up to 8 merged turns, down to 500
-  in one of more than 74.
-- **The agent's turns include what its tools returned**: files it read, command
-  output, search results. They are capped with the rest of the turn, so code
-  and output from a session can be part of what is sent.
-- A cut keeps the head and the tail, and states how much was left out.
+- **Your prompts, whole.** Your words are never cut.
+- **The agent's turns, capped.** The cap depends on how long the session is: 5,000 characters
+  a turn in a short session (up to 8 turns), down to 500 in a long one (more than 74).
+- **What the agent's tools returned**, inside those turns: files it read, command output,
+  search results. So code and output from a session can be part of what is sent.
 
-The packet goes to `claude -p` with no tools allowed (`--allowed-tools ''`): the
-model reads and answers; it cannot act.
+A cut keeps the start and the end of a turn, and says how much was left out.
 
-## Redaction is asserted before every call
+The call allows no tools: the model reads and answers; it cannot act.
 
-Redaction happens when the packet is built. Immediately before each call the
-packet is checked again, and the send is **aborted** if redaction would still
-change anything:
+## Redaction, checked before every call
 
-```
-  redact(packet) === packet   or the send aborts
-```
+Secrets are removed when the packet is built. Right before each call, the packet is checked
+again. If redaction would still change anything, the call is not made.
 
-What `src/redact.ts` removes:
+What is removed:
 
-- private keys (PEM blocks)
-- provider-prefixed tokens: Anthropic, OpenAI, GitHub, Slack, AWS, Google,
-  GitLab, npm, Stripe, Hugging Face and others
+- private keys
+- tokens with a known provider prefix: Anthropic, OpenAI, GitHub, Slack, AWS, Google, GitLab,
+  npm, Stripe, Hugging Face and others
 - JWTs and bearer tokens
 - credentials inside URLs
-- values assigned to secret-named variables (`*_TOKEN`, `*_SECRET`,
-  `PASSWORD`, `API_KEY` and the like)
+- values of secret-named variables (`*_TOKEN`, `*_SECRET`, `PASSWORD`, `API_KEY` and the like)
 - email addresses
 - your username in home-directory paths
 
-Commands, paths, commit SHAs and ids are kept: they are the evidence. Nothing is
-redacted on entropy alone.
+Commands, paths, commit hashes and ids are kept, because they are the evidence. Nothing is
+removed just because it looks random.
 
-[Where redaction happens in the pipeline →](/vibesenpai/architecture/judge/)
+[Where redaction happens in the pipeline](/vibesenpai/architecture/judge/)
 
-## On whose account
+## When it runs
 
-Your own. The judge calls the `claude` CLI you are already signed in to, so it
-runs on your plan, or on your API key if Claude Code is set up with one. If
-Claude Code is configured for Bedrock or Vertex, the packet goes there.
+Only when a turn ends. The `Stop` hook starts a background pass and exits, so your session
+never waits on it. Opening `/vibesenpai:insights` or `/vibesenpai:report` sends nothing.
 
-| | where your data goes |
-|---|---|
-| **mem0** | your memories go to `mcp.mem0.ai`: **a new party** |
-| **vibe-log** | optional cloud sync of sanitised patterns: **a new party** |
-| **vibesenpai** | the model you already use, on your own account: **nobody new** |
+Nothing is spent before the first turn after installation ends. Then the pass reads:
 
-## When
+- **your past sessions, once:** up to 200, newest first. It never goes further back on its own.
+- **each live session again** after about 50 new turns.
+- **within 2M tokens a day** (your local day). When the limit is reached, it stops and
+  continues the next day.
 
-Only the `Stop` hook spends. When a turn ends, the hook starts a detached
-judge pass and exits; the pass never runs inside the turn. Opening
-`/vibesenpai:insights` or `/vibesenpai:report` sends nothing.
-
-The first time a session starts after installation, a one-time notice states
-these figures and the off switch. Nothing is spent until that session's first
-turn ends.
-
-The automatic pass reads:
-
-- the live session again after about 50 new turns
-- **up to 200 past sessions once**, newest first; the cutoff is stored, so a
-  later pass never reaches further back
-- within **2M tokens a day** (local day). When the day's budget is reached, the
-  pass stops and continues the next day.
-
-[Phases of a run →](/vibesenpai/architecture/phases/)
+[Phases of a run](/vibesenpai/architecture/phases/)
 
 ## What it costs
 
-```
-  per session     about 60k tokens
-  per day         at most 2M tokens, about 33 sessions
-```
+| | |
+|---|---|
+| per session | about 60k tokens |
+| per day | at most 2M tokens, about 33 sessions |
 
-A packet is filled with whole sessions up to 60,000 tokens, and each model call
-carries about 26k tokens of invocation overhead of its own, so sessions share a
-call.
+Several sessions share one model call, up to 60,000 tokens of session text, because each call
+carries about 26k tokens of overhead of its own.
 
-Each call's tokens and the dollar figure Claude Code reports for it
-(`total_cost_usd`) are recorded. `/vibesenpai:judge` shows them. The dollars are
-Claude Code's own figure at API prices; on a subscription they are plan usage,
-not a bill.
+Each call's tokens and Claude Code's dollar figure for it are recorded.
+`/vibesenpai:judge` and the pane's Health tab show them:
+
+![The Health tab: 637k of 2.0M tokens today, 11 calls, 576k in, 61k out, $0.08 at API prices, and model reads on.](../../../assets/docs/health-spend.png)
+
+The dollar figure is at API prices; on a subscription it is plan usage, not a bill.
 
 ## How to stop it
 
-```
-/vibesenpai:judge off
-```
-
-Stops the model reads. The free checks keep running, and nothing is sent.
-`/vibesenpai:judge on` turns them back on.
-
-```
-/plugin disable vibesenpai
-```
-
-Stops everything, the hooks included. `VIBESENPAI_DISABLE=1` does the same from
-the environment.
+| | |
+|---|---|
+| `/vibesenpai:judge off` | stops the model reads. The free checks keep running; nothing is sent. `/vibesenpai:judge on` turns them back on |
+| `/plugin disable vibesenpai` | stops everything, hooks included |
+| `VIBESENPAI_DISABLE=1` | the same as disabling, from the environment Claude Code runs in |

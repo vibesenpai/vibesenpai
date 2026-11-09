@@ -3,61 +3,68 @@ title: Overview
 description: Several entry paths share one spine; the judge runs in the background, and the store holds derived data, never transcripts.
 ---
 
-Two things about the shape of this tool that a straight-line diagram would get
-wrong.
+This page shows how vibesenpai reads your sessions, what it keeps, and what it
+never keeps. The pages linked at the end go deeper on each part.
 
 ![The vibesenpai pipeline](../../../diagrams/pipeline.svg)
 
-**It is not one pipeline.** Several paths read transcripts, and they differ in
-how bytes get off disk, not in what happens afterwards. `insights` reads the
-live session and what the background passes stored. `report` walks many
-sessions, for the HTML report and for the pane. The standing pass runs detached
-and reads everything. The judge runs detached from the `Stop` hook and reads
-text the free checks never see.
+## Who reads the transcripts?
 
-**The catalog is a side-branch, not a stage.** `scan` records byte offsets and
-hashes so a re-read is cheap, and `doctor` reports on it. Neither `insights`,
-`report`, the standing pass nor the judge consults it. Findings from the free
-checks are re-derived from the source every time.
+Several paths read Claude Code's transcript files. They differ in what they
+read, not in how they process it:
 
-## The spine
-
-| | |
+| path | reads |
 |---|---|
-| **read** | byte ranges, in place. Never opens a source for writing |
-| **parse** | JSONL → events, in **file order**. [Why not the tree →](/vibesenpai/architecture/reading/) |
-| **redact** | here, at construction: not before display, not before sending |
-| **detect** | structure only. [The compiler enforces it →](/vibesenpai/architecture/two-tiers/) |
-| **findings** | identity, dedup, and the count that makes a finding stable |
+| `/vibesenpai:insights` | the live session, plus what the background passes stored |
+| `/vibesenpai:report` and the pane | many sessions, for the HTML report and the side pane |
+| the standing pass | every session; runs in the background and computes the free checks and each finding's fix |
+| the judge | conversation text the free checks never see; runs in the background after a turn ends |
 
-## What is stored
+There is also a catalog of byte offsets and hashes, which makes re-reading a
+file cheap. None of the paths above relies on it: the free checks are
+recomputed from the transcript every time.
 
-`store.db` (SQLite, in the archive) holds what cannot be re-derived for free:
+## What happens to each transcript?
 
-- the judge's findings, with the quote each one is anchored to, redacted
-- the ledger: how far into each session the judge has read, as a byte offset
-- spend: running totals of tokens, and of the dollar figure Claude Code reports
-- dismissals, as ids and enums
-- fix sightings: when a fix's marker was first seen, and whether its rule was
-  seen loaded
+Every path runs the same steps:
 
-It holds **no transcript copies**. What it stores is redacted when it is built.
-The free checks' findings are not stored there: they are computed from the
-transcript each time, so a stale index cannot produce a stale finding.
+| step | what it does |
+|---|---|
+| **read** | reads byte ranges in place; never opens the file for writing |
+| **parse** | turns JSONL lines into events, in **file order** ([why not the tree](/vibesenpai/architecture/reading/)) |
+| **redact** | removes secrets as events are built, not later |
+| **detect** | reads structure only ([the compiler enforces it](/vibesenpai/architecture/two-tiers/)) |
+| **findings** | gives each finding a stable identity and counts repeats |
 
-## No aggregate is a finding
+## What is stored?
 
-A session-wide ratio has no turn to point at, and everything this tool says must
-point at a turn. Ratios and token counts appear as *context* beside findings,
-never as findings.
+`store.db` is a SQLite file in vibesenpai's own data directory (the archive).
+It holds what was derived, never the source:
+
+- findings from both tiers, each with its anchor; a judge finding also keeps
+  its redacted quote
+- how far into each session the judge has read, as a byte offset
+- each session's size and the tokens the judge would need to read it
+- spend: total tokens, and the dollar figure Claude Code reports
+- dismissals, as ids and fixed values
+- when a fix's marker was first seen, and whether its rule was seen loaded
+
+It holds **no copy of any transcript**. The standing pass recomputes the free
+checks from the transcripts each time it runs, rather than trusting what it
+stored before.
+
+## Why is a ratio never a finding?
+
+A session-wide ratio has no turn to point at, and every finding points at a
+turn. Ratios and token counts appear only as context beside a finding.
 
 ## Where to go next
 
-- **[Phases of a run](/vibesenpai/architecture/phases/)**: when each part
-  fires, what spends, and how a failing job heals
-- **[Reading a transcript](/vibesenpai/architecture/reading/)**: the no-copy
-  rule, and the tree-walk that would have been a silent bug
-- **[The two tiers](/vibesenpai/architecture/two-tiers/)**: the free checks and
-  the judge, and why one of them cannot read text
-- **[The judge pipeline](/vibesenpai/architecture/judge/)**: windows, the
-  lookback gate, and where redaction happens
+- [Phases of a run](/vibesenpai/architecture/phases/): when each part runs,
+  what spends tokens, and how a failed job recovers
+- [Reading a transcript](/vibesenpai/architecture/reading/): why nothing is
+  copied, and why events follow file order
+- [The two tiers](/vibesenpai/architecture/two-tiers/): the free checks and
+  the judge, and why a detector cannot read text
+- [The judge pipeline](/vibesenpai/architecture/judge/): batches, the lookback
+  gate, and where redaction happens

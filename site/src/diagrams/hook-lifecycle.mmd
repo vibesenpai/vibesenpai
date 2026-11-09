@@ -2,23 +2,15 @@ sequenceDiagram
   autonumber
   participant You
   participant CC as Claude Code
-  participant H as vibesenpai hooks
-  participant W as detached jobs
-  participant M as the model
+  participant V as vibesenpai
+  participant M as Haiku
 
-  CC->>H: SessionStart
-  H-->>You: last pass's summary (systemMessage)
-  H->>W: standing pass, if stale
-  W-->>W: parse + the free checks (local)
-
+  CC->>V: SessionStart
+  V-->>You: summary (systemMessage)
+  V->>V: free checks, detached
   You->>CC: a turn
-  CC->>H: Stop
-  H->>W: standing pass, if stale
-  H->>W: judge, if due and within limits
-  Note right of H: the hook exits here
-  W->>M: redacted packet (asserted)
-  M-->>W: episodes, then labels
-  W-->>W: findings stored
-
+  CC->>V: Stop
+  V->>M: redacted packet, if due
+  M-->>V: findings, stored
   You->>CC: /vibesenpai:insights
-  CC-->>You: what the passes stored (sends nothing)
+  CC-->>You: the pane (sends nothing)

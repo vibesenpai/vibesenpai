@@ -3,88 +3,88 @@ title: Your first finding
 description: One real finding read the way the pane shows it, what each answer does, and why "nothing flagged" is a result.
 ---
 
-A finding is evidence, not a verdict. It says where to look and why; what it was is yours to
-decide. This page reads one real finding the way the pane shows it.
+This page walks through one real finding as the pane shows it, part by part, and what each of
+your answers to it does. A finding says where to look and why; whether it is right is yours to
+decide.
 
-From the public test data of [claude-code-log](https://github.com/daaain/claude-code-log) (MIT).
+The example is from the public test data of [claude-code-log](https://github.com/daaain/claude-code-log) (MIT).
 
 ## The row
 
-Under **Inaccurate self report** in **What went wrong, by kind**, the row's headline is the
-developer's own request, in italics and cut to fit:
+![The Misread intent kind, 3 times in 2 sessions, open to one finding: the developer's words, the date, the session and the time.](../../../assets/docs/ff-row.png)
 
-> *"OK, we're going to make a little experiment here. Pretend we have a list of tasks…"*
+- **The kind** comes first, with how often it happened: here, misread intent, 3 times in
+  2 sessions.
+- **Each finding** under it is headed by the words it is about, cut to fit. Here they are the
+  developer's own: *"You can set group.visible using the vis library which is less work"*.
+- **Under the words:** the date, the session and the time.
 
-The developer asked the agent to hand three research tasks to three teammates, each in its
-own worktree, merge their work, then send them a second round. Under the headline are the
-date, the session and the time of the first cited turn.
+## The turns
 
-## Opened
+![Three turns: the agent starting work, the developer interrupting with the cited words, and the agent agreeing.](../../../assets/docs/ff-turns.png)
 
-<!-- screenshot: finding.png -->
+Opening the finding shows the turns around the cited one, read from the transcript where Claude
+Code keeps it. The cited turn is marked **▶**. Each agent turn says how many tool calls it made
+and how many failed.
 
-The pane reads the conversation around the cited turns from the transcript, in place. The
-cited messages are marked `▶`:
+**Show conversation** opens the full messages either side.
 
-- **Agent**, after merging round one:
-  *"Round 1 merged cleanly. Now I'll dispatch round 2 to all three teammates in parallel via
-  SendMessage. Round 2 dispatched to alice, bob, carol. Waiting for their replies to come in."*
-- **You**, about ten minutes later: *"Well, the subagents seem to be either stuck or done... can
-  you check?"*
-- **Agent**: *"Worktrees are clean and still at round-1 commits — no uncommitted work. The
-  SendMessage landed in their inboxes but the agents had already terminated after round 1."*
+## Why
 
-Then:
+![The Why line: the developer asked to hide the group, the agent started per item, and the developer redirected it.](../../../assets/docs/ff-why.png)
 
-**Why:** *The agent reports "Round 2 dispatched to alice, bob, carol. Waiting for their
-replies" when the teammates had already terminated, so its account of the current state is
-wrong.*
-
-**Fix:** this finding has no fix of its own, so its kind's fix is shown:
-
-> A rule the agent reads in every session of this project:
-> *Never report work as done or passing unless a command in this session shows it; quote the output.*
-> Added to .claude/rules/vibesenpai.md
-
-with **Apply** ([Fixes and Apply](/vibesenpai/start/fixes/)), and under it **Finding is wrong**
-and **Hide**. **Not the agent's fault** is not offered here: the quote is the agent's words,
-not the developer's.
+**Why** is the model's one-line account of what went wrong.
 
 ## How to read it
 
-The three cited turns make the case without the model's account: the agent said it was
-waiting for replies; the developer had to ask; the agent's own check found the teammates had
-stopped after round one, so no reply could come. The **Why** line is the model's summary of
-that. The turns are the evidence.
+The turns are the evidence; **Why** only summarises them. Here:
 
-A model finding can be wrong. When the conversation does not bear it out, that is what
-**Finding is wrong** is for.
+1. The developer asked to hide a timeline group, not every item in it.
+2. The agent started hiding the items one by one.
+3. The developer interrupted, pointing at the library's `group.visible`.
+4. The agent agreed and switched.
 
-## What each answer does
+The developer had to correct the course. A model finding can be wrong: if the turns do not bear
+it out, press **Finding is wrong**.
 
-| answer | when | effect |
+## The fix
+
+![The fix: a rule the agent reads in every session of this project, its text, the file it is added to, and Apply.](../../../assets/docs/ff-fix.png)
+
+Each finding offers a change for your agent, with what kind of change it is, its exact text, and
+where it lands. **Apply** drafts it into your prompt box; your Enter is the yes.
+[Fixes and Apply](/vibesenpai/start/fixes/) has the details.
+
+## Your answers
+
+![Three answers: Finding is wrong, Not the agent's fault, and Hide.](../../../assets/docs/ff-answers.png)
+
+| answer | use it when | effect |
 |---|---|---|
-| **Finding is wrong** | it did not happen as described | hidden, `Hidden. Noted as a wrong finding.`; it counts nowhere |
-| **Not the agent's fault** | it happened, but it was not the agent's mistake. Offered only when the quote is yours | hidden, `Hidden. It doesn't count against the agent.` |
-| **Hide** | you have seen it | hidden, `Hidden. It still counts.` |
+| **Finding is wrong** | it did not happen as described | hidden, and it counts nowhere |
+| **Not the agent's fault** | it happened, but it was not the agent's mistake | hidden, and it no longer counts against the agent |
+| **Hide** | you have seen it | hidden, and it still counts |
 | *(no answer)* | | the finding stands, and its fix stays on offer |
 
-Each answer shows at once and offers **Undo**. Nothing is deleted: your answers are kept in
-the local store, and **Restore all** on the Health tab brings hidden findings back into view.
+**Not the agent's fault** is offered only when the cited words are your own, as here. When they
+are the agent's, only **Finding is wrong** and **Hide** are shown.
+
+Each answer takes effect at once and offers **Undo**. Nothing is deleted: **Restore all** on the
+Health tab brings hidden findings back.
 
 ## When nothing is flagged
 
-When nothing has been found, the Findings tab says so, with how many sessions were read. For example:
+If nothing has been found, the Findings tab says so, with how many sessions were read:
 
 ```
 Nothing flagged in 40 sessions read.
 ```
 
-That is a result. The free checks and the model reads ran over those sessions and found
-nothing they could anchor to a turn. Nothing is added to make the pane look busy.
+That is a result. The checks ran over those sessions and found nothing they could point to a
+turn. Nothing is added to fill the pane.
 
 ## Across your history
 
 **Open full report** at the bottom of the Findings tab, or
-[`/vibesenpai:report`](/vibesenpai/commands/report/), writes the same findings across your
-history as one HTML file.
+[`/vibesenpai:report`](/vibesenpai/commands/report/), writes every finding in your history to
+one HTML file.

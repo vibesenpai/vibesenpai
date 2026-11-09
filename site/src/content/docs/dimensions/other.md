@@ -3,6 +3,10 @@ title: Other
 description: A real problem that none of the four named kinds describes, kept rather than forced into a poor fit.
 ---
 
+Something went wrong that none of the four named kinds describes. Rather than
+force it into the wrong one, or drop it, the finding is kept with a short
+description of what it is.
+
 ## The dimension
 
 | | |
@@ -15,29 +19,25 @@ description: A real problem that none of the four named kinds describes, kept ra
 
 ## Description
 
-A breakdown the extract stage found and anchored, which the label stage could not
-honestly place in any of the four named kinds. Without this kind such a problem
-has no label and is dropped, so a real finding would be lost.
+The model found and anchored a real problem, but could not honestly place it in
+any of the four named kinds. Without this kind, such a problem would have no
+label and would be lost.
 
-The label stage is told to use `other` rather than force a poor fit or stay
-silent, and to give a 3 to 8 word noun phrase saying what it is. A record
-labelled `other` with no descriptor is dropped.
+The model is told to use `other` rather than force a poor fit, and to describe
+the problem in 3 to 8 words. An `other` finding with no description is dropped.
 
 What it is not:
 
-- **Not a bucket for weak findings.** It passes the same quote anchoring as every
-  kind, and the same lookback gate as misread intent and constraint violation
-  (below).
+- **Not a bucket for weak findings.** It passes the same quote check as every
+  kind, and the same lookback gate as misread intent and constraint violation.
 - **Never a secondary kind.** A finding can be `other` only as its main kind.
-
-There is no frequency for this kind from a source this site cites.
 
 ## Example conversation
 
 From the public test data of [claude-code-log](https://github.com/daaain/claude-code-log) (MIT).
 
-The developer and the agent had been fixing a script that extracts review comments
-from pull requests.
+The developer and the agent had been fixing a script that extracts review
+comments from pull requests.
 
 > **Developer**, turn 641 (cited): "It's almost perfect now! I just got another round of comments and the only thing missing is from the main (not inline) comment after a new commit that has the "Outside diff range comments" section…"
 >
@@ -57,37 +57,62 @@ What the finding records:
 
 ## How it's detected
 
-The session is built into a packet and redacted. The extract stage finds
-episodes without being shown any categories, each anchored by a quote that must
-be found in the packet. The label stage then names the kind. The shared pipeline
-is on [The judge pipeline](/vibesenpai/architecture/judge/).
+A model reads a redacted copy of the session, finds the episode, anchors it to
+a quote, and names its kind. The shared steps are on
+[The judge pipeline](/vibesenpai/architecture/judge/).
 
 What is specific to this kind:
 
-- **A descriptor is required.** No descriptor, no finding.
-- **The lookback gate applies.** `other` has to name where the expectation was set
-  before the agent acted, like misread intent and constraint violation. Without
-  that, the label stage moved records the gate would have dropped into `other`.
+- **A description is required.** No description, no finding.
+- **The lookback gate applies.** The finding must name where the expectation was
+  set before the agent acted, as for misread intent and constraint violation.
+  Without the gate, findings it would have dropped ended up as `other`.
 
 ![How an Other finding is labelled and gated](../../../diagrams/other.svg)
 
 ## Applicable fixes
 
-**The dimension has no fix.** `other` is unknown by construction, so there is no
-mechanism to recommend for it. The HTML report says so in words: "This is the
-escape hatch: a real problem none of the four dimensions describes. There is
-nothing to recommend yet — the point is to collect these until a pattern is
-visible."
+Which fix the pane shows first is explained in
+[How a fix is chosen](/vibesenpai/dimensions/#how-a-fix-is-chosen).
 
-**A finding can still have its own fix**, built from its evidence, because
-`other` carries where the expectation was set:
+### The kind's fix
 
-| Kind, in the pane's words | When | What it adds | Where | Apply |
-|---|---|---|---|---|
-| Claude Code asks you before this command runs, in every mode: | the developer forbade a command's verb, and the agent ran it | `"Bash(<command> *)"` in `permissions.ask` | `.claude/settings.local.json` | yes |
-| A test that fails when this rule is broken: | the expectation was already a loaded instruction | a request for a test, lint rule or type constraint; the agent shows it before adding it | a test or check in this project | yes |
-| A rule the agent reads when it opens these files: | the expectation was set in an earlier prompt, and 1 to 5 project files were written | `- Standing instruction from the developer: "<their words>"` with a `paths:` list | `.claude/rules/vibesenpai/<fix id>.md` | yes |
-| A rule the agent reads in every session of this project: | the expectation was set in an earlier prompt | `- Standing instruction from the developer: "<their words>"` | `.claude/rules/vibesenpai.md` | yes |
+There is none. `other` is unknown by construction, so there is nothing general
+to offer. The HTML report says: "This is the escape hatch: a real problem none
+of the four dimensions describes. There is nothing to recommend yet — the point
+is to collect these until a pattern is visible."
 
-When the finding has none of these, the pane shows the finding with no Fix
-section.
+### The finding's own fix
+
+An `other` finding records where the expectation was set, so it can still have
+its own fix. The first one that fits is offered.
+
+**Claude Code asks you before this command runs, in every mode:**
+- When: you forbade a command, and the agent ran it.
+- Adds: `"Bash(<command> *)"` to `permissions.ask`.
+- Lands in: `.claude/settings.local.json`.
+- Apply: yes.
+
+**A test that fails when this rule is broken:**
+- When: the expectation was already in a loaded instruction file.
+- Adds: a request for a test, lint rule or type constraint. The agent shows it to
+  you before adding it.
+- Lands in: a test or check in this project.
+- Apply: yes.
+
+**A rule the agent reads when it opens these files:**
+- When: the expectation was set in an earlier prompt, and 1 to 5 project files
+  were written.
+- Adds: `- Standing instruction from the developer: "<your words>"`, scoped to
+  those files.
+- Lands in: its own file under `.claude/rules/vibesenpai/`.
+- Apply: yes.
+
+**A rule the agent reads in every session of this project:**
+- When: the expectation was set in an earlier prompt.
+- Adds: `- Standing instruction from the developer: "<your words>"`.
+- Lands in: `.claude/rules/vibesenpai.md`.
+- Apply: yes.
+
+Your words are used only when they are 240 characters or fewer. When none of
+these fits, the pane shows the finding with no fix.

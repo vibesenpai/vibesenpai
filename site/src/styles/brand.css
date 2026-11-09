@@ -53,3 +53,18 @@
     navigation: auto;
   }
 }
+
+/* Screenshots in the docs (rasters, served as .webp), framed with room around them; diagrams (.svg) are not. */
+.sl-markdown-content img[src$='.webp'] {
+  display: block;
+  margin-block: 1.5rem;
+  padding: 14px;
+  border: 1px solid var(--vs-line);
+  border-radius: 14px;
+  background: var(--vs-panel);
+}
+
+/* The splash page (no sidebar) runs the window width up to 80rem; Starlight caps it at 67.5rem. */
+:root:not([data-has-sidebar]) {
+  --sl-content-width: min(100%, 80rem);
+}

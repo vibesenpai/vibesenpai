@@ -38,7 +38,7 @@ const values = [
     body: 'Once a fix is applied, the pane counts how often the same thing happened before it and since. Counts, never rates.',
     points: [
       ['Before and since, in this project', `${base}/start/fixes/`],
-      ['Says where it came back, if it did', `${base}/start/fixes/`],
+      ['Counts, never percentages', `${base}/start/fixes/`],
       ['A rule counts from when it was loaded', `${base}/start/fixes/`],
     ],
     shot: 'fixes',
@@ -103,18 +103,20 @@ const faq = [
 <div class="home not-content">
   <section class="hero">
     <div class="glow" aria-hidden="true"></div>
-    <h1 class="rise r1">Discover how your agents failed you.</h1>
-    <p class="lede rise r2">vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.</p>
-    <div class="art rise r3">
-      <Image src={sensei} alt="The vibesenpai mascot, an old sensei in a straw hat, pointing at a turn in a transcript." widths={[480, 720, 960]} sizes="(max-width: 720px) 90vw, 560px" loading="eager" />
+    <div class="copy">
+      <h1 class="rise r1">Discover how your agents failed you.</h1>
+      <p class="lede rise r2">vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.</p>
+      <div class="actions rise r3">
+        <a class="primary" href={`${base}/start/install/`}>Get started</a>
+        <a class="quiet" href="#dimensions">What it looks for</a>
+      </div>
+      <div class="install rise r4">
+        <pre><code>{install}</code></pre>
+        <button type="button" data-copy={install}>Copy</button>
+      </div>
     </div>
-    <div class="actions rise r4">
-      <a class="primary" href={`${base}/start/install/`}>Get started</a>
-      <a class="quiet" href="#dimensions">What it looks for</a>
-    </div>
-    <div class="install rise r5">
-      <pre><code>{install}</code></pre>
-      <button type="button" data-copy={install}>Copy</button>
+    <div class="art rise r5">
+      <Image src={sensei} alt="The vibesenpai mascot, an old sensei in a straw hat, pointing at a turn in a transcript." widths={[480, 720, 960]} sizes="(max-width: 860px) 90vw, 560px" loading="eager" />
     </div>
   </section>
 
@@ -143,7 +145,7 @@ const faq = [
         </ul>
       </div>
       <div class="picture">
-        <Shot name={v.shot} alt={v.alt} />
+        <Shot name={v.shot} alt={v.alt} {...(v.caption !== undefined ? { caption: v.caption } : {})} />
       </div>
     </section>
   ))}
@@ -226,20 +228,24 @@ const faq = [
   .home h3 { font-size: 15px; font-weight: 600; color: var(--vs-quiet); margin: 0 0 12px; }
   section { margin-top: var(--gap); }
 
-  /* Hero: centred, the mascot in a soft halo of the hat's blue. */
-  .hero { position: relative; text-align: center; margin-top: 24px; padding-top: 24px; }
+  /* Hero: words on the left, the mascot on the right in a soft halo of the hat's blue; stacked on phones. */
+  .hero {
+    position: relative; margin-top: 24px; padding-top: 24px;
+    display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(32px, 5vw, 72px); align-items: center;
+  }
+  .copy { min-width: 0; }
   .glow {
     position: absolute; inset: -80px -10% auto; height: 760px; z-index: -1; pointer-events: none;
-    background: radial-gradient(ellipse 50% 45% at 50% 55%, var(--vs-glow), transparent 70%);
+    background: radial-gradient(ellipse 50% 45% at 72% 55%, var(--vs-glow), transparent 70%);
   }
   .hero h1 {
     font-size: clamp(40px, 6.4vw, 76px); line-height: 1.02; letter-spacing: -0.035em; font-weight: 700;
-    max-width: 12ch; margin: 0 auto 20px; color: var(--vs-text);
+    max-width: 12ch; margin: 0 0 clamp(24px, 2.6vw, 36px); color: var(--vs-text);
   }
-  .lede { font-size: clamp(17px, 1.6vw, 20px); color: var(--vs-quiet); max-width: 46ch; margin: 0 auto 36px; line-height: 1.55; }
-  .art { width: min(560px, 90%); margin: 0 auto; border-radius: 20px; overflow: hidden; border: 1px solid var(--vs-line); box-shadow: 0 40px 120px -40px var(--vs-glow); }
+  .lede { font-size: clamp(17px, 1.6vw, 20px); color: var(--vs-quiet); max-width: 46ch; margin: 0 0 32px; line-height: 1.55; }
+  .art { width: 100%; min-width: 0; margin: 0; border-radius: 20px; overflow: hidden; border: 1px solid var(--vs-line); box-shadow: 0 40px 120px -40px var(--vs-glow); }
   .art :global(img) { display: block; width: 100%; height: auto; }
-  .actions { display: flex; gap: 24px; justify-content: center; align-items: center; margin: 36px 0 20px; flex-wrap: wrap; }
+  .actions { display: flex; gap: 24px; align-items: center; margin: 0 0 20px; flex-wrap: wrap; }
   .primary {
     display: inline-block; background: var(--vs-hat); color: var(--vs-ink) !important; font-weight: 600;
     padding: 12px 22px; border-radius: 8px; text-decoration: none;
@@ -247,15 +253,19 @@ const faq = [
   .quiet { font-weight: 500; }
   .install {
     position: relative; display: inline-block; text-align: left; max-width: 100%;
-    background: var(--vs-panel); border: 1px solid var(--vs-line); border-radius: 10px; padding: 12px 84px 12px 16px;
+    background: color-mix(in srgb, var(--vs-hat) 8%, var(--vs-panel));
+    border: 1px solid color-mix(in srgb, var(--vs-hat) 55%, var(--vs-line)); border-radius: 12px;
+    padding: 20px 112px 20px 22px;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--vs-hat) 10%, transparent), 0 24px 60px -30px var(--vs-glow);
   }
-  .install pre { margin: 0; background: none; border: 0; padding: 0; overflow-x: auto; }
-  .install code { font-size: 13.5px; color: var(--vs-text); background: none; }
+  .install pre { margin: 0; background: none; border: 0; padding: 0; overflow-x: auto; line-height: 1.8; }
+  .install code { font-size: clamp(14px, 1.15vw, 16.5px); color: var(--vs-text); background: none; }
   .install button {
-    position: absolute; top: 10px; right: 10px; font: 500 12.5px var(--sl-font); color: var(--vs-quiet);
-    background: transparent; border: 1px solid var(--vs-line); border-radius: 6px; padding: 4px 10px; cursor: pointer;
+    position: absolute; top: 50%; right: 16px; transform: translateY(-50%);
+    font: 600 14px var(--sl-font); color: var(--vs-ink);
+    background: var(--vs-hat); border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer;
   }
-  .install button:hover { color: var(--vs-text); border-color: var(--vs-quiet); }
+  .install button:hover { filter: brightness(1.1); }
 
   /* Proof: the claim, then the reality beside it. */
   .proof { text-align: center; }
@@ -303,10 +313,13 @@ const faq = [
 
   @media (max-width: 860px) {
     .pair, .value, .value.flip, .groups, .lines { grid-template-columns: 1fr; }
+    .hero { grid-template-columns: minmax(0, 1fr); text-align: center; }
+    .hero h1, .lede { margin-inline: auto; }
+    .actions { justify-content: center; }
     .value.flip .words { order: 0; }
-    .install { padding-right: 16px; padding-bottom: 44px; }
+    .install { padding-right: 18px; padding-bottom: 60px; }
     .install pre { white-space: pre-wrap; word-break: break-all; }
-    .install button { top: auto; bottom: 10px; }
+    .install button { top: auto; bottom: 12px; transform: none; }
   }
 
   /* Motion: one entrance on load, then sections easing in as they scroll into view. Off for reduced motion. */

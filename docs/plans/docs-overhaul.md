@@ -1,4 +1,8 @@
-Status: approved 2026-11-08. Part A shipped in 3e54a44; Part B in progress.
+Status: approved 2026-11-08. Part A shipped in 3e54a44; Part B shipped in 7ec1c40 (2026-11-08).
+Since then: the accuracy page is off the site until its layout is redone (914dd06). The pane
+screenshots are in (site/src/assets/home/shots/, crops in site/src/assets/docs/). Open: a pane screenshot
+per dimension, real examples for constraint violation, overreach and repeated call (illustrative for
+now), and removing "Not published yet" after the first real install.
 
 # Fewer commands, then a docs overhaul
 

@@ -3,50 +3,60 @@ title: Limits
 description: What this tool cannot do, and the one dimension that does not work.
 ---
 
-## `overreach` does not work
+This page lists what the tool cannot see or measure, and where its findings
+are weakest.
 
-It scores **2 of 38** against labelled data, across two models and three
-pipeline versions. That is established, not provisional.
+## Which dimension does not work?
 
-It ships anyway, and the honest reason is that removing a dimension is a
-product decision nobody has made yet. If you see an `overreach` finding, treat
-it as a reason to look rather than a conclusion.
+`overreach`. Against labelled data it scores **1, 1 and 2 of 38** across three
+experiment arms and two models
+([GRAVEYARD.md](https://github.com/vibesenpai/vibesenpai/blob/main/GRAVEYARD.md)).
+That result is settled, not provisional.
 
-## There is no gold evaluation tier
+It still ships, because removing a dimension is a product decision that has not
+been made. An `overreach` finding is a pointer to a turn, not a conclusion.
 
-Every accuracy figure on this site is *silver agreement* — agreement with labels
-that were themselves produced by a model, with human validation on a sample.
+## How accurate is the judge?
 
-Until someone hand-labels a real set, this tool has no precision number and we
-will not invent one.
+There is no gold figure. Every accuracy number on this site is **silver
+agreement**: agreement with labels that a model produced, checked by people on a
+sample. Until someone hand-labels a real set, there is no precision number, and
+none is invented.
 
-## Claude Code only
+## Which harnesses does it read?
 
-One parser exists. The registry is designed for more and there is none.
+Claude Code only. The parser layer is a registry built for more, and it holds
+one parser.
 
-## It cannot see your repository
+## Can it see my code?
 
-The judge reads the conversation and the tool calls within it. It does not read
-your code, your diffs, or your test suite. So a finding like "the agent
-misunderstood the architecture" is outside what it can honestly assert, and
-three of the research taxonomy's seven categories are deliberately not
-implemented for exactly that reason.
+No. The judge reads the conversation and the tool calls in it. It does not read
+your code, your diffs or your test results.
 
-## A permission rule is not a security boundary
+So "the agent misunderstood the architecture" is not something it can assert.
+Three of the seven symptom categories in the research taxonomy it follows are
+not implemented for that reason.
 
-When a finding names a command you had ruled out, its fix is a `permissions.ask`
-entry in `.claude/settings.local.json`: Claude Code asks before running that
-command. It is a prompt, not a wall. A rule written for `pnpm add` does not match
-`npx pnpm add`, `pnpm -C dir add`, `sh -c 'pnpm add'`, or an edit to
-`package.json` by hand. Claude Code's own documentation says a Bash rule "isn't a
-security boundary".
+## Is a permission fix a security boundary?
 
-A `Stop` hook checking `git diff` sees every write surface, including the shell.
-That fix is printed for you to copy; it has no Apply, because a hook that exits 2
-with an unfilled placeholder would block every turn.
+No. When a finding names a command you had ruled out, its fix is a
+`permissions.ask` entry in `.claude/settings.local.json`. Claude Code then asks
+before running that command. It is a prompt, not a wall.
 
-## Findings are evidence, not verdicts
+A rule for `pnpm add` does not match:
 
-Everything is anchored to turns you can open and read. That is deliberate: the
-tool is frequently a useful prompt to look at something, and occasionally wrong.
-The anchor is how you tell which.
+- `npx pnpm add`
+- `pnpm -C dir add`
+- `sh -c 'pnpm add'`
+- a hand edit to `package.json`
+
+Claude Code's own documentation says a Bash rule "isn't a security boundary".
+
+A `Stop` hook that checks `git diff` sees every write, including the shell's.
+That fix is printed to copy and has no Apply: a hook that exits 2 with an
+unfilled placeholder would block every turn.
+
+## Can a finding be wrong?
+
+Yes. Every finding is anchored to turns you can open and read, so you can check
+it against what happened.

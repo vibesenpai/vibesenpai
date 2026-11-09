@@ -1,62 +1,47 @@
 ---
 title: What else is out there
-description: Claude Code already ships a session analyzer. Here is what survives the comparison, and what does not.
+description: How this tool compares with Claude Code's /insights and other session tools.
 ---
 
-**Claude Code already has `/insights`.** It is free, first-party, already
-installed, and it does something close to this. Any honest page about
-vibesenpai has to start there.
+This page compares vibesenpai with other tools that read coding-agent sessions.
+Tool details were checked against each project's docs and repository on
+2026-10-12
+([docs/prior-art.md](https://github.com/vibesenpai/vibesenpai/blob/main/docs/prior-art.md)).
 
-## `/insights`
+## Claude Code's `/insights`
 
-Per Anthropic's own documentation, it *"analyzes your recent sessions on this
-machine and writes an HTML report covering what you work on, **friction points
-such as misunderstood requests or buggy code**, and suggestions for using
-Claude Code more effectively."*
+Claude Code ships `/insights`. Anthropic's documentation says it *"analyzes
+your recent sessions on this machine and writes an HTML report covering what you
+work on, friction points such as misunderstood requests or buggy code, and
+suggestions for using Claude Code more effectively."*
 
-Up to 200 sessions per run. Runs on any plan. The tokens count against your
-usage. "Friction points such as misunderstood requests" is our
-`misread_intent`, by another name.
+- It reads up to 200 sessions per run.
+- It runs on any plan, and its tokens count against your usage.
+- "Misunderstood requests" overlaps with vibesenpai's `misread_intent`.
 
-So: if you want a narrative read on how your sessions are going, type
-`/insights` and skip this project. It costs you nothing extra and it is
-maintained by the people who build the harness.
+Two differences:
 
-**Two things survive the comparison**, and neither of them is "we are local":
-
-**Its findings are model-authored narrative with nothing to check them
-against.** It reads your sessions and writes prose about them. Every finding
-here quotes the turn it came from, so you can open the transcript and disagree.
-That is the difference between a report and evidence.
-
-**It publishes no accuracy figure.** Neither does anyone else in this space. We
-publish 165 of 232 and call it *silver
-agreement* rather than precision, because the labels we agree with were
-themselves model-produced.
-
-## The rest of the field
-
-| | what it is | how it differs |
+| | `/insights` | vibesenpai |
 |---|---|---|
-| **vibe-log** | the closest third-party competitor — standup summaries, a prompt-quality score, coaching, hooks | Scores you (`85/100`) without showing the turns. Optional cloud sync is a new party; we add none |
-| **session-report** | Anthropic's bundled analyzer: tokens, cache breaks, by-project breakdowns | Measures **spend**, not habits — 44 token references in its script and zero for rework, loops or corrections |
-| **claude-code-history-viewer** | an offline browser over 11 harnesses' histories | A viewer. No diagnosis, and no opinion about what went wrong |
-| **agent-loop-detector** | a runtime guardrail that catches cyclic tool calls live | Prevention in-flight rather than retrospective evidence. A different problem |
+| a finding is | model-written prose about your sessions | a quote from a specific turn you can open |
+| accuracy | none published | 165 of 232 sessions, published as silver agreement ([docs/eval.md](https://github.com/vibesenpai/vibesenpai/blob/main/docs/eval.md)) |
 
-## Two claims we retired
+## Other tools
 
-This project started with six differentiators. Two did not survive contact with
-the field, and the honest thing is to say which:
+| tool | what it is | how it differs |
+|---|---|---|
+| [vibe-log-cli](https://github.com/vibe-log/vibe-log-cli) | standup summaries, a prompt-quality score, coaching, hooks; optional cloud sync | shows a score (`85/100`) without the turns behind it |
+| `session-report` | Anthropic's bundled analyzer: tokens, cache breaks, per-project breakdowns | measures spend; its script has no measure of rework, loops or corrections |
+| [claude-code-history-viewer](https://github.com/jhlee0409/claude-code-history-viewer) | an offline browser over 11 harnesses' histories | a viewer, with no diagnosis |
+| [agent-loop-detector](https://github.com/Princeu3/agent-loop-detector) | a runtime guard that catches repeated tool calls live | prevents during a session; does not report afterwards |
 
-**"Fully local" is not a differentiator.** vibe-log is local-first too; its
-cloud sync is opt-in. This is table stakes in this ecosystem, not an edge — and
-since the judge runs through your own harness, [it is no longer even strictly
-true of us](/vibesenpai/start/sends-and-costs/).
+## What is not a difference
 
-**"Cross-harness" is not a differentiator.** The history viewer covers eleven
-harnesses. We cover **one**, and the parser registry that is supposed to make
-more possible has exactly one parser in it. We would be starting at 1.
+- **Running locally.** vibe-log is local-first too, and the judge here
+  [sends session content to a model](/vibesenpai/start/sends-and-costs/).
+- **Covering many harnesses.** The history viewer covers 11; this tool covers
+  one.
 
-What is left is narrower and defensible: **evidence instead of scores**,
-**measured accuracy published with the right word on it**, and **no new party
-sees your data**. That is the whole claim.
+What remains: findings are quotes from turns rather than scores, the accuracy
+figure is published under the name it deserves, and no new party sees your
+data.

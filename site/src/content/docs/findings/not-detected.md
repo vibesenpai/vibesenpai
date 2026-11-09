@@ -1,43 +1,33 @@
 ---
 title: What we do not detect
-description: Things that were tried, or considered and refused, and why.
+description: What was tried and removed, what is out of scope by design, and what is not built yet.
 ---
 
-An incomplete tool that says what it cannot do is more useful than one that
-implies it covers everything.
+This page lists what vibesenpai does not report, and why: some ideas were
+measured and removed, some are out of scope, and some are not built yet.
 
-## Tried and deleted
+## Tried and removed
 
-Ten detectors were built, measured against real sessions, and removed.
-[The graveyard has the numbers](/vibesenpai/work/graveyard/) — including
-`stale_read`, where 100% of candidates turned out to be the agent's own prior
-edit, and `permission_denied`, where the denials in 18.1% of sessions were
-people rejecting a plan or answering a question: plan mode working.
+Detectors that were built or proposed, measured against 1,139 public sessions,
+and removed are in [the graveyard](/vibesenpai/work/graveyard/), each with the
+number that removed it. Two examples:
 
-## Refused on principle
+- A "stale read" check: every match followed the agent's own earlier edit.
+- A "denied tool call" check: the denials were people rejecting a plan or
+  answering a question, which is plan mode working.
 
-**Anything needing your repository.** The judge reads the conversation and the
-tool calls inside it, not your code or your diffs. So "it misdiagnosed the
-bug" and "the implementation was wrong" are outside what it can honestly
-assert — three of the research taxonomy's seven symptom categories are
-deliberately unimplemented for exactly this reason.
+## Out of scope by design
 
-**Anything that reads as a judgement of you.** No prompting score, no
-communication grade. Unfalsifiable, and it makes people defensive rather than
-curious.
+| not reported | why |
+|---|---|
+| anything that needs your repository | the judge reads the conversation and tool calls, not your code or diffs. Three of the research taxonomy's seven symptom categories need the code, so they are not implemented |
+| a score or grade of you | it cannot be checked against a turn |
+| a pattern that is common but not shown to be waste | for example, 48% of sessions edit some file five or more times ([GRAVEYARD.md](https://github.com/vibesenpai/vibesenpai/blob/main/GRAVEYARD.md)). Editing a file several times is how most work gets done |
 
-**Frequency without consequence.** Across the same 1,139 sessions, 48% edit
-some file five or more times (GRAVEYARD.md), and 11% have a file with more than
-five versions in Claude Code's file history (docs/findings-frequency.md): two
-definitions of churn. Under either, nobody could establish that churn is
-waste. Iterating is how work gets done. A
-finding that common which cannot say whether the thing it found was bad is a
-number pretending to be an insight.
+## Not built yet
 
-## Not yet
-
-A gold evaluation tier. Everything published is agreement with model-generated
-labels — silver, not gold — and there is no
-precision figure for this tool until someone hand-labels a real set.
-
-More harnesses. The parser layer is a registry; one parser exists.
+- **A gold accuracy figure.** Published accuracy is agreement with
+  model-generated labels (silver). There is no precision figure until a real
+  set is hand-labelled.
+- **Other harnesses.** The parser layer is a registry; it holds one parser,
+  for Claude Code.

@@ -1,24 +1,14 @@
-flowchart TD
-  P["session packet<br/><small>merged, truncated, redacted</small>"]
-
-  G1{"redact(p) == p ?"}
-  P --> G1
-  G1 -- no --> ABORT["abort the send"]
-  G1 -- yes --> A
-
-  A["stage A — extract<br/><small>never shown the categories</small>"]
-  A --> REC["records<br/><small>quote · context · turns</small>"]
-
-  REC --> G2{"redact again ?"}
-  G2 -- no --> ABORT
-  G2 -- yes --> B
-
-  B["stage B — label<br/><small>reads records, never the transcript</small>"]
-  B --> OUT["5 dimensions<br/><small>reasoning before the label</small>"]
-
-  OUT --> ANCHOR{"quote found<br/>in the packet ?"}
-  ANCHOR -- no --> DROP["discarded"]
-  ANCHOR -- yes --> KEEP["finding"]
-
-  classDef bad color:#9b2c2c
-  class ABORT,DROP bad
+flowchart TB
+  subgraph stages ["1 · two model stages"]
+    direction LR
+    P["packet<br/>redaction asserted"] --> A["extract<br/>no categories"] --> B["label<br/>records only"]
+  end
+  subgraph checks ["2 · checks before anything is kept"]
+    direction LR
+    Q("quote in<br/>the packet?") -- yes --> L("lookback<br/>passes?") -- yes --> K["finding"]
+    Q -. no .-> D["discarded"]
+    L -. no .-> D
+  end
+  stages --> checks
+  classDef bad color:#f0a39a
+  class D bad

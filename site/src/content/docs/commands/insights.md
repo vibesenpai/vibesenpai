@@ -3,29 +3,36 @@ title: /vibesenpai:insights
 description: Opens the pane beside the chat, with what has been found, the fixes, and the background jobs' health.
 ---
 
+Opens the insights pane beside the chat: your findings, the fixes you can apply, and the health
+of the background jobs.
+
 ```
 /vibesenpai:insights
 ```
 
-Opens the insights pane beside the chat. It takes no arguments.
+It takes no arguments.
 
 ## What it does
 
-It reads what the background passes have already worked out (the free checks, the model
-reads, the fixes) and shows it. It never sends anything to a model and never spends tokens:
-the model reads run only from the `Stop` hook, when a turn ends.
+It shows what the background passes have already found. It sends nothing to a model and
+spends no tokens; the model reads run only when a turn ends.
 
-When the pane opens, Claude Code prints `Insights opened beside the chat.` The pane itself is
-described on [A tour of the pane](/vibesenpai/start/pane/): the Findings, Fixes and Health
-tabs, Apply, and the answers you can give a finding.
+![The session-start summary from vibesenpai, then /vibesenpai:insights and the reply: Insights opened beside the chat.](../../../assets/docs/insights-open.png)
 
-The pane stays open and refreshes itself when a background pass writes something new.
+Claude Code prints `Insights opened beside the chat.` The pane stays open and refreshes when
+there is something new. [A tour of the pane](/vibesenpai/start/pane/) describes every part of it.
 
 ## Where no pane can open
 
-Where Claude Code cannot place a pane, the command prints a text version instead: the
-session you are in, read live with the free checks plus any model findings already stored
-for it, then your history, then how far the model reads have got. From the demo data:
+Claude Code cannot always draw a pane. Then the command prints a text version instead:
+
+1. the session you are in
+2. your history
+3. how far the model reads have got
+
+From a demo run over the public test data of
+[claude-code-log](https://github.com/daaain/claude-code-log) and
+[claude-code-sessions](https://github.com/frederick-douglas-pearce/claude-code-sessions) (both MIT):
 
 ```
   This session · 0 edits
@@ -48,12 +55,12 @@ for it, then your history, then how far the model reads have got. From the demo 
   Run /vibesenpai:report for more details
 ```
 
-The text version has no Apply and no answers; those are in the pane.
+The text version has no Apply and no answers. Those are only in the pane.
 
 ## Related
 
 | | |
 |---|---|
 | [`/vibesenpai:judge`](/vibesenpai/commands/judge/) | turns the model reads on or off |
-| [`/vibesenpai:report`](/vibesenpai/commands/report/) | the same findings as an HTML file; also **Open full report** in the pane |
-| [Settings](/vibesenpai/reference/#settings) | `preset` and `mute` decide which free checks run |
+| [`/vibesenpai:report`](/vibesenpai/commands/report/) | the same findings as an HTML file |
+| [Settings](/vibesenpai/reference/#settings) | which free checks run |

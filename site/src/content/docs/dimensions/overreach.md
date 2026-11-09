@@ -3,12 +3,16 @@ title: Overreach
 description: Substantial work beyond what was asked, which the developer pushed back on. It does not work yet.
 ---
 
+The agent did a lot more than you asked, and you pushed back. This dimension does
+not work reliably yet: an overreach finding points at turns worth reading; it is
+not a conclusion.
+
 :::caution[It does not work yet]
-Overreach agrees with labelled data on 1 of 38, 1 of 38 and 2 of 38 episodes,
-across three pipeline versions and two models (GRAVEYARD.md). That is recorded as
-broken, not untuned. It still runs, because retiring a dimension is a product
-decision nobody has made. An overreach finding is a pointer to turns worth
-reading, not a conclusion. [Limits](/vibesenpai/work/limits/).
+Against hand-labelled data, overreach agreed on 1, 1 and 2 of 38 episodes,
+across three pipeline versions and two models
+([the graveyard](/vibesenpai/work/graveyard/)). It still runs, because retiring
+a dimension is a decision nobody has made yet. See
+[Limits](/vibesenpai/work/limits/).
 :::
 
 ## The dimension
@@ -23,29 +27,26 @@ reading, not a conclusion. [Limits](/vibesenpai/work/limits/).
 
 ## Description
 
-The agent did substantial work beyond what was asked, and the developer pushed
-back on it. The misalignment is in the agent acting unprompted. The push-back
-requirement is deliberately kept for this kind, where it was dropped for the
-others (GRAVEYARD.md).
-
-It does not work yet: 2 of 38 at best against labelled data (GRAVEYARD.md).
+The agent did substantial work beyond what was asked, and you pushed back on
+it. The problem is the agent acting without being asked. Your push-back is
+required for this kind, though the other kinds no longer need it.
 
 What it is not:
 
 - **Not [constraint violation](/vibesenpai/dimensions/constraint-violation/).**
-  If a stated rule forbade the extra work, the main kind is constraint violation,
-  with `also overreach`.
+  If a stated rule forbade the extra work, the main kind is constraint
+  violation, `also overreach`.
 - **Not [misread intent](/vibesenpai/dimensions/misread-intent/).** Different
-  work on a wrong reading is a misread; more work on the right reading is
+  work on a wrong reading is a misread. More work on the right reading is
   overreach.
-- **Not extra work nobody objected to.** Without the developer pushing back, it
-  is not labelled.
+- **Not extra work nobody objected to.** Without your push-back, it is not
+  labelled.
 
 ## Example conversation
 
 :::note[Illustrative]
 The demo data has no overreach finding. This exchange was written for this page
-in the shape of a real transcript. It was not found.
+in the shape of a real transcript.
 :::
 
 > **Developer**, turn 20: "Fix the typo in the README heading."
@@ -60,63 +61,73 @@ What the finding records:
 | | |
 |---|---|
 | Why | The developer asked for one typo fix and the agent also restructured three documents, which the developer asked to revert. |
-| Established | not used for this kind |
 | Cited turns | 30, 31 |
 
 ## How it's detected
 
-The session is built into a packet and redacted. The extract stage finds
-episodes without being shown any categories, each anchored by a quote that must
-be found in the packet. The label stage then names the kind. The shared pipeline
-is on [The judge pipeline](/vibesenpai/architecture/judge/).
+A model reads a redacted copy of the session, finds the episode, anchors it to
+a quote, and names its kind. The shared steps are on
+[The judge pipeline](/vibesenpai/architecture/judge/).
 
-What is specific to this kind: the label needs both substantial unrequested work
-and the developer's push-back in the turns. There is no lookback gate.
+What is specific to this kind: the turns must show both substantial unrequested
+work and your push-back. There is no lookback gate.
 
 ![How an overreach finding is labelled](../../../diagrams/overreach.svg)
 
 ## Applicable fixes
 
-A finding's own fix is shown first, under the finding. The dimension's fix is the
-fallback, under the Overreach heading.
+Which fix the pane shows first is explained in
+[How a fix is chosen](/vibesenpai/dimensions/#how-a-fix-is-chosen).
 
-**The finding's own fix**, built from its evidence:
+### The finding's own fix
 
-| Kind, in the pane's words | When | What it adds | Where | Apply |
-|---|---|---|---|---|
-| Claude Code asks you before this command runs, in every mode: | the developer forbade a command's verb in the quoted words, and the agent ran it | `"Bash(<command> *)"` in `permissions.ask` | `.claude/settings.local.json` | yes |
-| Claude Code refuses an edit to this path and tells the agent why: | the agent wrote to a path outside the project | a `PreToolUse` hook on Edit, Write, MultiEdit and NotebookEdit that exits 2 for that path | `.claude/settings.local.json` | yes |
+**Claude Code asks you before this command runs, in every mode:**
+- When: you forbade a command, and the agent ran it.
+- Adds: `"Bash(<command> *)"` to `permissions.ask`.
+- Lands in: `.claude/settings.local.json`.
+- Apply: yes.
 
-**A shared fix, when a question got an edit.** When the developer asked a question
-(their prompt ends in `?`) and the agent wrote files in reply, in two or more
-sessions, the pane offers "A helper that answers questions and cannot edit:", a
-read-only subagent at `.claude/agents/ask.md`. The pane offers Apply.
+**Claude Code refuses an edit to this path and tells the agent why:**
+- When: the agent wrote to a path outside the project.
+- Adds: a `PreToolUse` hook on Edit, Write, MultiEdit and NotebookEdit that
+  blocks that one path.
+- Lands in: `.claude/settings.local.json`.
+- Apply: yes.
 
-**The dimension's fix**, shown when the finding has none of its own:
+### When a question got an edit
 
-> A rule the agent reads in every session of this project:
->
-> Do only what was asked. If something adjacent needs doing, say so and wait.
+**A helper that answers questions and cannot edit:**
+- When: you asked a question (your prompt ended in `?`) and the agent wrote
+  files in reply, in two or more sessions.
+- Adds: a read-only subagent named `ask`.
+- Lands in: `.claude/agents/ask.md`.
+- Apply: yes.
 
-It is added to `.claude/rules/vibesenpai.md`, with one pointer line in
-`CLAUDE.md`, and the pane offers Apply.
+### The kind's fix
 
-**Printed in the HTML report only, with no Apply** (`/vibesenpai:report`):
+**A rule the agent reads in every session of this project:**
+- Adds: `- Do only what was asked. If something adjacent needs doing, say so and wait.`
+- Lands in: `.claude/rules/vibesenpai.md`, with one pointer line in `CLAUDE.md`.
+- Apply: yes.
 
-- A `Stop` hook that holds the diff to what was asked, with a placeholder for the
-  paths:
+### Printed in the HTML report only
+
+These have no Apply. They appear in `/vibesenpai:report`.
+
+- **A `Stop` hook that holds the diff to what was asked.** The paths are a
+  placeholder for you to fill in:
 
   ```json
   { "hooks": { "Stop": [{ "hooks": [{ "type": "command",
       "command": "git diff --name-only | grep -vqE '<paths this task should touch>' && { echo 'changed files outside the task' >&2; exit 2; } || true" }] }] } }
   ```
 
-- The same instruction as a prompt for one session: "For the rest of this
-  session: do only what was asked. If you think something adjacent needs doing,
-  say so and wait rather than doing it."
-- When the conversation was compacted before the cited turn, the hook is replaced
-  by a `SessionStart` hook with the `compact` matcher that runs
+  When the conversation was compacted before the cited turn, this is replaced by
+  a `SessionStart` hook with the `compact` matcher that runs
   `cat .claude/standing.md`.
+- **A prompt for one session:** "For the rest of this session: do only what was
+  asked. If you think something adjacent needs doing, say so and wait rather
+  than doing it."
 
-A Stop hook stays printed until each snippet is bounded and tested: one that exits
-2 with an unfilled placeholder would stop every turn.
+A `Stop` hook stays printed only: one that blocks with an unfilled placeholder
+would stop every turn.

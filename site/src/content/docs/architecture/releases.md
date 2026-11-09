@@ -3,29 +3,27 @@ title: Releases and install counts
 description: The plugin ships as a zip on a tagged GitHub release, and installs are counted from that zip's downloads. No telemetry.
 ---
 
-Claude Code does not report a plugin's installs to its author, and this project
-sends no telemetry. The one first-party trace a self-hosted plugin leaves is a
-file someone downloads from us. So the plugin ships as a zip on a tagged GitHub
-release, and GitHub's per-file download count is the measure
+This page explains how a release is built and how installs are counted
+without telemetry. In short: the plugin ships as a zip on a tagged GitHub
+release, and GitHub's download count for that zip is the measure
 ([DECISIONS.md D69](https://github.com/vibesenpai/vibesenpai/blob/main/DECISIONS.md)).
 
-## What Claude Code offers an author
+## Why not ask Claude Code for install counts?
 
-Nothing, by its own documentation: *"Claude Code doesn't report a plugin's usage
-back to its author."* Public install counts cover only the
-`claude-plugins-official` marketplace: its stats file, read on 2026-11-08,
-listed 324 plugins, every one from that marketplace.
+It has none to give. Its documentation says: *"Claude Code doesn't report a
+plugin's usage back to its author."* Public install counts exist only for the
+`claude-plugins-official` marketplace.
 
-## Options considered
+## What else was considered?
 
 | option | counts | not chosen because |
 |---|---|---|
-| a ping from the plugin | anything | telemetry; the product does not phone home |
+| a ping from the plugin | anything | it is telemetry; the product does not phone home |
 | `marketplace.json` served from our own URL | adds and every refresh | also fetched on update and on install-by-name; our domain becomes a supply-chain point |
 | GitHub clone traffic | unique cloners | a 14-day window; mixes refreshes, updates and CI |
 | **release zip, `archive` source** | **zip downloads** | chosen |
 
-## How a release is made
+## How is a release made?
 
 A tag `v<version>` runs `.github/workflows/release.yml`:
 
@@ -37,11 +35,11 @@ A tag `v<version>` runs `.github/workflows/release.yml`:
 5. only then, a commit points the `marketplace.json` entry at the zip, with its
    `sha256`
 
-The hash is taken from the uploaded bytes, never from a rebuild. A changed zip
-fails to install. If the last step fails, the entry keeps its previous source.
-The install command does not change.
+The hash is taken from the uploaded bytes, never from a rebuild, so a changed
+zip fails to install. If the last step fails, the entry keeps its previous
+source. The install command does not change.
 
-## What a download means
+## What does one download mean?
 
 | event | downloads the zip |
 |---|---|
@@ -55,12 +53,12 @@ The install command does not change.
 So the count is **first installs plus manual upgrades**, per release. GitHub
 does not deduplicate, so it is not a count of people.
 
-## Open items
+## What is still open?
 
-- **Whether an update check downloads the zip** to read `plugin.json`. This is
-  observable after the first release: an update with no new version, then the
-  download count.
-- **What a client older than v2.1.224**, when the `archive` source arrived, does
+- **Whether an update check downloads the zip** to read `plugin.json`. This can
+  be observed after the first release: run an update with no new version, then
+  check the download count.
+- **What Claude Code before v2.1.224**, when the `archive` source arrived, does
   with the entry. The marketplace format has no minimum-version field.
 
 The full reasoning, with the documentation quoted, is in
