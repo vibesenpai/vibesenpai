@@ -355,7 +355,7 @@ export const register: Register = on => {
     const { Box, Text, Button } = els
     // Docs links are buttons, so a plain click opens them; `at` keeps keys unique where a page is linked twice.
     const info = (href: string, at: string) => (
-      <Box marginLeft={1}><Button key={`docs:${at}`} plain label="About this" onPress={() => openDocs($, href)}><Text color="suggestion"> ⓘ </Text></Button></Box>
+      <Box marginLeft={1} flexShrink={0}><Button key={`docs:${at}`} plain label="About this" onPress={() => openDocs($, href)}><Text color="suggestion"> ⓘ </Text></Button></Box>
     )
     const wordmark = (at: string) => (
       <Button key={`docs:${at}`} plain label="vibesenpai docs" onPress={() => openDocs($, docs())}><Text weight="bold" color="claude">vibesenpai</Text></Button>
@@ -769,9 +769,8 @@ export const register: Register = on => {
                 </Button>
                 <Box flexDirection="column" flexShrink={1}>
                   <Box flexDirection="row">
-                    <Text weight="bold">{title(x.dimension)}</Text>
-                    {info(dimensionDocs(x.dimension), `waiting:${x.fixId}`)}
-                    <Box flexShrink={1}><Text dimColor>{x.findingIds !== undefined ? `· ${fixOrigin(x).replace(/^For [^,]*, |\.$/g, '')} ` : ''}· {fixKind(x).replace(/:$/, '')}</Text></Box>
+                    <Box flexShrink={0} flexDirection="row"><Text weight="bold">{title(x.dimension)}</Text>{info(dimensionDocs(x.dimension), `waiting:${x.fixId}`)}</Box>
+                    <Box flexShrink={1}><Text dimColor> {x.findingIds !== undefined ? `· ${fixOrigin(x).replace(/^For [^,]*, |\.$/g, '')} ` : ''}· {fixKind(x).replace(/:$/, '')}</Text></Box>
                   </Box>
                   {prompt(clip(fixQuote(x), (width - 10) * 2), width - 8)}
                   <Text dimColor>{status}</Text>
