@@ -96,7 +96,9 @@ export VIBESENPAI_CONFIG="$work/config.json"
 # The release must find transcripts by itself: these would hide that.
 unset VIBESENPAI_SOURCES VIBESENPAI_DISABLE VIBESENPAI_PRESET VIBESENPAI_MUTE
 
-# A previous run's install is removed so this one is a first install.
+# A previous run's install is removed so this one is a first install. Its sessions go too, in the
+# validation profile only, so no run reads an earlier run's sessions.
+case "$profile" in *vibesenpai-validate*) rm -rf "$profile/projects" ;; esac
 claude plugin uninstall vibesenpai@vibesenpai </dev/null >/dev/null 2>&1 || true
 claude plugin marketplace remove vibesenpai </dev/null >/dev/null 2>&1 || true
 
@@ -158,29 +160,37 @@ warn "downloads: $count_before before (this script's own download adds 1), $coun
 # ---------------------------------------------------------------------------------------------------
 if [ "$spend" = 1 ]; then
   stage "3 · the model reads (spends tokens)"
+  # A public session with a known failure: the developer corrects the agent at turn 15 ("You can set
+  # group.visible…"). From claude-code-log (MIT) at the commit scripts/corpus.json pins; never vendored.
+  here="$(cd "$(dirname "$0")" && pwd)"
+  ccl_sha=$(json "j.corpora.find(c=>c.repo==='daaain/claude-code-log')?.sha" < "$here/corpus.json")
+  [ -n "$ccl_sha" ] || fail "no claude-code-log commit in scripts/corpus.json"
+  known=0d3a8e6f-290f-4105-a327-a2496e5e2a83
+  mkdir -p "$profile/projects/-validate-known-failure"
+  curl -fsSL -o "$profile/projects/-validate-known-failure/$known.jsonl" \
+    "https://raw.githubusercontent.com/daaain/claude-code-log/$ccl_sha/test/test_data/real_projects/-Users-dain-workspace-claude-code-log-sample/$known.jsonl" \
+    || fail "could not fetch the known-failure session from claude-code-log@$ccl_sha"
+  pass "a public session with a known failure is in place ($known)"
+
   cli judge --enable --apply >/dev/null
   pass "model reads on"
-  (cd "$work/project" && claude -p 'Create notes.txt containing the word hello.' --permission-mode acceptEdits </dev/null >/dev/null 2>"$work/p2.err") \
-    || { cat "$work/p2.err" >&2; fail "first turn failed"; }
-  (cd "$work/project" && claude -p -c 'No, I said a markdown file. Rename it to notes.md, and never create .txt files in this project.' --permission-mode acceptEdits </dev/null >/dev/null 2>"$work/p3.err") \
-    || { cat "$work/p3.err" >&2; fail "second turn failed"; }
-  pass "a two-turn session with a correction ran"
-
-  calls=0
-  for _ in $(seq 1 90); do
-    calls=$(cd "$work/project" && cli report --json 2>/dev/null | json "j.spend?.allTime?.calls ?? 0" || echo 0)
-    [ "${calls:-0}" -gt 0 ] && break
+  # This session's Stop hook starts a read; the known session has never been read, so it is due.
+  (cd "$work/project" && claude -p 'Reply with the single word ok.' </dev/null >/dev/null 2>"$work/p4.err") \
+    || { cat "$work/p4.err" >&2; fail "the session that starts the read failed"; }
+  jst=""
+  for _ in $(seq 1 120); do
+    jst=$(json "j.lastEnd?.status" < "$VIBESENPAI_ARCHIVE/jobs/judge.json" 2>/dev/null || true)
+    [ -n "$jst" ] && [ ! -d "$VIBESENPAI_ARCHIVE/jobs/judge.lease" ] && break
     sleep 5
   done
-  [ "${calls:-0}" -gt 0 ] || fail "no model call was recorded in 7.5 minutes (see $VIBESENPAI_ARCHIVE/jobs/judge.stderr)"
-  jst=$(json "j.lastEnd?.status" < "$VIBESENPAI_ARCHIVE/jobs/judge.json" 2>/dev/null || true)
-  pass "the model reads ran ($calls call(s), last status ${jst:-running})"
-  found=$(cd "$work/project" && cli report --json | json "j.sessions.reduce((n,s)=>n+s.judged.length,0)")
-  if [ "${found:-0}" -gt 0 ]; then pass "$found model finding(s)"; else warn "the model reads found nothing in the corrected session (a model can miss)"; fi
-
-  # A read already running may still call the model; wait for it to end first.
-  for _ in $(seq 1 120); do [ -d "$VIBESENPAI_ARCHIVE/jobs/judge.lease" ] || break; sleep 5; done
+  [ "$jst" = ok ] || fail "the read did not end ok within 10 minutes (status '${jst:-never ran}'; see $VIBESENPAI_ARCHIVE/jobs/judge.stderr)"
   calls=$(cd "$work/project" && cli report --json | json "j.spend?.allTime?.calls ?? 0")
+  [ "${calls:-0}" -gt 0 ] || fail "the read ended ok but recorded no model call"
+  pass "the model reads ran ($calls call(s), ended ok)"
+  kinds=$(cd "$work/project" && cli report --json | json "(j.sessions.find(s=>s.sessionId==='$known')?.judged ?? []).map(f=>f.dimension).join(', ')")
+  if [ -n "$kinds" ]; then pass "the known failure came back as a finding ($kinds)"
+  else warn "the known failure came back with no finding (a model can miss; misread_intent is expected)"; fi
+
   cli judge --disable --apply >/dev/null
   (cd "$work/project" && claude -p 'Reply with the single word ok.' </dev/null >/dev/null 2>&1) || true
   sleep 30
