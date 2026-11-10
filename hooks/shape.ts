@@ -131,6 +131,15 @@ export const blockCount = count
 const NAMES: Record<string, string> = { redundant_call: 'repeated call' }
 export const words = (dimension: string): string => NAMES[dimension] ?? dimension.replace(/_/g, ' ')
 
+/** The docs site; every page path below is a slug in `site/astro.config.mjs`. */
+export const DOCS = 'https://vibesenpai.github.io/vibesenpai/'
+const DIMENSION_PAGES = new Set(['misread_intent', 'constraint_violation', 'inaccurate_self_report', 'overreach', 'other', 'edit_retry', 'redundant_call', 'cache_rebuilds'])
+/** A docs page by slug, e.g. `start/fixes`. */
+export const docs = (slug = ''): string => `${DOCS}${slug === '' ? '' : `${slug}/`}`
+/** A dimension's own page; one the site has no page for gets the overview. */
+export const dimensionDocs = (dimension: string): string =>
+  docs(DIMENSION_PAGES.has(dimension) ? `dimensions/${dimension.replace(/_/g, '-')}` : 'dimensions')
+
 /** Cut to `max` characters on one line, with an ellipsis when cut. */
 export function clip(s: string, max: number): string {
   const flat = s.replace(/\s+/g, ' ').trim()

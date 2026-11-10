@@ -2,7 +2,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import type { PaneData } from '../types'
-import { aboutTime, barRuns, finishDay } from './shape.ts'
+import { DOCS, aboutTime, barRuns, dimensionDocs, finishDay } from './shape.ts'
 
 const NOW = new Date().toISOString()
 const EARLIER = '2026-10-01T10:00:00.000Z'
@@ -67,7 +67,7 @@ const PANE = {
   props: { title: 'vibesenpai', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
 } as const
 
-type Calls = { argv: string[][]; filled: string[]; draft?: string; refuse?: 'dialog' | 'no_composer'; copied?: string; copyFails?: boolean; mtime?: number; rateLimits?: { kind: string; percentUsed: number }[]; excerpt?: unknown }
+type Calls = { argv: string[][]; filled: string[]; draft?: string; refuse?: 'dialog' | 'no_composer'; copied?: string; copyFails?: boolean; noOpener?: boolean; mtime?: number; rateLimits?: { kind: string; percentUsed: number }[]; excerpt?: unknown }
 
 /** Run `/vibesenpai:insights`; the kit fills the fields a typed command carries. */
 const insights = ($: Parameters<TestBody>[0]) => $.command.run({ command: 'vibesenpai:insights' } as never)
@@ -93,6 +93,7 @@ function engine(on: Parameters<TestBody>[1], data: PaneData | null, calls: Calls
   on('process.run', (_, e) => {
     const argv = (e as { argv: string[] }).argv
     calls.argv.push([...argv])
+    if (calls.noOpener === true && (argv[0] === 'open' || argv[0] === 'xdg-open')) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     // `dismiss --all` prints its own count, as the CLI does.
     if (argv.includes('dismiss') && argv.includes('--all')) return { value: { exitCode: 0, stdout: '  Cleared 3 findings.\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = argv.includes('excerpt') ? calls.excerpt ?? { kept: false } : data
@@ -691,4 +692,47 @@ test('an applied fix with no sessions since says so in words, not as zero of zer
   expect(await ui.find({ type: 'Text', text: /Before 0 times in 2 sessions · Since: no sessions yet/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /0 times in 0 sessions/ })).toBeUndefined()
   await ui.unmount()
+})
+
+test('the wordmark and each ⓘ open their docs page with a plain click', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const opened = () => calls.argv.filter((a) => a[0] === 'open').map((a) => a[1])
+
+  await ui.press({ key: 'docs:header' })
+  await ui.press({ key: 'docs:block:misread_intent' })
+  await ui.press({ key: 'docs:block:edit_retry' })
+  await ui.press({ key: 'docs:cache' })
+  await ui.press({ key: 'docs:pane' })
+  expect(opened()).toEqual([DOCS, `${DOCS}dimensions/misread-intent/`, `${DOCS}dimensions/edit-retry/`, `${DOCS}dimensions/cache-rebuilds/`, `${DOCS}start/pane/`])
+
+  await ui.press({ key: 'tab:fixes' })
+  await ui.press({ key: 'docs:fixes' })
+  await ui.press({ key: 'docs:applied:dea0d0' })
+  await ui.press({ key: 'tab:health' })
+  await ui.press({ key: 'docs:health:Model reads' })
+  await ui.press({ key: 'docs:health:Today' })
+  expect(opened().slice(5)).toEqual([`${DOCS}start/fixes/`, `${DOCS}dimensions/overreach/`, `${DOCS}commands/judge/`, `${DOCS}start/sends-and-costs/`])
+  // A link is never drawn underlined as a terminal hyperlink: it is a button.
+  expect(await ui.findAll({ type: 'Link' })).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('where no browser opens, the docs link is copied and the pane says so', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], noOpener: true }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'docs:header' })
+  expect(calls.argv.map((a) => a[0]).filter((c) => c !== 'node')).toEqual(['open', 'xdg-open'])
+  expect(calls.copied).toBe(DOCS)
+  expect(await ui.find({ type: 'Text', text: /the link is copied/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a dimension the docs have no page for links to the overview', () => {
+  expect(dimensionDocs('redundant_call')).toBe(`${DOCS}dimensions/redundant-call/`)
+  expect(dimensionDocs('something_new')).toBe(`${DOCS}dimensions/`)
 })

@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState } from '../types'
-import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, finishDay, fixKind, fixOrigin, fixQuote, loadsLater, outcomeText, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
+import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, dimensionDocs, docs, finishDay, fixKind, fixOrigin, fixQuote, loadsLater, outcomeText, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
 import { applyRequest } from '../src/harness/claude-code.ts'
 import { MARK_PNG, MARK_SVG } from './logo.ts'
 
@@ -71,6 +71,16 @@ async function load($: EngineInterface): Promise<void> {
 }
 
 /** Re-reads the analysis, saying so meanwhile; answers given here are now in the data, so they are dropped. */
+/** Opens a docs page in the browser: a plain click, where a terminal link needs ⌘-click. Copied when no opener runs. */
+async function openDocs($: EngineInterface, url: string): Promise<void> {
+  for (const opener of ['open', 'xdg-open']) {
+    const r = await $.process.run([opener, url], { timeoutMs: 10_000 }).catch(() => undefined)
+    if (r !== undefined && r.exitCode === 0) return
+  }
+  const copied = await $.ui.copy({ text: url }).then((c) => c.isCopied).catch(() => false)
+  await update($, note, () => (copied ? `No browser opened; the link is copied: ${url}` : `No browser opened. The page is ${url}`))
+}
+
 async function refresh($: EngineInterface): Promise<void> {
   await update($, busy, () => true)
   try {
@@ -343,6 +353,16 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
+    // Docs links are buttons, so a plain click opens them; `at` keeps keys unique where a page is linked twice.
+    const info = (href: string, at: string) => (
+      <Box marginLeft={1}><Button key={`docs:${at}`} plain label="About this" onPress={() => openDocs($, href)}><Text color="suggestion"> ⓘ </Text></Button></Box>
+    )
+    const wordmark = (at: string) => (
+      <Button key={`docs:${at}`} plain label="vibesenpai docs" onPress={() => openDocs($, docs())}><Text weight="bold" color="claude">vibesenpai</Text></Button>
+    )
+    const docsLink = (at: string, label: string, href: string) => (
+      <Button key={`docs:${at}`} plain label={label} onPress={() => openDocs($, href)}><Text dimColor underline>{label}</Text></Button>
+    )
     const data = (await read($, snapshot)) as PaneData | null
     const message = (await read($, note)) as string
     const tick = (await read($, frame)) as number
@@ -352,7 +372,7 @@ export const register: Register = on => {
       const secs = Math.max(0, Math.round((Date.now() - loadStarted) / 1000))
       return (
         <Box flexDirection="column" alignItems="center" paddingY={2} gap={1}>
-          <Text weight="bold" color="claude">vibesenpai</Text>
+          {wordmark('loading')}
           {message === ''
             ? <Text><Text color="claude">{spin}</Text> Reading your history <Text dimColor>· {secs}s</Text></Text>
             : <Text>{message}</Text>}
@@ -685,9 +705,12 @@ export const register: Register = on => {
             const items = all ? b.items : b.items.slice(0, BLOCK_SHOWN + 1)
             return (
               <Box key={`block:${b.dimension}`} flexDirection="column" marginTop={1}>
-                <Button key={`block:${b.dimension}`} plain label={`${shown ? '▾' : '▸'} ${title(b.dimension)}`} onPress={() => toggle($, key)}>
-                  <Text weight="bold" color="claude">{shown ? '▾' : '▸'} {title(b.dimension)}</Text>
-                </Button>
+                <Box flexDirection="row">
+                  <Button key={`block:${b.dimension}`} plain label={`${shown ? '▾' : '▸'} ${title(b.dimension)}`} onPress={() => toggle($, key)}>
+                    <Text weight="bold" color="claude">{shown ? '▾' : '▸'} {title(b.dimension)}</Text>
+                  </Button>
+                  {info(dimensionDocs(b.dimension), `block:${b.dimension}`)}
+                </Box>
                 <Text dimColor>  {timesIn(blockCount(b), b.sessions)}</Text>
                 {shown && (
                   <Box flexDirection="column" paddingLeft={2} marginTop={1}>
@@ -708,9 +731,12 @@ export const register: Register = on => {
           })}
           {v.cache.count > 0 && (
             <Box flexDirection="column" marginTop={1}>
-              <Button key="block:cache" plain label={`${caret('block:cache')} Cache rebuilds`} onPress={() => toggle($, 'block:cache')}>
-                <Text weight="bold" color="claude">{caret('block:cache')} Cache rebuilds</Text>
-              </Button>
+              <Box flexDirection="row">
+                <Button key="block:cache" plain label={`${caret('block:cache')} Cache rebuilds`} onPress={() => toggle($, 'block:cache')}>
+                  <Text weight="bold" color="claude">{caret('block:cache')} Cache rebuilds</Text>
+                </Button>
+                {info(dimensionDocs('cache_rebuilds'), 'cache')}
+              </Box>
               <Text dimColor>  {v.cache.count} time{v.cache.count === 1 ? '' : 's'} · {human(v.cache.tokens)} tokens written again</Text>
               {isOpen('block:cache') && v.cache.largest.map((r) => (
                 <Text dimColor>    turn {r.seq} · {r.sessionId.slice(0, 8)}{r.gapMinutes !== undefined ? ` · ${Math.round(r.gapMinutes)} min after the previous request` : ''} · {r.tokens.toLocaleString('en-US')} written</Text>
@@ -742,7 +768,11 @@ export const register: Register = on => {
                   <Text {...(isPicked ? { color: 'claude' } : {})}>{isPicked ? '[x]' : '[ ]'} </Text>
                 </Button>
                 <Box flexDirection="column" flexShrink={1}>
-                  <Text><Text weight="bold">{title(x.dimension)}</Text><Text dimColor>{x.findingIds !== undefined ? ` · ${fixOrigin(x).replace(/^For [^,]*, |\.$/g, '')}` : ''} · {fixKind(x).replace(/:$/, '')}</Text></Text>
+                  <Box flexDirection="row">
+                    <Text weight="bold">{title(x.dimension)}</Text>
+                    {info(dimensionDocs(x.dimension), `waiting:${x.fixId}`)}
+                    <Box flexShrink={1}><Text dimColor>{x.findingIds !== undefined ? `· ${fixOrigin(x).replace(/^For [^,]*, |\.$/g, '')} ` : ''}· {fixKind(x).replace(/:$/, '')}</Text></Box>
+                  </Box>
                   {prompt(clip(fixQuote(x), (width - 10) * 2), width - 8)}
                   <Text dimColor>{status}</Text>
                   {x.applied === undefined && draftedIds.includes(x.fixId) && <Text color="success">✓ Drafted in your prompt box. Press Enter to apply it.</Text>}
@@ -760,11 +790,12 @@ export const register: Register = on => {
           {f.applied.length === 0 && <Text dimColor>None yet. A fix counts as applied once its request is seen in a session.</Text>}
           {f.applied.map((x) => (
             <Box key={`applied:${x.fixId}`} flexDirection="column" paddingLeft={2}>
-              <Text weight="bold">{title(x.dimension)}</Text>
+              <Box flexDirection="row"><Text weight="bold">{title(x.dimension)}</Text>{info(dimensionDocs(x.dimension), `applied:${x.fixId}`)}</Box>
               {prompt(clip(fixQuote(x), (width - 10) * 2), width - 8)}
               <Text><Text color="success">Applied {day(x.applied?.at ?? '')}{x.target === 'project-hooks' ? ' · hook' : ''}</Text><Text dimColor>{outcomeText(x) !== '' ? ` · ${outcomeText(x)}` : ''}</Text></Text>
             </Box>
           ))}
+          <Box>{docsLink('fixes', 'How fixes and Apply work', docs('start/fixes'))}</Box>
         </Box>
       )
     }
@@ -774,9 +805,9 @@ export const register: Register = on => {
     const healthTab = () => {
       const job = (name: string) => data.health.find((h) => h.job === name)
       const state = (name: string): string => { const h = job(name); return h === undefined ? 'not run yet' : `${h.state}${h.reason !== undefined ? ` · ${h.reason}` : ''}` }
-      const line = (label: string, ...values: string[]) => (
+      const line = (label: string | [string, string], ...values: string[]) => (
         <Box flexDirection="row">
-          <Box width={14} flexShrink={0}><Text dimColor>{label}</Text></Box>
+          <Box width={16} flexShrink={0}>{typeof label === 'string' ? <Text dimColor>{label}</Text> : <Box flexDirection="row"><Text dimColor>{label[0]}</Text>{info(label[1], `health:${label[0]}`)}</Box>}</Box>
           <Box flexDirection="column" flexShrink={1}>{values.map((v) => <Text>{v}</Text>)}</Box>
         </Box>
       )
@@ -786,12 +817,12 @@ export const register: Register = on => {
         <Box flexDirection="column" gap={1}>
           {line('History pass', state('standing'))}
           {line('Judge', state('judge'), `${data.read} of ${data.total} sessions read`)}
-          {today !== undefined && line('Today', `${human(today.tokens)} of ${human(today.limit)} tokens${today.tokens >= today.limit ? ' · budget reached, continues tomorrow' : ''}`)}
+          {today !== undefined && line(['Today', docs('start/sends-and-costs')], `${human(today.tokens)} of ${human(today.limit)} tokens${today.tokens >= today.limit ? ' · budget reached, continues tomorrow' : ''}`)}
           {sp?.allTime !== undefined && sp.allTime.calls > 0 && line('Spent', spendText(sp.allTime), ...(sp.allTime.usdMicros !== undefined ? [costNote(subscribed ? 'subscription' : sp.billing)] : []))}
           {sp !== undefined && sp.older > 0 && line('Older', `${sp.older} past session${sp.older === 1 ? '' : 's'} not read`)}
-          {sp !== undefined && line('Model reads', sp.enabled ? 'on · /vibesenpai:judge off stops them' : 'off · /vibesenpai:judge on')}
+          {sp !== undefined && line(['Model reads', docs('commands/judge')], sp.enabled ? 'on · /vibesenpai:judge off stops them' : 'off · /vibesenpai:judge on')}
           <Box flexDirection="row">
-            <Box width={14} flexShrink={0}><Text dimColor>Dismissed</Text></Box>
+            <Box width={16} flexShrink={0}><Text dimColor>Dismissed</Text></Box>
             <Text>{data.dismissed ?? 0} finding{data.dismissed === 1 ? '' : 's'}</Text>
             {(data.dismissed ?? 0) > 0 && <Box marginLeft={2}>{secondary('restore-all', 'Restore all', () => restoreAll($))}</Box>}
           </Box>
@@ -816,7 +847,7 @@ export const register: Register = on => {
           {mark()}
           <Box flexDirection="column" flexGrow={1}>
             <Box flexDirection="row" justifyContent="space-between" gap={2}>
-              <Text weight="bold" color="claude">vibesenpai</Text>
+              {wordmark('header')}
               {behind && !showCard
                 ? <Text>{reading && <Text color="claude">{spin} </Text>}{bar(12)}<Text dimColor> {data.read}/{target}</Text></Text>
                 : <Text dimColor>{data.read}/{data.total} sessions read</Text>}
@@ -855,7 +886,10 @@ export const register: Register = on => {
 
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>{'─'.repeat(width)}</Text>
-          <Text dimColor>⇥ move · ⏎ press</Text>
+          <Box flexDirection="row" gap={1}>
+            <Text dimColor>⇥ move · ⏎ press ·</Text>
+            {docsLink('pane', 'Guide to this pane', docs('start/pane'))}
+          </Box>
         </Box>
       </Box>
     )
