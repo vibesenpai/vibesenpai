@@ -7,8 +7,8 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen.svg)](package.json)
 
 **Discover how your agents failed you.** vibesenpai reads the sessions already
-on your disk and shows you the exact turns, what you'd asked for, and what it
-cost.
+on your disk and shows you where they went wrong: the exact turns, in your own
+words, and a fix you can apply.
 
 It is a Claude Code plugin. It shows evidence, and a fix you can apply. It does
 not score you and does not tell you how to work.

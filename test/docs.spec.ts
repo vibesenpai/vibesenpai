@@ -341,7 +341,7 @@ describe('documented output samples match the shape the code produces', () => {
 describe('one pitch, not five', () => {
   // One description of the tool across every manifest, the site and the README.
   const PITCH =
-    "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.";
+    "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you where they went wrong: the exact turns, in your own words, and a fix you can apply.";
 
   it('is identical in every manifest', () => {
     const json = (p: string) => JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;

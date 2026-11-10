@@ -30,7 +30,7 @@ export default defineConfig({
         { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://vibesenpai.github.io/vibesenpai/og.jpg' } },
       ],
       description:
-        "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you the exact turns, what you'd asked for, and what it cost.",
+        "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you where they went wrong: the exact turns, in your own words, and a fix you can apply.",
       social: {
         github: 'https://github.com/vibesenpai/vibesenpai',
       },
