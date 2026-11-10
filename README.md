@@ -17,6 +17,8 @@ not score you and does not tell you how to work.
 [What it shows you](https://vibesenpai.github.io/vibesenpai/start/what-it-is/) ·
 [What leaves your machine](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/)
 
+<p align="center"><img src="assets/screenshots/pane-finding.png" width="560" alt="The insights pane beside the chat. Under Constraint violation, 19 times in 6 sessions, one finding is open: the developer's words, “I also had asked you to drop the numbers in the tabs, which didn't happen”, the four turns around them, Why the agent's reply missed an earlier request, the developer's answer that it was a real mistake, and the fix, applied Nov 8."></p>
+
 ## Install
 
 In Claude Code:
