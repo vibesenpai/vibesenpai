@@ -20,7 +20,8 @@ own hooks and commands, and your `~/.claude/settings.json` is not touched.
 ## Requirements
 
 - **Node 22.13 or later.** The plugin runs TypeScript directly, with no build step.
-- **Claude Code 2.1.224 or later.**
+- **Claude Code 2.1.299 or later.** The pane needs it. On an older version, `/vibesenpai:insights`
+  says which version it needs and which one is running, and `claude update` installs the latest.
 
 ## What happens the first time
 

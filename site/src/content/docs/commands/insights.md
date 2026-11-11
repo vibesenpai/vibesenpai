@@ -57,6 +57,25 @@ finished:
 
 The text version has no Apply and no answers. Those are only in the pane.
 
+## On an older Claude Code
+
+The pane needs Claude Code 2.1.299 or later. On an older version the command shows no findings and
+says so instead:
+
+```
+The insights pane needs Claude Code 2.1.299 or later. This session runs 2.1.290.
+The latest installs with:
+
+  claude update
+
+The pane opens in the next session after that.
+
+In the meantime, try /vibesenpai:report. It works on this version and opens your whole history as an HTML report, with every finding, its turns and its fix.
+```
+
+[`/vibesenpai:report`](/vibesenpai/commands/report/) does not need the pane, so it works on any
+version the plugin installs on.
+
 ## Related
 
 | | |

@@ -7,6 +7,39 @@ import { fixMarker } from '../fix-marker.ts';
 export const RULES_FILE = '.claude/rules/vibesenpai.md';
 export const POINTER = `- Rules learned from your own sessions: ${RULES_FILE}`;
 
+/**
+ * The oldest Claude Code the pane draws on: `Text` `weight` arrived in 2.1.299, buttons with children in
+ * 2.1.295, mods in 2.1.287 (code.claude.com/docs/en/plugins/mods, checked 2026-11-10).
+ */
+export const MIN_CLAUDE_CODE = '2.1.299';
+
+/** True when `version` (`2.1.290`, or a dev build `2.1.290-dev…`) is a release older than `min`; unknown is never older. */
+export function olderThan(version: string | undefined, min: string = MIN_CLAUDE_CODE): boolean {
+  const parts = (v: string): number[] | undefined => {
+    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+    return m === null ? undefined : [Number(m[1]), Number(m[2]), Number(m[3])];
+  };
+  const a = version === undefined ? undefined : parts(version);
+  const b = parts(min);
+  if (a === undefined || b === undefined) return false;
+  for (let i = 0; i < 3; i++) if ((a[i] as number) !== (b[i] as number)) return (a[i] as number) < (b[i] as number);
+  return false;
+}
+
+/** What `/vibesenpai:insights` says on a Claude Code too old for the pane. */
+export function updateMessage(version: string): string {
+  return [
+    `The insights pane needs Claude Code ${MIN_CLAUDE_CODE} or later. This session runs ${version}.`,
+    'The latest installs with:',
+    '',
+    '  claude update',
+    '',
+    'The pane opens in the next session after that.',
+    '',
+    'In the meantime, try /vibesenpai:report. It works on this version and opens your whole history as an HTML report, with every finding, its turns and its fix.',
+  ].join('\n');
+}
+
 /** The project key Claude Code files a working directory's transcripts under. */
 export function projectKey(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-');

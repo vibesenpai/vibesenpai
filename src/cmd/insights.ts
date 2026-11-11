@@ -3,7 +3,8 @@
 import { statSync } from 'node:fs';
 import { bold, dim } from '../style.ts';
 import { type Config } from '../config.ts';
-import { parse } from '../parsers/index.ts';
+import { detectVersion, parse } from '../parsers/index.ts';
+import { olderThan, updateMessage } from '../harness/claude-code.ts';
 import { projectOf, readSession, resolveCurrentSession, sessionSizes } from '../read.ts';
 import { findingsFor, readJudgeState, tallyByDimension, type JudgeState } from '../judge/state.ts';
 import { analysisBlock, pendingWork } from '../judge/schedule.ts';
@@ -135,6 +136,13 @@ export async function cmdInsights(a: Argv): Promise<number> {
   // Live mode: `readSession` tails past the catalogued offset.
   const read = readSession({ source: current.source, sessionId: current.sessionId, mode: 'live' });
   const parsed = parse(current.source, read.text, current.sessionId);
+
+  // The pane falls through to this text on a Claude Code too old for it; the newest line says which build runs now.
+  const running = detectVersion(read.text.split('\n').reverse());
+  if (parsed.provenance.harness === 'claude-code' && running !== undefined && olderThan(running)) {
+    console.log(updateMessage(running));
+    return 0;
+  }
 
   const detectors = detectorsFromConfig(config);
   const res = await runDetectors({

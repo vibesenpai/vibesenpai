@@ -28,7 +28,7 @@ In Claude Code:
 /plugin install vibesenpai@vibesenpai
 ```
 
-It needs Node 22.13 or later on your PATH, and Claude Code 2.1.224 or later.
+It needs Node 22.13 or later on your PATH, and Claude Code 2.1.299 or later.
 
 ## Getting started
 

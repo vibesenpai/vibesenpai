@@ -736,3 +736,20 @@ test('a dimension the docs have no page for links to the overview', () => {
   expect(dimensionDocs('redundant_call')).toBe(`${DOCS}dimensions/redundant-call/`)
   expect(dimensionDocs('something_new')).toBe(`${DOCS}dimensions/`)
 })
+
+test('on a Claude Code older than the pane needs, the command falls through to the text version, which says what to update', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  on('session.version', () => ({ value: { version: '2.1.290', base: '2.1.290' } }))
+  const r = await insights($)
+  expect(r.text).toBe('the text version')
+  expect(calls.argv).toHaveLength(0)
+})
+
+test('on a current Claude Code the pane opens as before', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  on('session.version', () => ({ value: { version: '2.1.322', base: '2.1.322' } }))
+  const r = await insights($)
+  expect(r.text).toBe('Insights opened beside the chat.')
+})

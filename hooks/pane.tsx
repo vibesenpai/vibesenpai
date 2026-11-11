@@ -6,7 +6,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState } from '../types'
 import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, dimensionDocs, docs, finishDay, fixKind, fixOrigin, fixQuote, loadsLater, outcomeText, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
-import { applyRequest } from '../src/harness/claude-code.ts'
+import { applyRequest, olderThan } from '../src/harness/claude-code.ts'
 import { MARK_PNG, MARK_SVG } from './logo.ts'
 
 const PANE = 'insights'
@@ -316,7 +316,12 @@ async function show($: EngineInterface): Promise<boolean> {
 
 export const register: Register = on => {
   // The plugin's own command: open the pane where a surface draws one, else fall through to the text version.
-  on('command.run', { command: 'vibesenpai:insights' }, async ($, e, next) => ((await show($)) ? { text: 'Insights opened beside the chat.' } : next(e)))
+  // Too old a Claude Code falls through to the text version, which says what to update (MIN_CLAUDE_CODE).
+  on('command.run', { command: 'vibesenpai:insights' }, async ($, e, next) => {
+    const engine = await $.session.version().catch(() => undefined)
+    if (olderThan(engine?.base ?? engine?.version)) return next(e)
+    return (await show($)) ? { text: 'Insights opened beside the chat.' } : next(e)
+  })
 
   // After each turn, re-read only if a background pass changed something.
   // Only notes that a fix request was sent; the prompt passes on unchanged.
