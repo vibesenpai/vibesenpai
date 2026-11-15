@@ -5,6 +5,7 @@
 [![CI](https://github.com/vibesenpai/vibesenpai/actions/workflows/ci.yml/badge.svg)](https://github.com/vibesenpai/vibesenpai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen.svg)](package.json)
+[![ClaudePluginHub](https://www.claudepluginhub.com/badge/vibesenpai-vibesenpai)](https://www.claudepluginhub.com/plugins/vibesenpai-vibesenpai)
 
 **Discover how your agents failed you.** vibesenpai reads the sessions already
 on your disk and shows you where they went wrong: the exact turns, in your own
