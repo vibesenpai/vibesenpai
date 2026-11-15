@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-14
+
+### Changed
+
+- **The version drops the `-alpha` label.** The code is the same as 0.0.4-alpha.
+
 ## [0.0.4-alpha] - 2026-11-10
 
 ### Changed
@@ -109,7 +115,8 @@ candidates were the agent's own prior edit; `permission_denied`, where only 6
 of 398 denials were ever re-issued; and `file_churn`, which fires on 48% of
 sessions and could never be shown to be waste.
 
-[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4-alpha...HEAD
+[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4-alpha...v0.0.4
 [0.0.4-alpha]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.3-alpha...v0.0.4-alpha
 [0.0.3-alpha]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.2-alpha...v0.0.3-alpha
 [0.0.2-alpha]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.1-alpha...v0.0.2-alpha
