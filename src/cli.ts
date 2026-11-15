@@ -81,6 +81,7 @@ judge
   --status           what has been read, what is left, what it cost
   --backlog          what a full pass would cost; sends nothing without --apply
   --dry-run          build a real packet and price it, calling nothing
+  --gated [--limit <n>]  what the lookback gate dropped, newest first (default 20)
   --enable / --disable [--apply]
 
 standing

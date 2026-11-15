@@ -14,7 +14,7 @@ import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS } from '../judge/pa
 import { parseTranscript, withFullText } from '../parsers/claude-code.ts';
 import { dollars, duration, human, plural } from '../format.ts';
 import { resetCatchUp, todayLeft, waitingOnRequest } from '../judge/limits.ts';
-import { readSpend, withStore } from '../store.ts';
+import { readGated, readSpend, withStore } from '../store.ts';
 import { type Argv, configFromFlags } from './common.ts';
 
 /** Start the judge now through the supervisor, as the Stop hook would. False if a pass already holds it. */
@@ -84,6 +84,29 @@ export function cmdJudge(a: Argv): number {
           `${human(state.usage.outputTokens)} out${usd}`,
       );
       if (usd !== '') console.log(`  ${dim("dollars are Claude Code's own figure at API prices; on a subscription it is plan usage, not a bill.")}`);
+    }
+    return 0;
+  }
+
+  // `--gated`: records the lookback gate dropped, so a missed failure can be read. Sends nothing.
+  if (f['gated'] === true) {
+    const limit = Number(f['limit'] ?? 20);
+    const rows = withStore(config.archive, (db) => readGated(db, Number.isFinite(limit) && limit > 0 ? limit : 20));
+    if (rows === undefined) {
+      console.log('the store could not be read');
+      return 1;
+    }
+    if (rows.length === 0) {
+      console.log('nothing gated yet');
+      return 0;
+    }
+    for (const r of rows) {
+      console.log(`${bold(r.dimension)} · ${r.at.slice(0, 16).replace('T', ' ')} · session ${r.sessionId.slice(0, 8)} · turns ${r.turns.join(', ')}`);
+      if (r.name !== undefined) console.log(`  ${r.name}`);
+      if (r.quote !== undefined) console.log(`  “${r.quote.length > 200 ? `${r.quote.slice(0, 200)}…` : r.quote}”`);
+      console.log(`  ${dim(`dropped: ${r.reason}`)}`);
+      if (r.claimed !== undefined) console.log(`  ${dim(`claimed source: ${r.claimed}`)}`);
+      console.log('');
     }
     return 0;
   }

@@ -139,6 +139,25 @@ CREATE TABLE IF NOT EXISTS rule_seen (
 `;
 
 /**
+ * Records the lookback gate dropped: what was flagged, why it was dropped, and the source the model claimed.
+ * Kept so a missed failure can be read rather than inferred from `run.gated`. Text is redacted when written.
+ */
+const GATED_DDL = `
+CREATE TABLE IF NOT EXISTS gated (
+  id         TEXT PRIMARY KEY,   -- content hash, so a re-run is idempotent
+  session_id TEXT NOT NULL,
+  dimension  TEXT NOT NULL,
+  reason     TEXT NOT NULL,      -- why the gate dropped it
+  name       TEXT,               -- the extract stage's title for the episode
+  quote      TEXT,               -- the episode's first evidence quote
+  turns      TEXT NOT NULL,      -- JSON array of turn numbers
+  claimed    TEXT,               -- JSON of the source the model claimed, if any
+  at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS gated_at ON gated(at);
+`;
+
+/**
  * One `occurrence` row is one anchored instance; a finding is a GROUP BY, not a table.
  * `ledger` (progress) and `spend` (cost) are separate, so a failed stage re-bills rather than losing results.
  */
@@ -222,6 +241,7 @@ ${PART_DDL}
 ${DISMISSAL_DDL}
 ${LABEL_DDL}
 ${FIX_DDL}
+${GATED_DDL}
 `;
 
 /** Open the store, creating it if needed. WAL lets readers read during a write; busy_timeout waits rather than throws. */
@@ -293,6 +313,7 @@ export function openStore(archive: string): Db {
     db.exec(DISMISSAL_DDL);
     db.exec(LABEL_DDL);
     db.exec(FIX_DDL);
+    db.exec(GATED_DDL);
 
     // `session` gained `packet_tokens` the same way.
     const scols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map(
@@ -509,6 +530,47 @@ export function putEvidence(
      ON CONFLICT(occurrence_id, anchor) DO UPDATE SET quote = excluded.quote`,
   );
   for (const r of rows) put.run(r.occurrenceId, r.anchor, r.kind, r.quote ?? null);
+}
+
+export type GatedRow = {
+  id: string;
+  sessionId: string;
+  dimension: string;
+  reason: string;
+  name?: string;
+  quote?: string;
+  turns: number[];
+  claimed?: string;
+  at: string;
+};
+
+/** Store what the lookback gate dropped. Callers pass text already redacted (`gatedRows`). */
+export function putGated(db: Db, rows: GatedRow[]): void {
+  const put = db.prepare(
+    `INSERT OR IGNORE INTO gated(id, session_id, dimension, reason, name, quote, turns, claimed, at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (const r of rows) {
+    put.run(r.id, r.sessionId, r.dimension, r.reason, r.name ?? null, r.quote ?? null, JSON.stringify(r.turns), r.claimed ?? null, r.at);
+  }
+}
+
+/** The most recent gated records, newest first. */
+export function readGated(db: Db, limit = 20): GatedRow[] {
+  const rows = db
+    .prepare('SELECT id, session_id, dimension, reason, name, quote, turns, claimed, at FROM gated ORDER BY at DESC LIMIT ?')
+    .all(limit) as { id: string; session_id: string; dimension: string; reason: string; name: string | null; quote: string | null; turns: string; claimed: string | null; at: string }[];
+  return rows.map((r) => ({
+    id: r.id,
+    sessionId: r.session_id,
+    dimension: r.dimension,
+    reason: r.reason,
+    ...(r.name === null ? {} : { name: r.name }),
+    ...(r.quote === null ? {} : { quote: r.quote }),
+    turns: JSON.parse(r.turns) as number[],
+    ...(r.claimed === null ? {} : { claimed: r.claimed }),
+    at: r.at,
+  }));
 }
 
 /** Record that a pass has started and which session it is reading. */

@@ -49,8 +49,10 @@ expectation was set **before** the agent acted:
 
 Stage B is shown the session's earlier prompts and loaded instructions for
 this. The gate checks the cited quote against them. A finding with no earlier
-source is dropped as a suggestion, not a mistake, and the run records how many
-were dropped. The gate is on by default (`src/judge/lookback.ts`).
+source is dropped as a suggestion, not a mistake. The run records how many were
+dropped, and each one is kept with the gate's reason and the source the model
+claimed, redacted like every stored quote, so a missed failure can be read.
+The gate is on by default (`src/judge/lookback.ts`).
 
 ## How are sessions batched?
 

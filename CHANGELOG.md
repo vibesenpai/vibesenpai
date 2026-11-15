@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **What the lookback gate drops is kept.** Each record the gate throws away is stored with its
+  quote, its turns, the gate's reason and the source the model claimed, redacted when written.
+  `judge --gated` lists them. Before, only a count was kept, so a missed failure could not be read.
+
 ## [0.0.4] - 2026-11-14
 
 ### Changed

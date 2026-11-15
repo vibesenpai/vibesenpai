@@ -96,7 +96,7 @@ copied into it; they are read where Claude Code keeps them, under `~/.claude/pro
 
 | file | holds | if you delete it |
 |---|---|---|
-| `store.db` | model findings and their quotes; how far each session has been read; tokens and dollars spent; your answers; when each fix was requested and first seen loaded | **you lose the most.** Model findings come back only by reading again, which spends tokens again, and only for transcripts Claude Code still keeps. The 200-session catch-up starts over. Hidden findings reappear. Fix history comes back only from transcripts still kept |
+| `store.db` | model findings and their quotes; what the lookback gate dropped; how far each session has been read; tokens and dollars spent; your answers; when each fix was requested and first seen loaded | **you lose the most.** Model findings come back only by reading again, which spends tokens again, and only for transcripts Claude Code still keeps. The 200-session catch-up starts over. Hidden findings reappear. Fix history comes back only from transcripts still kept |
 | `standing.json` | your history from the free checks | nothing: the next history pass rebuilds it |
 | `finding-fixes.json` | each model finding's own fix | nothing: the next history pass rebuilds it |
 | `judge-settings.json` | the model-read settings above | the defaults return, **including `enabled: true`**: model reads you turned off come back on |

@@ -9,7 +9,7 @@ import {
   buildSession, estimateTokens, isHarnessNoise, largestFittingWindow, openFailuresBefore, partOfTurn,
   type JudgeCarry, type JudgePacketSession,
 } from './packet.ts';
-import { recordPass, recordSpend, type JudgeState } from './state.ts';
+import { gatedRows, recordPass, recordSpend, type JudgeState } from './state.ts';
 import type { Event } from '../types.ts';
 import { buildLookback, type LookbackSource } from './lookback.ts';
 import type { JudgeEpisode, Lookbacks } from './prompt.ts';
@@ -304,7 +304,7 @@ export async function runBatch(
     const at = new Date().toISOString();
     // Findings and the watermark in one transaction.
     if (!holds()) return fenced();
-    recordPass(archive, findings.map((f) => ({ ...f, at })), batch.offsets, batch.parts);
+    recordPass(archive, findings.map((f) => ({ ...f, at })), batch.offsets, batch.parts, gatedRows(labels.gated, at));
     return undefined;
   } catch (err) {
     // A reply that crashes its parser lands here, after the spend: a paid failure.

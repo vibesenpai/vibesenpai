@@ -36,7 +36,8 @@ model download, no telemetry.
 - **Lookback** (`src/judge/lookback.ts`, on by default): a `misread_intent` or `constraint_violation`
   must cite where the expectation was set before the agent acted (an earlier prompt, a loaded
   instruction, or the developer's own reference to an earlier decision). The gate checks the quote
-  against what was sent and drops the rest as suggestions; `run.gated` counts them.
+  against what was sent and drops the rest as suggestions; `run.gated` counts them, and each drop is stored in
+  `gated` (redacted at construction, like findings' quotes) so a missed failure can be read: `judge --gated`.
 - **Secondary kinds:** a label may add up to `SECONDARY_MAX` more kinds (`secondary_dimensions`), as
   the paper multi-labels. `dimension` stays in charge of the gate, ids and the fix; the gold scorer
   counts each kind as a claim and also prints the main-kind-only score for comparison.

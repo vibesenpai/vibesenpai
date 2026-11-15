@@ -5,7 +5,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { JUDGE_DIMENSIONS, type JudgeFinding } from './prompt.ts';
+import { JUDGE_DIMENSIONS, type JudgeFinding, type LabelResult } from './prompt.ts';
 import type { Established } from './lookback.ts';
 import {
   addSpend,
@@ -13,6 +13,7 @@ import {
   openStore,
   partCursors,
   putEvidence,
+  putGated,
   putOccurrences,
   readDismissals,
   readSpend,
@@ -21,7 +22,9 @@ import {
   transact,
   unmarkSkipped,
   type Db,
+  type GatedRow,
 } from '../store.ts';
+import { redact } from '../redact.ts';
 import { createHash } from 'node:crypto';
 import { writeJson } from '../files.ts';
 
@@ -237,6 +240,8 @@ export function recordPass(
   offsets: Map<string, number>,
   /** Progress inside an oversized turn, committed with the findings. `undefined` means finished. */
   parts: Map<string, { seq: number; chars: number } | undefined> = new Map(),
+  /** What the lookback gate dropped, from `gatedRows`. */
+  gated: GatedRow[] = [],
 ): boolean {
   let db: Db | undefined;
   try {
@@ -274,6 +279,7 @@ export function recordPass(
           ]),
         );
       }
+      if (gated.length > 0) putGated(db as Db, gated);
       for (const [id, off] of offsets) {
         advanceLedger(db as Db, id, off);
         unmarkSkipped(db as Db, id);
@@ -305,6 +311,28 @@ export function recordSpend(
   } finally {
     db?.close();
   }
+}
+
+/** The gate's drops as rows to store, redacted at construction like every stored quote. */
+export function gatedRows(gated: LabelResult['gated'], at: string): GatedRow[] {
+  const clean = (t: string): string => redact(t).text;
+  return gated.map((g) => {
+    const quote = g.episode.evidence[0]?.quote;
+    return {
+      id: createHash('sha256')
+        .update(`gated\0${g.episode.sessionId}\0${g.dimension}\0${quote ?? g.episode.name}`)
+        .digest('hex')
+        .slice(0, 16),
+      sessionId: g.episode.sessionId,
+      dimension: g.dimension,
+      reason: g.reason,
+      name: clean(g.episode.name),
+      ...(quote === undefined ? {} : { quote: clean(quote) }),
+      turns: g.episode.evidence.flatMap((v) => v.turns),
+      ...(g.established === undefined ? {} : { claimed: clean(JSON.stringify(g.established)) }),
+      at,
+    };
+  });
 }
 
 /** Content-hashed id, so a retried pass upserts instead of duplicating. */
