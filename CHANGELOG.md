@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quote, its turns, the gate's reason and the source the model claimed, redacted when written.
   `judge --gated` lists them. Before, only a count was kept, so a missed failure could not be read.
 
+### Fixed
+
+- **Redaction no longer hides ordinary words as API keys.** A provider prefix now has to start a
+  token, so "ask-on-…" or "task-on-…" are left alone, and a bare `sk-` key needs a digit or a
+  capital in it, so a slug like `sk-learn-…` is not one. Real keys are still caught after `=`,
+  in quotes, in URLs and percent-encoded.
+
 ## [0.0.4] - 2026-11-14
 
 ### Changed

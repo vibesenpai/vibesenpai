@@ -210,3 +210,32 @@ describe('redact — safety properties', () => {
     expect(r(clean).text).toBe(clean);
   });
 });
+
+describe('redact: a provider prefix must start a token', () => {
+  // Words ending in a prefix's letters are not keys: "ask-…" once redacted a rule's name.
+  it.each([
+    'ask-on-tradeoff-decisions',
+    'task-on-hold-until-friday-afternoon',
+    'disk-space-is-running-low-again',
+    'shelf_life_of_the_cache_entries',
+    'sk-learn-compatible-estimator-api',
+  ])('leaves %s alone', (s) => {
+    expect(r(s).text).toBe(s);
+  });
+
+  // Real key shapes, wherever they sit: start of text, after =, inside quotes, in a URL, percent-encoded.
+  it.each([
+    'sk-ant-api03-AbCdEf1234567890xyzAbCdEf',
+    'sk-proj-abcdefghijklmnopqrstuvwxyz0123',
+    'sk-AbCdEfGhIjKlMnOpQrStUvWx',
+    'OPENAI_KEY=sk-AbCdEf1234567890xyzAbCdEf',
+    '"sk-ant-api03-AbCdEf1234567890xyzAbCdEf"',
+    'https://x.io/?key=sk-AbCdEf1234567890xyzAbCdEf',
+    'https://x.io/?q=key%3Dsk-AbCdEf1234567890xyzAbCdEf',
+    'token:hf_AbCdEf1234567890xyzAbCdEf',
+  ])('still redacts %s', (s) => {
+    const out = r(s);
+    expect(out.redactions['api-key']).toBe(1);
+    expect(out.text).not.toMatch(/AbCdEf1234567890|abcdefghijklmnop|AbCdEfGhIjKl/);
+  });
+});

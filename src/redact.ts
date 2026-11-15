@@ -48,13 +48,16 @@ const RULES: Rule[] = [
     replace: TOKEN('private-key'),
   },
 
-  // Provider-prefixed tokens: the prefix is the tell, so no entropy heuristic.
+  // Provider-prefixed tokens: the prefix is the tell, so no entropy heuristic. A prefix must start a
+  // token (after a non-alphanumeric or a percent-encoded character), or "ask-on-…" reads as a key.
+  // No maximum lengths: providers do not publish them, and a miss copies a secret.
   {
     kind: 'api-key',
     pattern: new RegExp(
-      [
+      `(?<=^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2})(?:${[
         'sk-ant-[A-Za-z0-9_-]{16,}', // Anthropic
-        'sk-[A-Za-z0-9_-]{20,}', // OpenAI and lookalikes
+        // OpenAI and lookalikes; a digit or capital in the body, so a slug like `sk-learn-…` is not one.
+        'sk-(?=[A-Za-z0-9_-]{0,200}[A-Z0-9])[A-Za-z0-9_-]{20,}',
         'gh[pousr]_[A-Za-z0-9]{16,}', // GitHub classic
         'github_pat_[A-Za-z0-9_]{20,}', // GitHub fine-grained
         'xox[baprs]-[A-Za-z0-9-]{10,}', // Slack
@@ -70,7 +73,7 @@ const RULES: Rule[] = [
         'SG\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}', // SendGrid
         'r8_[A-Za-z0-9]{20,}', // Replicate
         'ya29\\.[A-Za-z0-9_-]{20,}', // Google OAuth access token
-      ].join('|'),
+      ].join('|')})`,
       'g',
     ),
     replace: TOKEN('api-key'),
