@@ -360,7 +360,7 @@ export function rulesView(r: PaneRules): RulesView {
 }
 
 /** What kind of file it is, in words: the harness's own kind, translated. */
-export function ruleKind(f: PaneRuleFile): string {
+function ruleKind(f: PaneRuleFile): string {
   if (f.kind === 'AutoMem') return /MEMORY\.md$/.test(f.path) ? 'memory index' : 'memory'
   if (f.kind === 'Project') return 'project'
   if (f.kind === 'User') return 'yours, every project'
