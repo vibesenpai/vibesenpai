@@ -1,6 +1,6 @@
 ---
 title: Inaccurate self report
-description: The agent's account of its own work did not match what the turns show.
+description: "The coding agent said it had done something (fixed, tested, finished) that the turns don't show."
 ---
 
 The agent told you something about its own work that the session shows was not

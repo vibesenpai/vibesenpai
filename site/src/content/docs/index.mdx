@@ -1,7 +1,14 @@
 ---
 title: vibesenpai
-description: "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you where they went wrong: the exact turns, in your own words, and a fix you can apply."
+description: "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you where they went wrong: the exact turns, in your own words, and a fix you can apply. Works with Claude Code today."
 template: splash
+head:
+  - tag: title
+    content: 'vibesenpai: see where your coding agents went wrong'
+  - tag: script
+    attrs:
+      type: application/ld+json
+    content: '{"@context":"https://schema.org","@type":"SoftwareApplication","name":"vibesenpai","description":"Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you where they went wrong: the exact turns, in your own words, and a fix you can apply.","applicationCategory":"DeveloperApplication","softwareRequirements":"Claude Code 2.1.299 or later; Node.js 22.13 or later","url":"https://vibesenpai.github.io/vibesenpai/","codeRepository":"https://github.com/vibesenpai/vibesenpai","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}'
 hero:
   title: vibesenpai
 ---

@@ -1,6 +1,6 @@
 ---
 title: Overreach
-description: Substantial work beyond what was asked, which you pushed back on.
+description: The coding agent did substantial work beyond what was asked, and you pushed back on it.
 ---
 
 The agent did a lot more than you asked, and you pushed back.

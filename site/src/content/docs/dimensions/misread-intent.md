@@ -1,6 +1,6 @@
 ---
 title: Misread intent
-description: The request left room, and the agent filled it with a reading you did not mean.
+description: The request left room, and the coding agent filled it with a reading you did not mean.
 ---
 
 Your request could be read more than one way, and the agent picked a reading you

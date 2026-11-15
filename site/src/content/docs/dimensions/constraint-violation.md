@@ -1,6 +1,6 @@
 ---
 title: Constraint violation
-description: The agent did not follow a rule that was stated literally before it acted.
+description: The coding agent did not follow a rule you stated before it acted, in a rules file or in the chat.
 ---
 
 You stated a rule plainly, such as "don't push", and the agent broke it. The
