@@ -28,7 +28,7 @@ The first time it opens, it says `Reading your history` with a seconds counter, 
 - **A failing job**, if there is one, in one line: `The history pass is retrying: <reason>` or
   `The judge is held: <reason>`. *Held* means the model reads stopped after 3 failed paid calls
   in a row; they stay stopped until you run `/vibesenpai:judge on`.
-- **Four tabs:** Findings, Fixes, Health, Rules. `⇥` moves between buttons; `⏎` presses one.
+- **Four tabs:** Findings, Rules, Fixes, Health. `⇥` moves between buttons; `⏎` presses one.
 
 ## Findings tab
 
@@ -89,6 +89,12 @@ Last, three answers: **Finding is wrong**, **Not the agent's fault** and **Hide*
 effect at once and offers **Undo**. [Your first finding](/vibesenpai/start/first-finding/#your-answers)
 says when to use each.
 
+## Rules tab
+
+What Claude was given in this project, and what it never sees: the instruction files your sessions
+loaded, memory that does not load by itself, and a few facts about the files. [Rules](/vibesenpai/start/rules/)
+describes it.
+
 ## Fixes tab
 
 ![The Fixes tab's Waiting list: five fixes, two ticked, and Apply 2.](../../../assets/docs/fixes-waiting.png)
@@ -124,9 +130,3 @@ which sessions each count covers.
 
 The dollar figure is Claude Code's own, at API prices. On a subscription it is plan usage, not
 a bill.
-
-## Rules tab
-
-What Claude was given in this project, and what it never sees: the instruction files your sessions
-loaded, memory that does not load by itself, and a few facts about the files. [Rules](/vibesenpai/start/rules/)
-describes it.

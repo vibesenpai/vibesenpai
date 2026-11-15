@@ -226,7 +226,7 @@ export function fixesView(data: PaneData): { waiting: PaneFixState[]; applied: P
   }
 }
 
-const TABS = [['findings', 'Findings'], ['fixes', 'Fixes'], ['health', 'Health'], ['rules', 'Rules']] as const
+const TABS = [['findings', 'Findings'], ['rules', 'Rules'], ['fixes', 'Fixes'], ['health', 'Health']] as const
 
 /**
  * The folder tab: the active label boxed and open at the bottom, joined to a rule the pane's width.
