@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-14
+
 ### Added
 
 - **A Rules tab in the pane.** It lists the instruction files Claude Code loaded in this project's
@@ -18,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **What the lookback gate drops is kept.** Each record the gate throws away is stored with its
   quote, its turns, the gate's reason and the source the model claimed, redacted when written.
   `judge --gated` lists them. Before, only a count was kept, so a missed failure could not be read.
+
+### Changed
+
+- **The pane and the session-start message read as sentences,** without " · " between the parts.
+  For example: "vibesenpai, your last 12 sessions: 76 findings."
 
 ### Fixed
 
@@ -134,7 +141,8 @@ candidates were the agent's own prior edit; `permission_denied`, where only 6
 of 398 denials were ever re-issued; and `file_churn`, which fires on 48% of
 sessions and could never be shown to be waste.
 
-[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4-alpha...v0.0.4
 [0.0.4-alpha]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.3-alpha...v0.0.4-alpha
 [0.0.3-alpha]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.2-alpha...v0.0.3-alpha
