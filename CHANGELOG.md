@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A Rules tab in the pane.** It lists the instruction files Claude Code loaded in this project's
+  sessions (CLAUDE.md, `.claude/rules`, the memory index), read from the transcript; memory that
+  does not load by itself (this project's memory files, and every parent folder's memory, which
+  never loads here); and facts about the files: the same line in two files, a link to a file that
+  does not exist. Only paths are stored; each file's text is read live. When rules you wrote do
+  not load in a project, the session-start message says how many.
 - **What the lookback gate drops is kept.** Each record the gate throws away is stored with its
   quote, its turns, the gate's reason and the source the model claimed, redacted when written.
   `judge --gated` lists them. Before, only a count was kept, so a missed failure could not be read.

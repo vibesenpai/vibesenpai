@@ -29,7 +29,7 @@ const base = (over: Partial<Standing> = {}): Standing => ({
 describe('report — the real standing from this machine', () => {
   it('produces the agreed block', () => {
     const out = reportBlock(base(), '/vibesenpai for the exact turns');
-    expect(out).toContain('vibesenpai · your last 4 sessions');
+    expect(out).toContain('vibesenpai, your last 4 sessions');
     expect(out).toContain('4 edits were rejected and retried, across 3 files');
     expect(out).toContain('most often rosy-seeking-feather.md');
     expect(out).toContain("the text didn't match");

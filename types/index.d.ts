@@ -120,7 +120,40 @@ export type PaneData = {
   dismissed?: number;
   /** How far the automatic reads have to go. */
   progress?: PaneProgress;
+  /** The rules Claude was given in this project, and nearby ones it never sees (D71). */
+  rules?: PaneRules;
 };
+
+/** One instruction file Claude Code loaded here. `lines`: its current text, read live and redacted. */
+export type PaneRuleFile = {
+  path: string;
+  display: string;
+  kind: string;
+  sessions: number;
+  atStartSessions: number;
+  lines?: string[];
+  total?: number;
+};
+
+/** A memory file that does not load by itself here: this project's (on demand) or a parent folder's. */
+export type PaneMemory = {
+  path: string;
+  display: string;
+  folder: string;
+  scope: 'on-demand' | 'parent';
+  name?: string;
+  description?: string;
+  type?: string;
+  listed: boolean;
+  lines?: string[];
+  total?: number;
+};
+
+export type PaneRuleCheck =
+  | { kind: 'duplicate'; line: string; files: string[] }
+  | { kind: 'missing-link'; file: string; target: string };
+
+export type PaneRules = { cwd: string; loaded: PaneRuleFile[]; memory: PaneMemory[]; checks: PaneRuleCheck[] };
 
 /** `target`: sessions the automatic reads cover. `seconds`: today's share at the measured pace. `finishOn`: when the daily limit lets them finish. */
 export type PaneProgress = { target: number; seconds?: number; finishOn?: string };

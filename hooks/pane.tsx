@@ -4,8 +4,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState } from '../types'
-import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, dimensionDocs, docs, finishDay, fixKind, fixOrigin, fixQuote, loadsLater, outcomeText, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
+import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState, PaneMemory, PaneRuleFile } from '../types'
+import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, dimensionDocs, docs, finishDay, fixKind, fixOrigin, fixQuote, loadsLater, outcomeText, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, memoryName, ruleMeta, rulesView, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
 import { applyRequest, olderThan } from '../src/harness/claude-code.ts'
 import { MARK_PNG, MARK_SVG } from './logo.ts'
 
@@ -379,7 +379,7 @@ export const register: Register = on => {
         <Box flexDirection="column" alignItems="center" paddingY={2} gap={1}>
           {wordmark('loading')}
           {message === ''
-            ? <Text><Text color="claude">{spin}</Text> Reading your history <Text dimColor>· {secs}s</Text></Text>
+            ? <Text><Text color="claude">{spin}</Text> Reading your history <Text dimColor>({secs}s)</Text></Text>
             : <Text>{message}</Text>}
           <Text dimColor>The free checks come first. Model reads begin when this turn ends.</Text>
         </Box>
@@ -427,7 +427,7 @@ export const register: Register = on => {
     ))
     const limitReached = data.spend?.today !== undefined && data.spend.today.tokens >= data.spend.today.limit
     const readsLine = reading
-      ? `reading now · ${progress?.seconds !== undefined ? aboutTime(progress.seconds) : 'measuring the pace'}`
+      ? `Reading now, ${progress?.seconds !== undefined ? aboutTime(progress.seconds) : 'measuring the pace'}.`
       : data.read === 0 ? 'Begins when this turn ends.'
         : limitReached ? "Today's limit is reached; it continues tomorrow."
           : 'Continues in the background when a turn ends.'
@@ -500,7 +500,7 @@ export const register: Register = on => {
     const toolCount = (m: PaneExcerptEntry): string => {
       if (m.tools.length === 0) return ''
       const failed = m.tools.filter((t) => t.endsWith(' · failed')).length
-      return `${m.tools.length} tool call${m.tools.length === 1 ? '' : 's'}${failed > 0 ? ` · ${failed} failed` : ''}`
+      return `${m.tools.length} tool call${m.tools.length === 1 ? '' : 's'}${failed > 0 ? `, ${failed} failed` : ''}`
     }
     // Who, when and ▶ in fixed columns; the pane wraps or cuts the text, never us.
     const turnLine = (m: PaneExcerptEntry, k: string, full: boolean) => {
@@ -526,7 +526,7 @@ export const register: Register = on => {
             : (
               <Box flexDirection="row" flexShrink={1}>
                 <Box flexShrink={1}>{text !== '' ? content : <Text dimColor>{tools}</Text>}</Box>
-                {text !== '' && tools !== '' && <Box flexShrink={0}><Text dimColor> · {tools}</Text></Box>}
+                {text !== '' && tools !== '' && <Box flexShrink={0}><Text dimColor> ({tools})</Text></Box>}
               </Box>
             )}
         </Box>
@@ -577,10 +577,10 @@ export const register: Register = on => {
       return (
       <Box flexDirection="column" paddingLeft={2} marginTop={1} gap={1}>
         {x?.excerpt?.kept === true ? conversation(i, { around: x.around, excerpt: x.excerpt }) : kept(i)}
-        {i.rows.length > 0 && <Box flexDirection="column">{i.rows.slice(0, 4).map((r) => field(r.ts !== undefined ? clock(r.ts) : `Turn ${r.turn}`, `${r.what}${r.detail === '' ? '' : ` · ${clip(r.detail, width - 24)}`}`))}</Box>}
+        {i.rows.length > 0 && <Box flexDirection="column">{i.rows.slice(0, 4).map((r) => field(r.ts !== undefined ? clock(r.ts) : `Turn ${r.turn}`, `${r.what}${r.detail === '' ? '' : `: ${clip(r.detail, width - 24)}`}`))}</Box>}
         {i.established !== undefined && field('Established', clip(i.established, width * 2))}
         {i.why !== undefined && field('Why', i.why)}
-        {i.reasons.length > 0 && field('Reasons', i.reasons.join(' · '))}
+        {i.reasons.length > 0 && field('Reasons', i.reasons.join(', '))}
         {i.method === 'rule' && i.written > 0 && field('Cost', `${human(i.written)}+ tokens written and discarded`)}
         {i.dismissId !== undefined && (answerOf(i) !== undefined
           ? answerResult(i, answerOf(i) as Answer)
@@ -605,8 +605,7 @@ export const register: Register = on => {
 
     // A time the developer can place, where the transcript gives one; else the turn numbers.
     const where = (i: Item, withSession: boolean): string =>
-      [when(i.turnAt ?? i.at, now), ...(withSession ? [`session ${i.sessionId.slice(0, 8)}`] : []),
-        i.turnAt !== undefined ? clock(i.turnAt) : `turn${i.turns.length === 1 ? '' : 's'} ${i.turns.slice(0, 3).join(', ')}`].join(' · ')
+      `${when(i.turnAt ?? i.at, now)}${withSession ? `, session ${i.sessionId.slice(0, 8)}` : ''}, ${i.turnAt !== undefined ? clock(i.turnAt) : `turn${i.turns.length === 1 ? '' : 's'} ${i.turns.slice(0, 3).join(', ')}`}`
     // The row's headline is the developer's own words: their quote, else the prompt the turn answered.
     // The agent's words are never drawn as a prompt.
     const headline = (i: Item): { text: string; mine: boolean; asked: boolean } =>
@@ -625,10 +624,10 @@ export const register: Register = on => {
           </Button>
           <Text>
             {'  '}
-            {isNew && <Text color="claude">{title(i.dimension)} · </Text>}
-            {i.secondaryDimensions !== undefined && <Text color="claude">also {i.secondaryDimensions.map(words).join(', ')} · </Text>}
+            {isNew && <Text color="claude">{title(i.dimension)}: </Text>}
+            {i.secondaryDimensions !== undefined && <Text color="claude">also {i.secondaryDimensions.map(words).join(', ')}: </Text>}
             <Text dimColor>{where(i, !isNew)}</Text>
-            {label !== undefined && <Text color="success"> · {label === 'mistake' ? 'you said: real mistake' : label === 'hidden' ? 'hidden' : `hidden: ${label === 'wrong' ? 'wrong finding' : "not the agent's fault"}`}</Text>}
+            {label !== undefined && <Text color="success">. {label === 'mistake' ? 'You said: real mistake' : label === 'hidden' ? 'Hidden' : `Hidden: ${label === 'wrong' ? 'wrong finding' : "not the agent's fault"}`}</Text>}
           </Text>
           {isOpen(key) && detail(i)}
         </Box>
@@ -655,7 +654,7 @@ export const register: Register = on => {
     // Once pressed, a fix folds to one line saying how far it got: drafted, requested, applied.
     const fixDone = (f: PaneFixState): string | undefined =>
       f.applied !== undefined && f.inEffect !== false ? `Fix applied ${day(f.applied.at)}`
-        : f.applied !== undefined ? `Fix requested ${day(f.applied.at)} · not in effect yet: rules load in a new session, or after /compact`
+        : f.applied !== undefined ? `Fix requested ${day(f.applied.at)}. Not in effect yet: rules load in a new session, or after /compact.`
           : draftedIds.includes(f.fixId) ? 'Fix drafted in your prompt box. Press Enter to apply it.'
             : undefined
     // `scope` keeps keys unique when a finding repeats its dimension's fix.
@@ -742,9 +741,9 @@ export const register: Register = on => {
                 </Button>
                 {info(dimensionDocs('cache_rebuilds'), 'cache')}
               </Box>
-              <Text dimColor>  {v.cache.count} time{v.cache.count === 1 ? '' : 's'} · {human(v.cache.tokens)} tokens written again</Text>
+              <Text dimColor>  {v.cache.count} time{v.cache.count === 1 ? '' : 's'}, {human(v.cache.tokens)} tokens written again</Text>
               {isOpen('block:cache') && v.cache.largest.map((r) => (
-                <Text dimColor>    turn {r.seq} · {r.sessionId.slice(0, 8)}{r.gapMinutes !== undefined ? ` · ${Math.round(r.gapMinutes)} min after the previous request` : ''} · {r.tokens.toLocaleString('en-US')} written</Text>
+                <Text dimColor>    Turn {r.seq} in session {r.sessionId.slice(0, 8)}{r.gapMinutes !== undefined ? `, ${Math.round(r.gapMinutes)} min after the previous request` : ''}: {r.tokens.toLocaleString('en-US')} tokens written</Text>
               ))}
             </Box>
           )}
@@ -766,7 +765,7 @@ export const register: Register = on => {
           {f.waiting.length === 0 &&<Text dimColor>Every fix on offer is applied in this project.</Text>}
           {f.waiting.map((x) => {
             const isPicked = picks.includes(x.fixId)
-            const status = [fixWhere(x), ...(x.applied !== undefined && x.inEffect === false ? [`requested ${day(x.applied.at)}, in effect from your next session`] : [])].join(' · ')
+            const status = [fixWhere(x), ...(x.applied !== undefined && x.inEffect === false ? [`Requested ${day(x.applied.at)}, in effect from your next session.`] : [])].join('. ')
             return (
               <Box key={`waiting:${x.fixId}`} flexDirection="row" paddingLeft={2}>
                 <Button key={`pick:${x.fixId}`} plain label={`${isPicked ? '[x]' : '[ ]'} ${x.text}`} onPress={() => update($, picked, (p) => (isPicked ? p.filter((k) => k !== x.fixId) : [...p, x.fixId]))}>
@@ -775,7 +774,7 @@ export const register: Register = on => {
                 <Box flexDirection="column" flexShrink={1}>
                   <Box flexDirection="row">
                     <Box flexShrink={0} flexDirection="row"><Text weight="bold">{title(x.dimension)}</Text>{info(dimensionDocs(x.dimension), `waiting:${x.fixId}`)}</Box>
-                    <Box flexShrink={1}><Text dimColor> {x.findingIds !== undefined ? `· ${fixOrigin(x).replace(/^For [^,]*, |\.$/g, '')} ` : ''}· {fixKind(x).replace(/:$/, '')}</Text></Box>
+                    <Box flexShrink={1}><Text dimColor>: {x.findingIds !== undefined ? `${fixOrigin(x).replace(/^For [^,]*, |\.$/g, '')}, ` : ''}{fixKind(x).replace(/:$/, '')}</Text></Box>
                   </Box>
                   {prompt(clip(fixQuote(x), (width - 10) * 2), width - 8)}
                   <Text dimColor>{status}</Text>
@@ -796,7 +795,7 @@ export const register: Register = on => {
             <Box key={`applied:${x.fixId}`} flexDirection="column" paddingLeft={2}>
               <Box flexDirection="row"><Text weight="bold">{title(x.dimension)}</Text>{info(dimensionDocs(x.dimension), `applied:${x.fixId}`)}</Box>
               {prompt(clip(fixQuote(x), (width - 10) * 2), width - 8)}
-              <Text><Text color="success">Applied {day(x.applied?.at ?? '')}{x.target === 'project-hooks' ? ' · hook' : ''}</Text><Text dimColor>{outcomeText(x) !== '' ? ` · ${outcomeText(x)}` : ''}</Text></Text>
+              <Text><Text color="success">Applied {day(x.applied?.at ?? '')}{x.target === 'project-hooks' ? ' (a hook)' : ''}.</Text><Text dimColor>{outcomeText(x) !== '' ? ` ${outcomeText(x)}` : ''}</Text></Text>
             </Box>
           ))}
           <Box>{docsLink('fixes', 'How fixes and Apply work', docs('start/fixes'))}</Box>
@@ -808,7 +807,7 @@ export const register: Register = on => {
     const subscribed = active === 'health' && await $.session.usage().then((u) => u.rateLimits.length > 0).catch(() => false)
     const healthTab = () => {
       const job = (name: string) => data.health.find((h) => h.job === name)
-      const state = (name: string): string => { const h = job(name); return h === undefined ? 'not run yet' : `${h.state}${h.reason !== undefined ? ` · ${h.reason}` : ''}` }
+      const state = (name: string): string => { const h = job(name); return h === undefined ? 'not run yet' : `${h.state}${h.reason !== undefined ? ` (${h.reason})` : ''}` }
       const line = (label: string | [string, string], ...values: string[]) => (
         <Box flexDirection="row">
           <Box width={16} flexShrink={0}>{typeof label === 'string' ? <Text dimColor>{label}</Text> : <Box flexDirection="row"><Text dimColor>{label[0]}</Text>{info(label[1], `health:${label[0]}`)}</Box>}</Box>
@@ -821,16 +820,93 @@ export const register: Register = on => {
         <Box flexDirection="column" gap={1}>
           {line('History pass', state('standing'))}
           {line('Judge', state('judge'), `${data.read} of ${data.total} sessions read`)}
-          {today !== undefined && line(['Today', docs('start/sends-and-costs')], `${human(today.tokens)} of ${human(today.limit)} tokens${today.tokens >= today.limit ? ' · budget reached, continues tomorrow' : ''}`)}
+          {today !== undefined && line(['Today', docs('start/sends-and-costs')], `${human(today.tokens)} of ${human(today.limit)} tokens${today.tokens >= today.limit ? '. The limit is reached; reads continue tomorrow.' : ''}`)}
           {sp?.allTime !== undefined && sp.allTime.calls > 0 && line('Spent', spendText(sp.allTime), ...(sp.allTime.usdMicros !== undefined ? [costNote(subscribed ? 'subscription' : sp.billing)] : []))}
           {sp !== undefined && sp.older > 0 && line('Older', `${sp.older} past session${sp.older === 1 ? '' : 's'} not read`)}
-          {sp !== undefined && line(['Model reads', docs('commands/judge')], sp.enabled ? 'on · /vibesenpai:judge off stops them' : 'off · /vibesenpai:judge on')}
+          {sp !== undefined && line(['Model reads', docs('commands/judge')], sp.enabled ? 'On. /vibesenpai:judge off stops them.' : 'Off. /vibesenpai:judge on starts them.')}
           <Box flexDirection="row">
             <Box width={16} flexShrink={0}><Text dimColor>Dismissed</Text></Box>
             <Text>{data.dismissed ?? 0} finding{data.dismissed === 1 ? '' : 's'}</Text>
             {(data.dismissed ?? 0) > 0 && <Box marginLeft={2}>{secondary('restore-all', 'Restore all', () => restoreAll($))}</Box>}
           </Box>
           {sayLines(BULK, width)}
+        </Box>
+      )
+    }
+
+    // What Claude was given here, and what it never sees: facts from structure and file locations (D71).
+    const rulesTab = () => {
+      const r = data.rules
+      if (r === undefined) return <Text dimColor>The rules show after the next history pass.</Text>
+      const v = rulesView(r)
+      // A file's current text, read live; each line clipped to the pane.
+      const body = (k: string, f: { lines?: string[]; total?: number }) => isOpen(k) && f.lines !== undefined && (
+        <Box flexDirection="column" paddingLeft={4}>
+          {f.lines.map((l) => <Text dimColor>{l.trim() === '' ? ' ' : clip(l, width - 6)}</Text>)}
+          {(f.total ?? 0) > f.lines.length && <Text dimColor>… {(f.total ?? 0) - f.lines.length} more lines</Text>}
+        </Box>
+      )
+      const fileRow = (f: PaneRuleFile, group: string) => {
+        const k = `rule:${group}:${f.path}`
+        return (
+          <Box key={k} flexDirection="column">
+            <Button key={k} plain label={`${caret(k)} ${f.display}`} onPress={() => toggle($, k)}>
+              <Text>{caret(k)} {clip(f.display, Math.max(12, width - 34))}  <Text dimColor>{ruleMeta(f)}</Text></Text>
+            </Button>
+            {body(k, f)}
+          </Box>
+        )
+      }
+      const memoryRow = (m: PaneMemory, group: string) => {
+        const k = `rule:${group}:${m.path}`
+        const label = m.scope === 'parent' ? `${m.folder} memory: ${memoryName(m)}` : memoryName(m)
+        return (
+          <Box key={k} flexDirection="column">
+            <Button key={k} plain label={`${caret(k)} ${label}`} onPress={() => toggle($, k)}>
+              <Text>{caret(k)} {clip(label, width - 4)}{m.type === 'feedback' ? <Text dimColor>  rule</Text> : null}</Text>
+            </Button>
+            {m.description !== undefined && <Box paddingLeft={4}><Text italic>{clip(m.description, (width - 6) * 2)}</Text></Box>}
+            {body(k, m)}
+          </Box>
+        )
+      }
+      // A group: the first three start open, the later ones start closed; every one toggles.
+      const group = (key: string, heading: string, note: string, startOpen: boolean, rows: unknown[]) => {
+        if (rows.length === 0) return null
+        const k = startOpen ? `closed:rules:${key}` : `rules:${key}`
+        const shown = startOpen ? !isOpen(k) : isOpen(k)
+        return (
+          <Box key={`rules:${key}`} flexDirection="column" marginTop={1}>
+            <Button key={k} plain label={`${shown ? '▾' : '▸'} ${heading} (${rows.length})`} onPress={() => toggle($, k)}>
+              <Text weight="bold" color="claude">{shown ? '▾' : '▸'} {heading} ({rows.length})</Text>
+            </Button>
+            <Text dimColor>  {note}</Text>
+            {shown && <Box flexDirection="column" paddingLeft={2} marginTop={1}>{rows as never}</Box>}
+          </Box>
+        )
+      }
+      const checkRow = (c: (typeof v.checks)[number], i: number) => c.kind === 'duplicate'
+        ? (
+          <Box key={`check:${i}`} flexDirection="column">
+            <Text>The same line is in {c.files.join(' and ')}:</Text>
+            <Box paddingLeft={2}><Text italic>“{clip(c.line, (width - 6) * 2)}”</Text></Box>
+          </Box>
+        )
+        : <Text key={`check:${i}`}>{c.file} links to {c.target}, which does not exist.</Text>
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row">
+            <Text weight="bold">Rules</Text>
+            {info(docs('start/rules'), 'rules')}
+          </Box>
+          <Text dimColor>What Claude was given in this project, and what it never sees.</Text>
+          {r.loaded.length === 0 && r.memory.length === 0 && <Box marginTop={1}><Text dimColor>No instruction files were recorded in this project's sessions.</Text></Box>}
+          {group('every', 'Every session', 'Loaded when a session starts.', true, v.every.map((f) => fileRow(f, 'every')))}
+          {group('sometimes', 'Sometimes', 'Loaded when Claude works in that folder or on matching files.', false, v.sometimes.map((f) => fileRow(f, 'sometimes')))}
+          {group('elsewhere', 'Written, but not loaded here', 'Memory of a parent folder. Claude Code loads memory only for the folder a session starts in.', true, v.elsewhere.map((m) => memoryRow(m, 'elsewhere')))}
+          {group('on-demand', 'Loaded only when Claude opens them', "This project's memory files. Only the MEMORY.md index loads by itself.", false, v.onDemand.map((m) => memoryRow(m, 'on-demand')))}
+          {group('checks', 'Worth a look', 'Facts about the files themselves.', true, v.checks.map(checkRow))}
+          <Box marginTop={1}>{docsLink('rules', 'How Claude Code loads rules', docs('start/rules'))}</Box>
         </Box>
       )
     }
@@ -886,12 +962,12 @@ export const register: Register = on => {
 
         {message !== '' && <Text color="suggestion">{message === RECORDING ? `${spin} ` : ''}{message}</Text>}
 
-        {active === 'fixes' ? fixesTab() : active === 'health' ? healthTab() : findingsTab()}
+        {active === 'fixes' ? fixesTab() : active === 'health' ? healthTab() : active === 'rules' ? rulesTab() : findingsTab()}
 
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>{'─'.repeat(width)}</Text>
           <Box flexDirection="row" gap={1}>
-            <Text dimColor>⇥ move · ⏎ press ·</Text>
+            <Text dimColor>⇥ to move, ⏎ to press.</Text>
             {docsLink('pane', 'Guide to this pane', docs('start/pane'))}
           </Box>
         </Box>

@@ -139,6 +139,24 @@ CREATE TABLE IF NOT EXISTS rule_seen (
 `;
 
 /**
+ * The instruction files Claude Code loaded in a project's sessions: paths and counts only, never their
+ * text (the Rules tab reads each file live). Replaced per project by every history pass. D71.
+ */
+const RULE_FILE_DDL = `
+CREATE TABLE IF NOT EXISTS rule_file (
+  project           TEXT NOT NULL,
+  path              TEXT NOT NULL,
+  kind              TEXT NOT NULL,   -- as the harness recorded it: Project, AutoMem, User, Local, ...
+  cwd               TEXT,            -- the folder the project's latest session started in
+  sessions          INTEGER NOT NULL,
+  at_start_sessions INTEGER NOT NULL,
+  first_at          TEXT NOT NULL,
+  last_at           TEXT NOT NULL,
+  PRIMARY KEY (project, path)
+);
+`;
+
+/**
  * Records the lookback gate dropped: what was flagged, why it was dropped, and the source the model claimed.
  * Kept so a missed failure can be read rather than inferred from `run.gated`. Text is redacted when written.
  */
@@ -242,6 +260,7 @@ ${DISMISSAL_DDL}
 ${LABEL_DDL}
 ${FIX_DDL}
 ${GATED_DDL}
+${RULE_FILE_DDL}
 `;
 
 /** Open the store, creating it if needed. WAL lets readers read during a write; busy_timeout waits rather than throws. */
@@ -314,6 +333,7 @@ export function openStore(archive: string): Db {
     db.exec(LABEL_DDL);
     db.exec(FIX_DDL);
     db.exec(GATED_DDL);
+    db.exec(RULE_FILE_DDL);
 
     // `session` gained `packet_tokens` the same way.
     const scols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map(
@@ -571,6 +591,37 @@ export function readGated(db: Db, limit = 20): GatedRow[] {
     ...(r.claimed === null ? {} : { claimed: r.claimed }),
     at: r.at,
   }));
+}
+
+export type RuleFileRow = {
+  path: string;
+  kind: string;
+  sessions: number;
+  atStartSessions: number;
+  firstAt: string;
+  lastAt: string;
+};
+
+/** Replace one project's loaded instruction files. */
+export function putRuleFiles(db: Db, project: string, cwd: string | undefined, rows: RuleFileRow[]): void {
+  db.prepare('DELETE FROM rule_file WHERE project = ?').run(project);
+  const put = db.prepare(
+    `INSERT INTO rule_file(project, path, kind, cwd, sessions, at_start_sessions, first_at, last_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (const r of rows) put.run(project, r.path, r.kind, cwd ?? null, r.sessions, r.atStartSessions, r.firstAt, r.lastAt);
+}
+
+/** One project's loaded instruction files, and the folder its latest session started in. */
+export function readRuleFiles(db: Db, project: string): { cwd?: string; files: RuleFileRow[] } {
+  const rows = db
+    .prepare('SELECT path, kind, cwd, sessions, at_start_sessions, first_at, last_at FROM rule_file WHERE project = ? ORDER BY path')
+    .all(project) as { path: string; kind: string; cwd: string | null; sessions: number; at_start_sessions: number; first_at: string; last_at: string }[];
+  const cwd = rows.find((r) => r.cwd !== null)?.cwd ?? undefined;
+  return {
+    ...(cwd === undefined ? {} : { cwd }),
+    files: rows.map((r) => ({ path: r.path, kind: r.kind, sessions: r.sessions, atStartSessions: r.at_start_sessions, firstAt: r.first_at, lastAt: r.last_at })),
+  };
 }
 
 /** Record that a pass has started and which session it is reading. */

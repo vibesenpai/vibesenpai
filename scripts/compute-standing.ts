@@ -14,16 +14,18 @@ import {
 import { clean, STANDING_DEADLINE_MS } from '../src/jobs.ts';
 import { runJob, type Outcome } from '../src/supervise/index.ts';
 import {
-  openStore, putFixApplied, putOccurrences, putRuleLoaded, putSessionCost, transact,
+  openStore, putFixApplied, putOccurrences, putRuleFiles, putRuleLoaded, putSessionCost, transact,
   type Db, type FixSighting, type SessionCostRow,
 } from '../src/store.ts';
+import { rulesCounts, tallyLoaded, untilde } from '../src/rules.ts';
+import { claudeDir } from '../src/config.ts';
 import { knownRules } from '../src/fix.ts';
 import { findingRules, fixesFor } from '../src/finding-fix.ts';
 import { writeFindingFixes } from '../src/fix-file.ts';
 import { sessionForFix } from '../src/cmd/common.ts';
 import { readJudgeState } from '../src/judge/state.ts';
 import { sightingsIn } from '../src/outcome.ts';
-import { withFullText } from '../src/parsers/claude-code.ts';
+import { sessionCwd, withFullText, type Instruction } from '../src/parsers/claude-code.ts';
 import { renderExtract } from '../src/judge/prompt.ts';
 import { buildSession, estimateTokens } from '../src/judge/packet.ts';
 import { discoverTranscripts, projectOf } from '../src/read.ts';
@@ -50,6 +52,8 @@ async function main(): Promise<Outcome> {
         return [];
       }
     })()];
+    // Per project: what each session loaded, and the folder the latest one started in. Paths only (D71).
+    const ruleSources = new Map<string, { cwd?: string; cwdAt: string; sessions: { at: string; instructions: Instruction[] }[] }>();
     let unreadable = 0;
     for (const f of discoverTranscripts(config.sources)) {
       try {
@@ -64,6 +68,19 @@ async function main(): Promise<Outcome> {
         const seen = sightingsIn(id, project, parsed.events, instructions, rules);
         applied.push(...seen.applied);
         loaded.push(...seen.loaded);
+
+        const at = spanOf(parsed.events).first ?? '';
+        // A subagent's transcript sits in a `subagents` folder; it is not a project of its own.
+        if (!f.includes('/subagents/')) {
+          const src = ruleSources.get(project) ?? { cwdAt: '', sessions: [] };
+          src.sessions.push({ at, instructions });
+          const cwd = at >= src.cwdAt ? sessionCwd(text.split('\n')) : undefined;
+          if (cwd !== undefined) {
+            src.cwd = untilde(cwd);
+            src.cwdAt = at;
+          }
+          ruleSources.set(project, src);
+        }
 
         // What the judge will have to read, measured now so the queue needs no estimate.
         try {
@@ -94,7 +111,33 @@ async function main(): Promise<Outcome> {
       detectorsFor(config.preset, undefined, config.mute),
       { unreadable, dismissed: readDismissed(config.archive) },
     );
-    writeStanding(config.archive, standing);
+    // Rules per project: counts for the session-start line, and the loaded files' paths for the pane.
+    const ruleFiles = new Map<string, ReturnType<typeof tallyLoaded>>();
+    const ruleCounts: Record<string, { notLoaded: number; checks: number }> = {};
+    for (const [project, src] of ruleSources) {
+      try {
+        const files = tallyLoaded(src.sessions);
+        ruleFiles.set(project, files);
+        if (src.cwd !== undefined) ruleCounts[project] = rulesCounts(src.cwd, claudeDir(), files);
+      } catch {
+        // Principle Zero: a project whose rules cannot be read is left out.
+      }
+    }
+    writeStanding(config.archive, { ...standing, rules: ruleCounts });
+
+    if (ruleFiles.size > 0) {
+      let db: Db | undefined;
+      try {
+        db = openStore(config.archive);
+        transact(db, () => {
+          for (const [project, files] of ruleFiles) putRuleFiles(db as Db, project, ruleSources.get(project)?.cwd, files);
+        });
+      } catch {
+        // Principle Zero: the Rules tab shows what it can.
+      } finally {
+        db?.close();
+      }
+    }
 
     // Each judged finding's own fix, for the pane. Reads only the judged sessions again.
     if (!process.argv.includes('--skip-fixes')) try {

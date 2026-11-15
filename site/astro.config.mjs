@@ -46,6 +46,7 @@ export default defineConfig({
             { label: 'A tour of the pane', slug: 'start/pane' },
             { label: 'Your first finding', slug: 'start/first-finding' },
             { label: 'Fixes and Apply', slug: 'start/fixes' },
+            { label: 'Rules', slug: 'start/rules' },
           ],
         },
         {

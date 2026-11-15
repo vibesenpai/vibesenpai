@@ -203,7 +203,7 @@ test('the Fixes tab applies several as one request, and says how an applied one 
   expect(await ui.find({ type: 'Text', text: /1 time in 4 sessions/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Came back/ })).toBeUndefined()
   // Requested but never loaded: still offered, since the developer may have said no.
-  expect(await ui.find({ type: 'Text', text: /requested Oct 22, in effect from your next session/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Requested Oct 22, in effect from your next session\./ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'pick:3704ae' })).toBeDefined()
   await ui.unmount()
 })
@@ -228,7 +228,7 @@ test('the Health tab states the jobs, what was read and what was spent', async (
   await ui.press({ key: 'tab:health' })
   expect(await ui.find({ type: 'Text', text: /2 of 3 sessions read/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /610k of 2\.0M tokens/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^114 calls · 3\.8M in · 226k out · \$1\.87$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^114 calls, 3\.8M in, 226k out, \$1\.87$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /on a subscription it comes out of your plan's usage instead/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /3 past sessions not read/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /judge off stops them/ })).toBeDefined()
@@ -244,7 +244,7 @@ test('on a subscription, Health says the dollars are not a bill, and shows nothi
   await ui.press({ key: 'tab:health' })
   expect(await ui.find({ type: 'Text', text: /5-hour limit|Claude usage/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /comes out of your plan's usage, not a bill/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /budget reached, continues tomorrow/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /The limit is reached; reads continue tomorrow\./ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -406,7 +406,7 @@ test('Finding is wrong shows at once and records the answer', async ($, on) => {
   // No re-read after an answer: the finding stays where it is.
   expect(calls.argv.filter((a) => a.includes('--json'))).toHaveLength(1)
   expect(await ui.find({ type: 'Text', text: /^✓ Hidden\. Noted as a wrong finding\.$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /hidden: wrong finding/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Hidden: wrong finding/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -418,7 +418,7 @@ test('Not the agent\'s fault hides the finding in place, says so, and Undo takes
   await ui.press({ key: 'item:new:judged-new' })
   await ui.press({ key: 'suggestion:judged-new' })
   expect(await ui.find({ type: 'Text', text: /^✓ Hidden\. It doesn't count against the agent\.$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /hidden: not the agent's fault/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Hidden: not the agent's fault/ })).toBeDefined()
   await ui.press({ key: 'undo:judged-new' })
   expect(calls.argv.some((a) => a.join(' ').endsWith('label judged-new --undo'))).toBe(true)
   expect(await ui.find({ type: 'Button', key: 'suggestion:judged-new' })).toBeDefined()
@@ -446,10 +446,10 @@ test('an open finding reads its conversation, marks the cited turn, and asks for
   expect(await ui.find({ type: 'Text', text: /^▶$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^You asked:$/ }), 'the conversation replaces the quote blocks').toBeUndefined()
   // Collapsed: a line per message, tool calls as a count, no "more" yet.
-  expect(await ui.find({ type: 'Text', text: /^ · 2 tool calls · 1 failed$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ \(2 tool calls, 1 failed\)$/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'more:judged-new' })).toBeUndefined()
   await ui.press({ key: 'conv:judged-new' })
-  expect(await ui.find({ type: 'Text', text: /^2 tool calls · 1 failed$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^2 tool calls, 1 failed$/ })).toBeDefined()
   await ui.press({ key: 'more:judged-new' })
   expect(calls.argv.some((a) => a.join(' ').includes('--around 6'))).toBe(true)
   await ui.unmount()
@@ -529,7 +529,7 @@ test('while the judge runs, the card says so with the measured time and the day 
   engine(on, { ...DATA, sessions, read: 1, total: 3, health: [{ job: 'judge', state: 'running' }], progress: { target: 3, seconds: 180, finishOn } }, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^reading now · about 3 min$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Reading now, about 3 min\.$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /the rest finish \w+day\.$/ })).toBeDefined()
   await ui.unmount()
 })
@@ -689,7 +689,7 @@ test('an applied fix with no sessions since says so in words, not as zero of zer
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab:fixes' })
-  expect(await ui.find({ type: 'Text', text: /Before 0 times in 2 sessions · Since: no sessions yet/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Before 0 times in 2 sessions\. Since: no sessions yet\./ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /0 times in 0 sessions/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -752,4 +752,45 @@ test('on a current Claude Code the pane opens as before', async ($, on) => {
   on('session.version', () => ({ value: { version: '2.1.322', base: '2.1.322' } }))
   const r = await insights($)
   expect(r.text).toBe('Insights opened beside the chat.')
+})
+
+const RULES: PaneData['rules'] = {
+  cwd: '/r',
+  loaded: [
+    { path: '/r/CLAUDE.md', display: 'CLAUDE.md', kind: 'Project', sessions: 3, atStartSessions: 3, lines: ['# Rules', '- Hooks exit 0.'], total: 2 },
+    { path: '/r/.claude/rules/hooks.md', display: '.claude/rules/hooks.md', kind: 'Project', sessions: 1, atStartSessions: 0, lines: ['- Never wait.'], total: 1 },
+  ],
+  memory: [
+    { path: '/h/.claude/projects/-h-work/memory/push.md', display: '~/.claude/projects/-h-work/memory/push.md', folder: '~/work', scope: 'parent', name: 'never-push', description: 'Never push without asking', type: 'feedback', listed: true },
+  ],
+  checks: [{ kind: 'duplicate', line: 'hooks exit 0.', files: ['CLAUDE.md', '.claude/rules/hooks.md'] }],
+}
+
+test('the Rules tab shows what loaded, what never loads here, and the facts about the files', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, { ...DATA, rules: RULES }, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:rules' })
+  expect(await ui.find({ type: 'Text', text: /Every session \(1\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /project, 2 lines/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Written, but not loaded here \(1\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /~\/work memory: push\.md/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Never push without asking/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /The same line is in CLAUDE\.md and \.claude\/rules\/hooks\.md/ })).toBeDefined()
+  // "Sometimes" starts closed; a file opens to its current lines.
+  expect(await ui.find({ type: 'Text', text: /Never wait/ })).toBeUndefined()
+  await ui.press({ key: 'rule:every:/r/CLAUDE.md' })
+  expect(await ui.find({ type: 'Text', text: /Hooks exit 0\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('before the history pass has run, the Rules tab says so', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [] }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:rules' })
+  expect(await ui.find({ type: 'Text', text: /The rules show after the next history pass/ })).toBeDefined()
+  await ui.unmount()
 })

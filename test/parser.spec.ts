@@ -595,6 +595,12 @@ describe('project instructions, captured for the judge only', () => {
     expect(instructions.map((i) => i.source)).toEqual(['CLAUDE.md', 'memory', 'rules/hooks.md']);
     expect(instructions[0]?.text).toContain('Never push.');
     expect(instructions[0]?.text).not.toContain('sk-ant-api03');
+    // Path and kind as the harness recorded them, and which loaded with the session.
+    expect(instructions.map((i) => [i.path, i.kind, i.atStart])).toEqual([
+      ['/repo/CLAUDE.md', 'Project', true],
+      ['/home/me/.claude/projects/x/memory/MEMORY.md', 'AutoMem', true],
+      ['/repo/.claude/rules/hooks.md', 'Project', false],
+    ]);
     // The rule loaded after the second prompt applies from there, not from the start.
     const second = result.events.find((e) => e.turnType === 'user_prompt' && e.uuid === 'u2');
     expect(instructions[2]?.fromSeq).toBeGreaterThan(second?.seq ?? Infinity);

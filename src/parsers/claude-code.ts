@@ -152,8 +152,11 @@ function redactToFixedPoint(s: string, limit = 4): string {
 let keepFullText = false;
 let pendingFullText: string | undefined;
 
-/** A project instruction the harness loaded (CLAUDE.md, a rule, memory), redacted, and the seq it applies from. */
-export type Instruction = { fromSeq: number; source: string; text: string };
+/**
+ * An instruction the harness loaded (CLAUDE.md, a rule, memory), redacted, and the seq it applies from.
+ * `path` and `kind` are as the harness recorded them; `atStart` is true for the session-start set.
+ */
+export type Instruction = { fromSeq: number; source: string; text: string; path: string; kind: string; atStart: boolean };
 
 export function withFullText<T>(fn: () => T): { result: T; fullText: Map<number, string>; instructions: Instruction[] } {
   keepFullText = true;
@@ -187,9 +190,17 @@ function instructionSource(path: string, kind: unknown): string {
 function captureInstructions(a: unknown, fromSeq: number): void {
   if (!keepFullText || a === null || typeof a !== 'object') return;
   const at = a as { type?: unknown; files?: unknown; content?: unknown };
+  const atStart = at.type === 'instructions';
   const add = (path: unknown, kind: unknown, content: unknown): void => {
     if (typeof path !== 'string' || typeof content !== 'string' || content.trim() === '') return;
-    capturedInstructions.push({ fromSeq, source: instructionSource(path, kind), text: redactToFixedPoint(redact(content).text) });
+    capturedInstructions.push({
+      fromSeq,
+      source: instructionSource(path, kind),
+      text: redactToFixedPoint(redact(content).text),
+      path,
+      kind: typeof kind === 'string' ? kind : 'unknown',
+      atStart,
+    });
   };
   if (at.type === 'instructions' && Array.isArray(at.files)) {
     for (const f of at.files as { path?: unknown; type?: unknown; content?: unknown }[]) add(f.path, f.type, f.content);

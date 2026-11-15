@@ -48,7 +48,7 @@ From the public test data of [claude-code-log](https://github.com/daaain/claude-
 In the pane, under **Cache rebuilds**, the rebuild is listed as:
 
 ```
-turn 134 · a7da6a22 · 69 min after the previous request · 54,357 written
+Turn 134 in session a7da6a22, 69 min after the previous request: 54,357 tokens written
 ```
 
 `a7da6a22` is the start of the session id. The summary line gives the number of

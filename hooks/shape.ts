@@ -1,6 +1,6 @@
 // What the insights pane shows, worked out from `report --json`. Pure: no `$`, so it is tested alone.
 
-import type { PaneData, PaneFixState, PaneRebuild, PaneRow, PaneSpend, PaneSpendWindow, PaneWindow } from '../types'
+import type { PaneData, PaneFixState, PaneMemory, PaneRebuild, PaneRow, PaneRuleCheck, PaneRuleFile, PaneRules, PaneSpend, PaneSpendWindow, PaneWindow } from '../types'
 
 /** One finding as the pane lists it. The method is carried in the data and never shown. */
 export type Item = {
@@ -182,10 +182,10 @@ export function shortDay(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-/** `12 calls · 610k in · 40k out · $0.31`. */
+/** `12 calls, 610k in, 40k out, $0.31`. */
 export function spendText(w: PaneSpendWindow): string {
-  const usd = w.usdMicros === undefined ? '' : ` · ${dollars(w.usdMicros)}`
-  return `${w.calls} call${w.calls === 1 ? '' : 's'} · ${human(w.tokensIn)} in · ${human(w.tokensOut)} out${usd}`
+  const usd = w.usdMicros === undefined ? '' : `, ${dollars(w.usdMicros)}`
+  return `${w.calls} call${w.calls === 1 ? '' : 's'}, ${human(w.tokensIn)} in, ${human(w.tokensOut)} out${usd}`
 }
 
 export type Billing = 'subscription' | PaneSpend['billing']
@@ -226,7 +226,7 @@ export function fixesView(data: PaneData): { waiting: PaneFixState[]; applied: P
   }
 }
 
-const TABS = [['findings', 'Findings'], ['fixes', 'Fixes'], ['health', 'Health']] as const
+const TABS = [['findings', 'Findings'], ['fixes', 'Fixes'], ['health', 'Health'], ['rules', 'Rules']] as const
 
 /**
  * The folder tab: the active label boxed and open at the bottom, joined to a rule the pane's width.
@@ -269,7 +269,7 @@ export function outcomeText(f: PaneFixState): string {
   const parts: string[] = []
   if (f.before !== undefined) parts.push(`Before ${windowText(f.before)}`)
   if (f.since !== undefined) parts.push(f.since.sessions === 0 ? 'Since: no sessions yet' : `Since ${windowText(f.since)}`)
-  return parts.join(' · ')
+  return parts.length === 0 ? '' : `${parts.join('. ')}.`
 }
 
 /** Word-wrapped to `max` columns, so each line can carry its own prefix (a bar the layout cannot repeat). */
@@ -335,4 +335,49 @@ export function finishDay(iso: string, now: Date): string {
   const days = Math.round((d.getTime() - now.getTime()) / 86_400_000)
   if (days <= 1) return 'tomorrow'
   return days < 7 ? d.toLocaleDateString('en-US', { weekday: 'long' }) : shortDay(iso)
+}
+
+/** The Rules tab's groups (D71): what loaded every session, what loaded later, and memory that does not load by itself. */
+export type RulesView = {
+  every: PaneRuleFile[]
+  sometimes: PaneRuleFile[]
+  /** A parent folder's memory: never loaded here. Rules (feedback) first. */
+  elsewhere: PaneMemory[]
+  /** This project's memory files: loaded only when Claude opens one. */
+  onDemand: PaneMemory[]
+  checks: PaneRuleCheck[]
+}
+
+export function rulesView(r: PaneRules): RulesView {
+  const rulesFirst = (a: PaneMemory, b: PaneMemory): number => Number(b.type === 'feedback') - Number(a.type === 'feedback') || a.display.localeCompare(b.display)
+  return {
+    every: r.loaded.filter((f) => f.atStartSessions > 0),
+    sometimes: r.loaded.filter((f) => f.atStartSessions === 0),
+    elsewhere: r.memory.filter((m) => m.scope === 'parent').sort(rulesFirst),
+    onDemand: r.memory.filter((m) => m.scope === 'on-demand').sort(rulesFirst),
+    checks: r.checks,
+  }
+}
+
+/** What kind of file it is, in words: the harness's own kind, translated. */
+export function ruleKind(f: PaneRuleFile): string {
+  if (f.kind === 'AutoMem') return /MEMORY\.md$/.test(f.path) ? 'memory index' : 'memory'
+  if (f.kind === 'Project') return 'project'
+  if (f.kind === 'User') return 'yours, every project'
+  if (f.kind === 'Local') return 'local, not shared'
+  return f.kind.toLowerCase()
+}
+
+/** The line beside a loaded file: its kind, and how often it loaded when not every time. */
+export function ruleMeta(f: PaneRuleFile): string {
+  const size = f.total === undefined ? 'no longer on disk' : /MEMORY\.md$/.test(f.path)
+    ? `${(f.lines ?? []).filter((l) => /^\s*-\s*\[/.test(l)).length} entries`
+    : `${f.total} line${f.total === 1 ? '' : 's'}`
+  const when = f.atStartSessions > 0 ? '' : `, loaded in ${f.sessions} session${f.sessions === 1 ? '' : 's'}`
+  return `${ruleKind(f)}, ${size}${when}`
+}
+
+/** A memory file's own name, without its folder. */
+export function memoryName(m: PaneMemory): string {
+  return m.display.split('/').at(-1) ?? m.display
 }

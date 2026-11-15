@@ -50,6 +50,13 @@ export function cacheLine(s: Standing): string {
   return `The cache was rebuilt from scratch ${times} — ${human(r.tokens)} tokens written again`;
 }
 
+/** Rules the developer wrote that never load in this project, stated as a fact (D71). Empty when none. */
+export function rulesLine(rules: { notLoaded: number } | undefined): string {
+  const n = rules?.notLoaded ?? 0;
+  if (n === 0) return '';
+  return `${n} rule${n === 1 ? '' : 's'} you wrote ${n === 1 ? 'does' : 'do'} not load in this project. For more info open the "Rules" tab in /vibesenpai:insights`;
+}
+
 /** Judge findings by dimension, passed in because persisted `Standing` holds the rule tier only. */
 type JudgedTally = { dimension: string; count: number }[];
 
@@ -63,6 +70,8 @@ export function reportBlock(
   jobs: JobHealth[] = [],
   /** Model findings judged since the previous session started. */
   fresh = 0,
+  /** This project's rule counts (`Standing.rules`), when known. */
+  rules?: { notLoaded: number; checks: number },
 ): string {
   const failing = healthLines(jobs);
   if (s === undefined) return failing.length === 0 ? '' : `\nvibesenpai\n${failing.map((l) => `  ${l}`).join('\n')}`;
@@ -72,14 +81,14 @@ export function reportBlock(
   const wasted = Object.values(s.wastedTokens).reduce((n, w) => n + w.written, 0);
   const ruleCount = s.dimensions.reduce((n, d) => n + d.occurrences, 0);
   const judgedTotal = judged.reduce((n, j) => n + j.count, 0);
-  const headline =
-    wasted > 0
-      ? ` · ${approx(wasted)} tokens discarded on ${ruleCount} finding${ruleCount === 1 ? '' : 's'}`
-      : ruleCount + judgedTotal > 0
-        ? ` · ${ruleCount + judgedTotal} finding${ruleCount + judgedTotal === 1 ? '' : 's'}`
-        : '';
+  const last = `your last ${s.sessions} session${s.sessions === 1 ? '' : 's'}`;
+  const found = ruleCount + judgedTotal;
   const head =
-    `vibesenpai · your last ${s.sessions} session${s.sessions === 1 ? '' : 's'}${headline}`;
+    wasted > 0
+      ? `vibesenpai, ${last}: ${approx(wasted)} tokens discarded on ${ruleCount} finding${ruleCount === 1 ? '' : 's'}.`
+      : found > 0
+        ? `vibesenpai, ${last}: ${found} finding${found === 1 ? '' : 's'}.`
+        : `vibesenpai, ${last}:`;
   const lines: string[] = [];
   if (fresh > 0) lines.push(`  ${fresh} new finding${fresh === 1 ? '' : 's'} since your last session`);
 
@@ -111,13 +120,16 @@ export function reportBlock(
   if (cost !== '') lines.push(`  ${cost}`);
   for (const l of failing) lines.push(`  ${l}`);
 
+  const rulesNote = rulesLine(rules);
   if (lines.length === 0) {
     // Reached only when both tiers are empty. Said rather than omitted, so it does not read as broken.
     const dismissed = (s.dismissed ?? 0) + judgedDismissed;
+    const tail = rulesNote === '' ? '' : `\n  ${rulesNote}`;
     return dismissed > 0
-      ? `\n${head} · nothing to flag across ${s.edits} edits · ${dismissed} dismissed`
-      : `\n${head} · nothing to flag across ${s.edits} edits`;
+      ? `\n${head} nothing to flag across ${s.edits} edits (${dismissed} dismissed).${tail}`
+      : `\n${head} nothing to flag across ${s.edits} edits.${tail}`;
   }
+  if (rulesNote !== '') lines.push(`  ${rulesNote}`);
 
   if (s.unreadable > 0) {
     // Never hidden: a report must not claim more coverage than it has.
@@ -152,10 +164,10 @@ function healthLines(jobs: JobHealth[]): string[] {
     const who = JOB_LABEL[j.job] ?? j.job;
     if (j.state === 'retrying') {
       const times = j.failures === 1 ? 'once' : `${j.failures} times`;
-      const next = Date.parse(j.retryAt) <= Date.now() ? 'retrying at the next turn' : `next try ${localStamp(j.retryAt).slice(11)}`;
-      out.push(`${who} has failed ${times} since ${localStamp(j.since).slice(11)} (${j.reason}) · ${next}`);
+      const next = Date.parse(j.retryAt) <= Date.now() ? 'It retries at the next turn.' : `The next try is at ${localStamp(j.retryAt).slice(11)}.`;
+      out.push(`${who} has failed ${times} since ${localStamp(j.since).slice(11)} (${j.reason}). ${next}`);
     } else if (j.state === 'held') {
-      out.push(`${who} stopped after ${j.paidFailures} failed paid calls (${j.reason}) · it stays stopped until re-enabled`);
+      out.push(`${who} stopped after ${j.paidFailures} failed paid calls (${j.reason}). It stays stopped until re-enabled.`);
     }
   }
   return out;

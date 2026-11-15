@@ -28,7 +28,7 @@ The first time it opens, it says `Reading your history` with a seconds counter, 
 - **A failing job**, if there is one, in one line: `The history pass is retrying: <reason>` or
   `The judge is held: <reason>`. *Held* means the model reads stopped after 3 failed paid calls
   in a row; they stay stopped until you run `/vibesenpai:judge on`.
-- **Three tabs:** Findings, Fixes, Health. `⇥` moves between buttons; `⏎` presses one.
+- **Four tabs:** Findings, Fixes, Health, Rules. `⇥` moves between buttons; `⏎` presses one.
 
 ## Findings tab
 
@@ -46,7 +46,7 @@ From top to bottom:
    `N times in M sessions`. Inside, `▸ N findings` lists them three at a time. The kind's fix,
    if it has one, is below the list.
 4. **Cache rebuilds.** When the prompt cache was thrown away and written again from scratch:
-   `N times · N tokens written again`. Opened, it lists the three largest.
+   `N times, N tokens written again`. Opened, it lists the three largest.
    ([Cache rebuilds](/vibesenpai/dimensions/cache-rebuilds/))
 5. **Open full report** writes and opens the [HTML report](/vibesenpai/commands/report/).
    **Hide all** hides every finding and takes them out of the counts.
@@ -114,8 +114,8 @@ which sessions each count covers.
 
 | row | what |
 |---|---|
-| **History pass** | the job that runs the free checks: `ok`, `running`, `retrying · <reason>` or `not run yet` |
-| **Judge** | the job that does the model reads, in the same words or `held · <reason>`, and `N of M sessions read` |
+| **History pass** | the job that runs the free checks: `ok`, `running`, `retrying (<reason>)` or `not run yet` |
+| **Judge** | the job that does the model reads, in the same words or `held (<reason>)`, and `N of M sessions read` |
 | **Today** | tokens used today against the daily limit, as `N of 2.0M tokens` |
 | **Spent** | all model reads so far: calls, tokens in and out, and dollars |
 | **Older** | past sessions the model reads skip. The first time, they read your 200 most recent past sessions (the catch-up); older ones are not read automatically |
@@ -124,3 +124,9 @@ which sessions each count covers.
 
 The dollar figure is Claude Code's own, at API prices. On a subscription it is plan usage, not
 a bill.
+
+## Rules tab
+
+What Claude was given in this project, and what it never sees: the instruction files your sessions
+loaded, memory that does not load by itself, and a few facts about the files. [Rules](/vibesenpai/start/rules/)
+describes it.

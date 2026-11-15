@@ -12,7 +12,7 @@ import { JUDGE_STALE_MS, jobsHealth } from '../jobs.ts';
 import { renderHtml } from '../html.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from '../range.ts';
 import { leadSegments } from '../render.ts';
-import { currentRun, measuredCallMs, measuredMsPerToken, openStore, sessionCosts, readFixApplied, readLabels, readRuleLoaded, readSpend, sessionSpans, spendSince, withStore, type Spend } from '../store.ts';
+import { currentRun, measuredCallMs, measuredMsPerToken, openStore, sessionCosts, readFixApplied, readLabels, readRuleFiles, readRuleLoaded, readSpend, sessionSpans, spendSince, withStore, type Spend } from '../store.ts';
 import { batchCost, catchUpFrom, eligible, todayLeft, waitingOnRequest } from '../judge/limits.ts';
 import { applyPlan, type ApplyPlan } from '../fix.ts';
 import { fixStates, type FixState, type OutcomeSession } from '../outcome.ts';
@@ -22,6 +22,10 @@ import { findingPlan, KIND_WORDS, type FindingFix } from '../finding-fix.ts';
 import { readFindingFixes } from '../fix-file.ts';
 import type { JudgeState } from '../judge/state.ts';
 import { readDismissed } from '../dismiss.ts';
+import { currentLines, currentTexts, nearbyMemory, structuralChecks, tilde } from '../rules.ts';
+import { claudeDir } from '../config.ts';
+import { redact } from '../redact.ts';
+import type { PaneRules } from '../../types/index.d.ts';
 import { nextRung } from '../session-block.ts';
 import { plural } from '../format.ts';
 import { writeAtomic } from '../files.ts';
@@ -86,7 +90,8 @@ export async function cmdReport(a: Argv): Promise<number> {
     const w = pendingWork(judgeState, sizes);
     const labels = Object.fromEntries((withStore(config.archive, readLabels) ?? []).map((l) => [l.key, l.verdict]));
     const fixes = fixesFor(data, judgeState, config.archive, projectKey(process.cwd()));
-    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), progress: progressFor(judgeState, config.archive, sizes), dismissed: (judgeState.dismissed ?? 0) + (data.standing.dismissed ?? 0) };
+    const rules = rulesFor(config.archive, process.cwd());
+    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), progress: progressFor(judgeState, config.archive, sizes), dismissed: (judgeState.dismissed ?? 0) + (data.standing.dismissed ?? 0), ...(rules === undefined ? {} : { rules }) };
     process.stdout.write(`${JSON.stringify(out)}\n`);
     return 0;
   }
@@ -428,4 +433,45 @@ function spendFor(
     enabled: state.settings.enabled,
     billing: api ? 'api' : 'unknown',
   };
+}
+
+/**
+ * The Rules tab's data for the project at `cwd`: the files its sessions loaded (paths from the store), the
+ * memory nearby that does not load by itself, and the structural checks. Text is read now and never stored.
+ */
+export function rulesFor(archive: string, cwd: string, home: string = claudeDir()): PaneRules | undefined {
+  try {
+    const stored = withStore(archive, (db) => readRuleFiles(db, projectKey(cwd)));
+    const files = stored?.files ?? [];
+    const display = (p: string): string => (p.startsWith(`${cwd}/`) ? p.slice(cwd.length + 1) : tilde(p));
+    const withLines = <T extends { path: string }>(r: T): T & { lines?: string[]; total?: number } => {
+      const c = currentLines(r.path);
+      return c === undefined ? r : { ...r, lines: c.lines, total: c.total };
+    };
+    const clean = (t: string | undefined): string | undefined => (t === undefined ? undefined : redact(t).text);
+    return {
+      cwd,
+      loaded: files.map((f) => withLines({ path: f.path, display: display(f.path), kind: f.kind, sessions: f.sessions, atStartSessions: f.atStartSessions })),
+      memory: nearbyMemory(cwd, home).map((m) => {
+        const name = clean(m.name);
+        const description = clean(m.description);
+        return withLines({
+          path: m.path,
+          display: tilde(m.path),
+          folder: tilde(m.folder),
+          scope: m.scope,
+          listed: m.listed,
+          ...(name === undefined ? {} : { name }),
+          ...(description === undefined ? {} : { description }),
+          ...(m.type === undefined ? {} : { type: m.type }),
+        });
+      }),
+      checks: structuralChecks(currentTexts(files)).map((c) =>
+        c.kind === 'duplicate' ? { ...c, line: redact(c.line).text, files: c.files.map(display) } : { ...c, file: display(c.file) },
+      ),
+    };
+  } catch {
+    // Principle Zero: the pane shows its other tabs.
+    return undefined;
+  }
 }

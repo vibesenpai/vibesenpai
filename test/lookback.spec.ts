@@ -17,8 +17,8 @@ const SRC: LookbackSource = {
     { seq: 40, text: 'Since this is a terminal, labels need to be bold.' },
   ],
   instructions: [
-    { fromSeq: 0, source: 'CLAUDE.md', text: '# Rules\n- Model findings render as "flagged by a model".\n- Hooks exit 0.' },
-    { fromSeq: 50, source: 'rules/hooks.md', text: '- A hook never waits on analysis.' },
+    { fromSeq: 0, source: 'CLAUDE.md', text: '# Rules\n- Model findings render as "flagged by a model".\n- Hooks exit 0.', path: '/repo/CLAUDE.md', kind: 'Project', atStart: true },
+    { fromSeq: 50, source: 'rules/hooks.md', text: '- A hook never waits on analysis.', path: '/repo/.claude/rules/hooks.md', kind: 'Project', atStart: false },
   ],
 };
 

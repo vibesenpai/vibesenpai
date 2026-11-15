@@ -13,6 +13,7 @@ import {
 import { resolveConfig } from '../src/config.ts';
 import { readStanding } from '../src/standing.ts';
 import { disclosure, nextRung, reportBlock } from '../src/session-block.ts';
+import { projectKey } from '../src/harness/claude-code.ts';
 
 function main(): void {
   if (process.env['VIBESENPAI_DISABLE'] === '1') return;
@@ -22,13 +23,15 @@ function main(): void {
   // Report before the breaker check, so a tripped analyser still shows stale results.
   const state = readJudgeState(config.archive);
   const fresh = newSinceLastSession(config.archive, state.findings.map((f) => f.at));
+  const standing = readStanding(config.archive);
   const block = reportBlock(
-    readStanding(config.archive),
+    standing,
     nextRung('block'),
     tallyByDimension(state),
     state.dismissed ?? 0,
     jobsHealth(config.archive),
     fresh,
+    standing?.rules?.[projectKey(process.cwd())],
   );
 
   // One-time disclosure, prepended so it is one message. Only this hook can say it:

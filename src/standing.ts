@@ -53,6 +53,8 @@ export type Standing = {
   unreadable: number;
   /** Rule findings a dismissal kept out of the totals, stated so shrinkage is not misread. */
   dismissed?: number;
+  /** Per project key: rules the developer gave that never load there, and structural checks (D71). */
+  rules?: Record<string, { notLoaded: number; checks: number }>;
 };
 
 function pathFor(archive: string): string {
