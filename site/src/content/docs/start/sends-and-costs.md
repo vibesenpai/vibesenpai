@@ -175,9 +175,9 @@ a bill.
 
 These are Claude Code's own cost figures, recorded with every call, measured on 2026-11-15 over
 the author's own sessions: $1.13 for 385 calls and about 12.9M tokens, most of each call's fixed
-overhead served from the prompt cache. Your sessions will differ; the Health tab shows your own.
+overhead served from the prompt cache. Your sessions will differ; the Status tab shows your own.
 
-![The Health tab: 637k of 2.0M tokens today, 11 calls, 576k in, 61k out, $0.08 at API prices, and model reads on.](../../../assets/docs/health-spend.png)
+![The Status tab: 637k of 2.0M tokens today, 11 calls, 576k in, 61k out, $0.08 at API prices, and model reads on.](../../../assets/docs/health-spend.png)
 
 ## See it for yourself
 
@@ -185,7 +185,7 @@ overhead served from the prompt cache. Your sessions will differ; the Health tab
 |---|---|
 | the card in `/vibesenpai:insights` | the exact text the next read would send, before you say yes |
 | `/vibesenpai:judge on` | the same preview, summarised in the chat |
-| **What was sent**, on the pane's Health tab | every call made: when, which step, how many sessions, how much text. **View** shows a step 1 call's text |
+| the pane's **Sent** tab | every call made: when, which step, how many sessions, tokens and cost. **View** shows a step 1 call's text |
 
 ### What was sent, without keeping a copy
 

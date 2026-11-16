@@ -74,7 +74,7 @@ A live session is read again after about 50 new turns. Several sessions share on
 | catch-up | 200 past sessions | the first time, it reads up to 200 past sessions, newest first. After that, only new ones |
 
 Past sessions older than the catch-up are not read automatically, to keep the first-day spend
-bounded. The Health tab counts them on its **Older** row.
+bounded. The Status tab counts them on its **Older** row.
 
 Both limits are in `judge-settings.json` ([Reference](/vibesenpai/reference/#model-read-settings)).
 
@@ -85,7 +85,7 @@ Both limits are in `judge-settings.json` ([Reference](/vibesenpai/reference/#mod
 - **A failure after a model call** counts separately. After 3 in a row with no success between,
   the model reads stop until you run `/vibesenpai:judge on`, then `/vibesenpai:judge yes`.
 
-While a job is failing, each session start says so in one line, and so does the pane's Health tab.
+While a job is failing, each session start says so in one line, and so does the pane's Status tab.
 
 ## What it uses
 

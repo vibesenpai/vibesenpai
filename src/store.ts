@@ -693,9 +693,13 @@ function sentFrom(r: SentDbRow): SentRow {
   };
 }
 
-/** The most recent model calls, newest first. */
-export function readSent(db: Db, limit = 20): SentRow[] {
-  return (db.prepare('SELECT * FROM sent ORDER BY id DESC LIMIT ?').all(limit) as SentDbRow[]).map(sentFrom);
+/** Model calls, newest first, a page at a time. */
+export function readSent(db: Db, limit = 20, offset = 0): SentRow[] {
+  return (db.prepare('SELECT * FROM sent ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset) as SentDbRow[]).map(sentFrom);
+}
+
+export function countSent(db: Db): number {
+  return Number((db.prepare('SELECT COUNT(*) AS n FROM sent').get() as { n: number }).n);
 }
 
 export function readSentOne(db: Db, id: number): SentRow | undefined {

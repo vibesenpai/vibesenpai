@@ -51,11 +51,11 @@ const values = [
     body: 'The free checks read every session. Model reads run in the background after a turn ends, within about 2M tokens a day, and stop with one command.',
     points: [
       ['A short summary at session start; the rest waits until you open the pane', `${base}/commands/insights/`],
-      ['Spend and progress on the Health tab', `${base}/commands/judge/`],
+      ['Spend and progress on the Status tab', `${base}/commands/judge/`],
       ['/vibesenpai:judge off stops the model reads', `${base}/commands/judge/`],
     ],
     shot: 'health',
-    alt: 'The Health tab of the pane: sessions read, tokens used today against the daily limit, and the model reads switch.',
+    alt: 'The Status tab of the pane: sessions read, tokens used today against the daily limit, and the model reads switch.',
   },
   {
     id: 'report',

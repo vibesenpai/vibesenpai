@@ -28,7 +28,7 @@ The first time it opens, it says `Reading your history` with a seconds counter, 
 - **A failing job**, if there is one, in one line: `The history pass is retrying: <reason>` or
   `The judge is held: <reason>`. *Held* means the model reads stopped after 3 failed paid calls
   in a row; they stay stopped until you run `/vibesenpai:judge on`, then `/vibesenpai:judge yes`.
-- **Four tabs:** Findings, Rules, Fixes, Health. `⇥` moves between buttons; `⏎` presses one.
+- **Five tabs:** Findings, Rules, Fixes, Status, Sent. `⇥` moves between buttons; `⏎` presses one.
 
 ## Findings tab
 
@@ -44,7 +44,7 @@ From top to bottom:
    - the instructions given to the model, the sessions it reads first (one row; it opens to five,
      then all) and what the second step adds, each opening to its exact text.
 
-   **Turn on** is the yes. **Not now** folds the card into the Health tab. A tab, **Close**, or
+   **Turn on** is the yes. **Not now** folds the card into the Status tab. A tab, **Close**, or
    opening the pane again goes back to the tabs.
    [How your data is used](/vibesenpai/start/sends-and-costs/) describes it.
 
@@ -129,9 +129,9 @@ finding happened before and since:
 These are counts, not rates. [Fixes and Apply](/vibesenpai/start/fixes/#before-and-since) says
 which sessions each count covers.
 
-## Health tab
+## Status tab
 
-![The Health tab with model reads off: the history pass and the judge, tokens today against the daily limit, what was spent, and Model reads: Off until you say yes, with See what would be sent.](../../../assets/docs/health-reads-off.png)
+![The Status tab with model reads off: the history pass and the judge, tokens today against the daily limit, what was spent, and Model reads: Off until you say yes, with See what would be sent.](../../../assets/docs/health-reads-off.png)
 
 | row | what |
 |---|---|
@@ -141,8 +141,25 @@ which sessions each count covers.
 | **Spent** | all model reads so far: calls, tokens in and out, and dollars |
 | **Older** | past sessions the model reads skip. The first time, they read your 200 most recent past sessions (the catch-up); older ones are not read automatically |
 | **Model reads** | `On, until /vibesenpai:judge off.`, or `Off until you say yes.` with **See what would be sent** |
-| **What was sent** | the last model calls: when, which step, how many sessions, how much text. **View** rebuilds a step 1 call from your transcript and says whether it matches what was sent |
 | **Dismissed** | how many findings are hidden, with **Restore all** |
 
 The dollar figure is Claude Code's own, at API prices. On a subscription it is plan usage, not
 a bill.
+
+## Sent tab
+
+Every model call, newest first, 20 to a page; **Older** and **Newer** move between pages.
+
+| column | what |
+|---|---|
+| **When** | the day and time of the call |
+| **Step** | `1` reads the sessions; `2` names the dimension of what step 1 found |
+| **Sessions** | how many sessions a step 1 call read |
+| **Tokens in** | the tokens sent, as Claude Code counted them |
+| **Cost** | Claude Code's own figure, at API prices |
+
+**View**, on a step 1 call, cuts the same part of your transcript again and checks it against the
+fingerprint taken when it was sent: a match says it is exactly what was sent. A step 2 call has
+no View, because it is built from the model's own reply and only its size is kept.
+[How your data is used](/vibesenpai/start/sends-and-costs/#what-was-sent-without-keeping-a-copy)
+explains why no copy is kept.

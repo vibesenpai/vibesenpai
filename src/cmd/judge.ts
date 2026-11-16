@@ -12,7 +12,7 @@ import { releaseHold, supervise, type JobSpec } from '../supervise/index.ts';
 import type { Config } from '../config.ts';
 import { dollars, duration, human, plural } from '../format.ts';
 import { resetCatchUp, todayLeft, waitingOnRequest } from '../judge/limits.ts';
-import { readGated, readSent, readSentOne, readSpend, withStore } from '../store.ts';
+import { countSent, readGated, readSent, readSentOne, readSpend, withStore } from '../store.ts';
 import { rebuildSent } from '../judge/sent.ts';
 import { type Argv, configFromFlags } from './common.ts';
 
@@ -175,9 +175,14 @@ export function cmdJudge(a: Argv): number {
   // What was sent: the record of each call, and its text rebuilt from the transcript (DECISIONS.md D73).
   if (f['sent'] === true) {
     const limit = Number(f['limit'] ?? 20);
-    const rows = withStore(config.archive, (db) => readSent(db, Number.isFinite(limit) && limit > 0 ? limit : 20)) ?? [];
+    const offset = Number(f['offset'] ?? 0);
+    const page = withStore(config.archive, (db) => ({
+      rows: readSent(db, Number.isFinite(limit) && limit > 0 ? limit : 20, Number.isFinite(offset) && offset > 0 ? offset : 0),
+      total: countSent(db),
+    })) ?? { rows: [], total: 0 };
+    const rows = page.rows;
     if (f['json'] === true) {
-      process.stdout.write(`${JSON.stringify(rows.map(({ recipes, ...r }) => ({ ...r, sessions: Array.isArray(recipes) ? recipes.length : 0 })))}\n`);
+      process.stdout.write(`${JSON.stringify({ total: page.total, rows: rows.map(({ recipes, ...r }) => ({ ...r, sessions: Array.isArray(recipes) ? recipes.length : 0 })) })}\n`);
       return 0;
     }
     if (rows.length === 0) {

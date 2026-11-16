@@ -116,7 +116,7 @@ export function cmdDismiss(a: Argv): number {
           : '  Hidden from insights, fix and new sessions.',
       ),
     );
-    console.log(dim(clearing ? "  Restore all on the pane's Health tab brings them back." : '  Undo in the pane brings them back.'));
+    console.log(dim(clearing ? "  Restore all on the pane's Status tab brings them back." : '  Undo in the pane brings them back.'));
     return 0;
   } finally {
     try {

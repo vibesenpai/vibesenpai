@@ -74,7 +74,7 @@ on offer.
 are the agent's, only **Finding is wrong** and **Hide** are shown.
 
 Each answer takes effect at once and offers **Undo**. Nothing is deleted: **Restore all** on the
-Health tab brings hidden findings back.
+Status tab brings hidden findings back.
 
 ## When nothing is flagged
 

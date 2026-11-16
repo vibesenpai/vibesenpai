@@ -12,7 +12,7 @@ import { JUDGE_STALE_MS, jobsHealth } from '../jobs.ts';
 import { renderHtml } from '../html.ts';
 import { describeCoverage, resolveRange, segmentByDepth } from '../range.ts';
 import { leadSegments } from '../render.ts';
-import { currentRun, measuredCallMs, measuredMsPerToken, openStore, sessionCosts, readFixApplied, readLabels, readRuleFiles, readRuleLoaded, readSent, readSpend, sessionSpans, spendSince, withStore, type Spend } from '../store.ts';
+import { currentRun, measuredCallMs, measuredMsPerToken, openStore, sessionCosts, readFixApplied, readLabels, readRuleFiles, readRuleLoaded, readSpend, sessionSpans, spendSince, withStore, type Spend } from '../store.ts';
 import { batchCost, catchUpFrom, eligible, todayLeft, waitingOnRequest } from '../judge/limits.ts';
 import { applyPlan, type ApplyPlan } from '../fix.ts';
 import { fixStates, type FixState, type OutcomeSession } from '../outcome.ts';
@@ -91,12 +91,7 @@ export async function cmdReport(a: Argv): Promise<number> {
     const labels = Object.fromEntries((withStore(config.archive, readLabels) ?? []).map((l) => [l.key, l.verdict]));
     const fixes = fixesFor(data, judgeState, config.archive, projectKey(process.cwd()));
     const rules = rulesFor(config.archive, process.cwd());
-    const sent = (withStore(config.archive, (db) => readSent(db, 5)) ?? []).map((r) => ({
-      id: r.id, at: r.at, stage: r.stage, model: r.model, chars: r.chars,
-      ...(r.tokensIn === undefined ? {} : { tokensIn: r.tokensIn }),
-      sessions: Array.isArray(r.recipes) ? r.recipes.length : 0,
-    }));
-    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), progress: progressFor(judgeState, config.archive, sizes), dismissed: (judgeState.dismissed ?? 0) + (data.standing.dismissed ?? 0), ...(rules === undefined ? {} : { rules }), sent };
+    const out = { ...data, archive: config.archive, read: w.judged + w.behind, total: sizes.length, health: jobsHealth(config.archive), labels, fixes, spend: spendFor(judgeState, config.archive, sizes), progress: progressFor(judgeState, config.archive, sizes), dismissed: (judgeState.dismissed ?? 0) + (data.standing.dismissed ?? 0), ...(rules === undefined ? {} : { rules }) };
     process.stdout.write(`${JSON.stringify(out)}\n`);
     return 0;
   }
@@ -408,7 +403,7 @@ function progressFor(
   };
 }
 
-/** What the judge spent, and the limits on what it may spend next, for the pane's Health tab. */
+/** What the judge spent, and the limits on what it may spend next, for the pane's Status tab. */
 function spendFor(
   state: JudgeState,
   archive: string,

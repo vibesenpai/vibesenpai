@@ -1,10 +1,10 @@
-// The insights pane: findings, the fixes for them, and job health, in three tabs beside the chat.
+// The insights pane: findings, rules, the fixes for them, status, and what was sent, in tabs beside the chat.
 // Opens only when asked (`/vibesenpai:insights`); never on its own (CLAUDE.md, Principle One).
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState, PaneMemory, PanePreview, PaneRuleFile } from '../types'
+import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState, PaneMemory, PanePreview, PaneRuleFile, PaneSent, PaneSentPage } from '../types'
 import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, dimensionDocs, docs, finishDay, fixKind, fixOrigin, fixQuote, loadsLater, outcomeText, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, memoryName, ruleMeta, rulesView, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
 import { applyRequest, olderThan } from '../src/harness/claude-code.ts'
 import { MARK_PNG, MARK_SVG } from './logo.ts'
@@ -29,6 +29,7 @@ const excerpts = atom({ plugin: 'vibesenpai', key: 'excerpts' } as const, {}, { 
 const frame = atom({ plugin: 'vibesenpai', key: 'frame' } as const, 0, { shape: 'frame-1' })
 const preview = atom({ plugin: 'vibesenpai', key: 'preview' } as const, null, { shape: 'preview-1' })
 const readsCardHidden = atom({ plugin: 'vibesenpai', key: 'readsCardHidden' } as const, false, { shape: 'reads-card-1' })
+const sentPage = atom({ plugin: 'vibesenpai', key: 'sentPage' } as const, null, { shape: 'sent-page-1' })
 
 /** When the person last looked: what "new" is measured from, kept across sessions. */
 const SEEN_KEY = 'lastSeen'
@@ -224,12 +225,12 @@ async function apply($: EngineInterface, fixes: PaneFixState[]): Promise<void> {
 /** Said when neither the prompt box nor the clipboard took the request; the request follows it. */
 const BY_HAND = 'The prompt box and the clipboard both refused it. Copy this into your prompt:'
 
-/** Hides every finding; each still counts, and Restore all on Health brings them back. The count is the CLI's own. */
+/** Hides every finding; each still counts, and Restore all on Status brings them back. The count is the CLI's own. */
 async function hideAll($: EngineInterface): Promise<void> {
   const r = await $.process.run(cli($, ['dismiss', '--all']), { env: ENV, timeoutMs: BULK_TIMEOUT_MS })
   const n = /Cleared (\d+) finding/.exec(r.stdout)?.[1]
   const what = n === undefined ? 'Findings hidden.' : `${n} finding${n === '1' ? '' : 's'} hidden.`
-  await update($, applied, (m) => ({ ...m, [BULK]: r.exitCode === 0 ? `${what} They still count. Restore all is on Health.` : 'Could not hide them.' }))
+  await update($, applied, (m) => ({ ...m, [BULK]: r.exitCode === 0 ? `${what} They still count. Restore all is on Status.` : 'Could not hide them.' }))
   await load($)
 }
 
@@ -254,6 +255,15 @@ async function showPreview($: EngineInterface): Promise<void> {
   } finally {
     await update($, busy, () => false)
   }
+}
+
+const SENT_PAGE = 20
+
+/** One page of the Sent tab, from the store's record of calls. */
+async function loadSent($: EngineInterface, offset: number): Promise<void> {
+  const r = await $.process.run(cli($, ['judge', '--sent', '--json', '--limit', String(SENT_PAGE), '--offset', String(offset)]), { env: ENV, timeoutMs: 30_000 }).catch(() => undefined)
+  const got = r !== undefined && r.exitCode === 0 ? (JSON.parse(r.stdout) as { total: number; rows: PaneSent[] }) : { total: 0, rows: [] }
+  await update($, sentPage, () => ({ rows: got.rows, total: got.total, offset }))
 }
 
 /** A call already made, rebuilt from its transcript and checked against what was sent (D73). */
@@ -430,7 +440,9 @@ export const register: Register = on => {
     }
 
     const width = Math.max(30, (e.props as { bodyColumns?: number }).bodyColumns ?? 60)
-    const active = (await read($, tab)) as string
+    // A pane left on the old Health tab opens on Status.
+    const stored = (await read($, tab)) as string
+    const active = stored === 'health' ? 'status' : stored
     const opened = (await read($, open)) as string[]
     const looking = (await read($, preview)) as PanePreview | null
     const cardHidden = (await read($, readsCardHidden)) as boolean
@@ -968,13 +980,13 @@ export const register: Register = on => {
     }
 
     // The plan's usage windows exist only on a subscription; that is how the pane tells.
-    const subscribed = active === 'health' && await $.session.usage().then((u) => u.rateLimits.length > 0).catch(() => false)
-    const healthTab = () => {
+    const subscribed = (active === 'status' || active === 'sent') &&await $.session.usage().then((u) => u.rateLimits.length > 0).catch(() => false)
+    const statusTab = () => {
       const job = (name: string) => data.health.find((h) => h.job === name)
       const state = (name: string): string => { const h = job(name); return h === undefined ? 'not run yet' : `${h.state}${h.reason !== undefined ? ` (${h.reason})` : ''}` }
       const line = (label: string | [string, string], ...values: string[]) => (
         <Box flexDirection="row">
-          <Box width={16} flexShrink={0}>{typeof label === 'string' ? <Text dimColor>{label}</Text> : <Box flexDirection="row"><Text dimColor>{label[0]}</Text>{info(label[1], `health:${label[0]}`)}</Box>}</Box>
+          <Box width={16} flexShrink={0}>{typeof label === 'string' ? <Text dimColor>{label}</Text> : <Box flexDirection="row"><Text dimColor>{label[0]}</Text>{info(label[1], `status:${label[0]}`)}</Box>}</Box>
           <Box flexDirection="column" flexShrink={1}>{values.map((v) => <Text>{v}</Text>)}</Box>
         </Box>
       )
@@ -990,9 +1002,9 @@ export const register: Register = on => {
           {sp !== undefined && sp.enabled && line(['Model reads', docs('commands/judge')], 'On, until /vibesenpai:judge off.')}
           {sp !== undefined && !sp.enabled && (
             <Box flexDirection="row">
-              <Box width={16} flexShrink={0} flexDirection="row"><Text dimColor>Model reads</Text>{info(docs('start/sends-and-costs'), 'health:Model reads')}</Box>
+              <Box width={16} flexShrink={0} flexDirection="row"><Text dimColor>Model reads</Text>{info(docs('start/sends-and-costs'), 'status:Model reads')}</Box>
               <Text>Off until you say yes.</Text>
-              <Box marginLeft={2}>{secondary('see-preview-health', 'See what would be sent', () => showPreview($))}</Box>
+              <Box marginLeft={2}>{secondary('see-preview-status', 'See what would be sent', () => showPreview($))}</Box>
             </Box>
           )}
           <Box flexDirection="row">
@@ -1000,18 +1012,46 @@ export const register: Register = on => {
             <Text>{data.dismissed ?? 0} finding{data.dismissed === 1 ? '' : 's'}</Text>
             {(data.dismissed ?? 0) > 0 && <Box marginLeft={2}>{secondary('restore-all', 'Restore all', () => restoreAll($))}</Box>}
           </Box>
-          {(data.sent ?? []).length > 0 && (
-            <Box flexDirection="column">
-              <Box flexDirection="row"><Text dimColor>What was sent</Text>{info(docs('start/sends-and-costs'), 'health:sent')}</Box>
-              {(data.sent ?? []).map((x) => (
-                <Box key={`sent:${x.id}`} flexDirection="row" paddingLeft={2} gap={2}>
-                  <Text>{day(x.at)} {clock(x.at)}, step {x.stage === 'extract' ? 1 : 2}{x.stage === 'extract' ? `, ${x.sessions} session${x.sessions === 1 ? '' : 's'}` : ''}, {x.chars.toLocaleString('en-US')} characters</Text>
-                  {x.stage === 'extract' && tertiary(`sent:${x.id}`, 'View', () => viewSent($, x.id))}
-                </Box>
-              ))}
-            </Box>
-          )}
           {sayLines(BULK, width)}
+        </Box>
+      )
+    }
+
+    // Every model call, a page at a time: a record, never the text; View rebuilds a step 1 call (D73).
+    const page = (await read($, sentPage)) as PaneSentPage | null
+    const sentTab = () => {
+      if (page === null) return <Text dimColor>Loading…</Text>
+      if (page.total === 0) return <Text>Nothing has been sent.{data.spend?.enabled === true ? '' : ' Model reads are off until you say yes.'}</Text>
+      const money = (m: number | undefined) => (m === undefined ? '' : m < 1000 ? '<$0.001' : `$${(m / 1_000_000).toFixed(3)}`)
+      // Fixed columns, so the table lines up however many rows there are.
+      const cell = (w: number, text: string, right = false, dim = false) => (
+        <Box width={w} flexShrink={0} {...(right ? { justifyContent: 'flex-end' as const } : {})}><Text {...(dim ? { dimColor: true } : {})}>{text}</Text></Box>
+      )
+      const last = Math.min(page.offset + page.rows.length, page.total)
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="row"><Text>Every model call, newest first. View shows the exact text a step 1 call sent.</Text>{info(docs('start/sends-and-costs'), 'sent:about')}</Box>
+          <Box flexDirection="column">
+            <Box flexDirection="row" gap={1}>
+              {cell(16, 'When', false, true)}{cell(5, 'Step', false, true)}{cell(9, 'Sessions', true, true)}{cell(10, 'Tokens in', true, true)}{cell(8, 'Cost', true, true)}
+            </Box>
+            {page.rows.map((x) => (
+              <Box key={`sent-row:${x.id}`} flexDirection="row" gap={1}>
+                {cell(16, `${day(x.at)} ${clock(x.at)}`)}
+                {cell(5, x.stage === 'extract' ? '1' : '2')}
+                {cell(9, x.stage === 'extract' ? String(x.sessions) : '', true)}
+                {cell(10, (x.tokensIn ?? 0).toLocaleString('en-US'), true)}
+                {cell(8, money(x.usdMicros), true)}
+                {x.stage === 'extract' && <Box marginLeft={2}>{tertiary(`sent:${x.id}`, 'View', () => viewSent($, x.id))}</Box>}
+              </Box>
+            ))}
+          </Box>
+          <Box flexDirection="row" gap={2}>
+            <Text dimColor>{page.offset + 1}–{last} of {page.total.toLocaleString('en-US')}</Text>
+            {page.offset > 0 && secondary('sent-newer', 'Newer', () => loadSent($, Math.max(0, page.offset - SENT_PAGE)))}
+            {last < page.total && secondary('sent-older', 'Older', () => loadSent($, page.offset + SENT_PAGE))}
+          </Box>
+          <Text dimColor>{costNote(subscribed ? 'subscription' : data.spend?.billing)}</Text>
         </Box>
       )
     }
@@ -1134,7 +1174,7 @@ export const register: Register = on => {
           <Text color="claude">{strip.top}</Text>
           <Box flexDirection="row">
             {strip.cells.map((c) => (
-              <Button key={`tab:${c.key}`} plain label={c.text.trim()} onPress={async () => { await update($, preview, () => null); await update($, tab, () => c.key) }}>
+              <Button key={`tab:${c.key}`} plain label={c.text.trim()} onPress={async () => { await update($, preview, () => null); await update($, tab, () => c.key); if (c.key === 'sent') await loadSent($, 0) }}>
                 <Text {...(c.active ? { color: 'claude', weight: 'bold' as const } : { dimColor: true })}>{c.text}</Text>
               </Button>
             ))}
@@ -1144,7 +1184,7 @@ export const register: Register = on => {
 
         {message !== '' && <Text color="suggestion">{message === RECORDING ? `${spin} ` : ''}{message}</Text>}
 
-        {looking !== null ? previewView(looking) : active === 'fixes' ? fixesTab() : active === 'health' ? healthTab() : active === 'rules' ? rulesTab() : findingsTab()}
+        {looking !== null ? previewView(looking) : active === 'fixes' ? fixesTab() : active === 'status' ? statusTab() : active === 'sent' ? sentTab() : active === 'rules' ? rulesTab() : findingsTab()}
 
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>{'─'.repeat(width)}</Text>

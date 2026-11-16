@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chat and `/vibesenpai:judge yes` turns reads on; `off` forgets the yes. `judge --dry-run` prints
   the full text. The session-start notice says reads are paused and nothing has been sent.
 - **What was sent.** Every model call is recorded: when, which step, how many sessions, how much
-  text, and a fingerprint of the exact text, never the text. The Health tab lists the last calls
-  and **View** cuts a step 1 call again from your transcript and checks it matches what went out;
-  `judge --sent` and `--sent-view <id>` do the same in a terminal.
+  text, and a fingerprint of the exact text, never the text. A new **Sent** tab lists every call
+  in a table, 20 to a page, with tokens and cost, and **View** cuts a step 1 call again from your
+  transcript and checks it matches what went out.
+- **Health is now Status.** Same rows; the list of calls moved to the Sent tab.
 - **"How your data is used"** replaces "What leaves your machine": what stays on your machine, what
   a read sends with real packet examples, every safety layer in order, what is not redacted, and
   measured costs.

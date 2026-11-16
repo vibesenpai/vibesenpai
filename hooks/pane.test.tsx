@@ -1,7 +1,7 @@
 // The insights pane, against a stubbed engine and a stubbed `vibesenpai report --json`.
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import type { PaneData, PanePreview } from '../types'
+import type { PaneData, PanePreview, PaneSent } from '../types'
 import { DOCS, aboutTime, barRuns, dimensionDocs, finishDay } from './shape.ts'
 
 const NOW = new Date().toISOString()
@@ -67,7 +67,7 @@ const PANE = {
   props: { title: 'vibesenpai', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
 } as const
 
-type Calls = { preview?: unknown; argv: string[][]; filled: string[]; draft?: string; refuse?: 'dialog' | 'no_composer'; copied?: string; copyFails?: boolean; noOpener?: boolean; mtime?: number; rateLimits?: { kind: string; percentUsed: number }[]; excerpt?: unknown }
+type Calls = { preview?: unknown; sent?: PaneSent[]; argv: string[][]; filled: string[]; draft?: string; refuse?: 'dialog' | 'no_composer'; copied?: string; copyFails?: boolean; noOpener?: boolean; mtime?: number; rateLimits?: { kind: string; percentUsed: number }[]; excerpt?: unknown }
 
 /** Run `/vibesenpai:insights`; the kit fills the fields a typed command carries. */
 const insights = ($: Parameters<TestBody>[0]) => $.command.run({ command: 'vibesenpai:insights' } as never)
@@ -97,6 +97,14 @@ function engine(on: Parameters<TestBody>[1], data: PaneData | null, calls: Calls
     // `dismiss --all` prints its own count, as the CLI does.
     if (argv.includes('dismiss') && argv.includes('--all')) return { value: { exitCode: 0, stdout: '  Cleared 3 findings.\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (argv.includes('--yes')) return { value: { exitCode: 0, stdout: 'Model reads are on.\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    // `judge --sent --json` pages through the calls as the CLI does: newest first, `--limit` from `--offset`.
+    if (argv.includes('--sent')) {
+      const all = calls.sent ?? []
+      const at = (flag: string, d: number) => { const i = argv.indexOf(flag); return i < 0 ? d : Number(argv[i + 1]) }
+      const offset = at('--offset', 0)
+      const page = { total: all.length, rows: all.slice(offset, offset + at('--limit', 20)) }
+      return { value: { exitCode: 0, stdout: JSON.stringify(page), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const out = argv.includes('excerpt') ? calls.excerpt ?? { kept: false } : argv.includes('--preview') ? calls.preview : argv.includes('--sent-view') ? { row: { at: '2026-11-15T10:00:00.000Z', model: 'haiku', sha256: 'h' }, back: { ok: true, matched: true, text: 'You are reading transcripts.\n=== SESSION abc12345 ===\nUSER: keep tabs plain', sessions: [{ sessionId: 'abc12345-0000', turns: 1, chars: 40 }] } } : data
     return { value: { exitCode: 0, stdout: out === null ? '' : JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -221,12 +229,12 @@ test('with every fix applied, the Fixes tab drops the Waiting heading', async ($
   await ui.unmount()
 })
 
-test('the Health tab states the jobs, what was read and what was spent', async ($, on) => {
+test('the Status tab states the jobs, what was read and what was spent', async ($, on) => {
   const calls: Calls = { argv: [], filled: [] }
   engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'tab:health' })
+  await ui.press({ key: 'tab:status' })
   expect(await ui.find({ type: 'Text', text: /2 of 3 sessions read/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /610k of 2\.0M tokens/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^114 calls, 3\.8M in, 226k out, \$1\.87$/ })).toBeDefined()
@@ -237,12 +245,12 @@ test('the Health tab states the jobs, what was read and what was spent', async (
   await ui.unmount()
 })
 
-test('on a subscription, Health says the dollars are not a bill, and shows nothing of the plan beyond vibesenpai', async ($, on) => {
+test('on a subscription, Status says the dollars are not a bill, and shows nothing of the plan beyond vibesenpai', async ($, on) => {
   const calls: Calls = { argv: [], filled: [], rateLimits: [{ kind: 'five_hour', percentUsed: 34 }, { kind: 'seven_day', percentUsed: 12.4 }] }
   engine(on, { ...DATA, spend: { ...DATA.spend!, today: { tokens: 2_000_000, limit: 2_000_000 } } }, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'tab:health' })
+  await ui.press({ key: 'tab:status' })
   expect(await ui.find({ type: 'Text', text: /5-hour limit|Claude usage/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /comes out of your plan's usage, not a bill/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /The limit is reached; reads continue tomorrow\./ })).toBeDefined()
@@ -649,15 +657,15 @@ test('when the prompt box and the clipboard both refuse, the request is shown to
   await ui.unmount()
 })
 
-test('Hide all hides every finding through the CLI, and Restore all on Health brings them back', async ($, on) => {
+test('Hide all hides every finding through the CLI, and Restore all on Status brings them back', async ($, on) => {
   const calls: Calls = { argv: [], filled: [] }
   engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'hide-all' })
   expect(calls.argv.some((a) => a.slice(-2).join(' ') === 'dismiss --all')).toBe(true)
-  expect(await ui.find({ type: 'Text', text: /^3 findings hidden\. They still count\. Restore all is on Health\.$/ })).toBeDefined()
-  await ui.press({ key: 'tab:health' })
+  expect(await ui.find({ type: 'Text', text: /^3 findings hidden\. They still count\. Restore all is on Status\.$/ })).toBeDefined()
+  await ui.press({ key: 'tab:status' })
   await ui.press({ key: 'restore-all' })
   expect(calls.argv.some((a) => a.slice(-3).join(' ') === 'dismiss --undo all')).toBe(true)
   expect(await ui.find({ type: 'Text', text: /Every hidden finding is back\./ })).toBeDefined()
@@ -712,9 +720,9 @@ test('the wordmark and each ⓘ open their docs page with a plain click', async 
   await ui.press({ key: 'tab:fixes' })
   await ui.press({ key: 'docs:fixes' })
   await ui.press({ key: 'docs:applied:dea0d0' })
-  await ui.press({ key: 'tab:health' })
-  await ui.press({ key: 'docs:health:Model reads' })
-  await ui.press({ key: 'docs:health:Today' })
+  await ui.press({ key: 'tab:status' })
+  await ui.press({ key: 'docs:status:Model reads' })
+  await ui.press({ key: 'docs:status:Today' })
   expect(opened().slice(5)).toEqual([`${DOCS}start/fixes/`, `${DOCS}dimensions/overreach/`, `${DOCS}commands/judge/`, `${DOCS}start/sends-and-costs/`])
   // A link is never drawn underlined as a terminal hyperlink: it is a button.
   expect(await ui.findAll({ type: 'Link' })).toHaveLength(0)
@@ -829,26 +837,34 @@ test('with model reads off, the Findings tab shows the card, the preview shows t
   await ui.unmount()
 })
 
-test('Not now folds the card away, and Health still offers the preview', async ($, on) => {
+test('Not now folds the card away, and Status still offers the preview', async ($, on) => {
   const calls: Calls = { argv: [], filled: [], preview: PREVIEW }
   engine(on, OFF, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'reads-not-now' })
   expect(await ui.find({ type: 'Text', text: /^Model reads are off$/ })).toBeUndefined()
-  await ui.press({ key: 'tab:health' })
+  await ui.press({ key: 'tab:status' })
   expect(await ui.find({ type: 'Text', text: /Off until you say yes\./ })).toBeDefined()
   expect(calls.argv.some((a) => a.includes('--yes'))).toBe(false)
   await ui.unmount()
 })
 
-test('Health lists what was sent, and View shows a call rebuilt and matched against its record', async ($, on) => {
-  const calls: Calls = { argv: [], filled: [] }
-  engine(on, { ...DATA, sent: [{ id: 7, at: '2026-11-15T10:00:00.000Z', stage: 'extract', model: 'haiku', chars: 1234, tokensIn: 900, sessions: 2 }] }, calls)
+test('the Sent tab is a table of calls, and View shows a call rebuilt and matched against its record', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], sent: [
+    { id: 8, at: '2026-11-15T10:01:00.000Z', stage: 'label', model: 'haiku', chars: 2000, tokensIn: 1500, usdMicros: 2000, sessions: 0 },
+    { id: 7, at: '2026-11-15T10:00:00.000Z', stage: 'extract', model: 'haiku', chars: 1234, tokensIn: 9120, usdMicros: 3100, sessions: 2 },
+  ] }
+  engine(on, DATA, calls)
   await insights($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'tab:health' })
-  expect(await ui.find({ type: 'Text', text: /step 1, 2 sessions, 1,234 characters/ })).toBeDefined()
+  await ui.press({ key: 'tab:sent' })
+  expect(await ui.find({ type: 'Text', text: /^Tokens in$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^9,120$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^\$0\.003$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1–2 of 2$/ })).toBeDefined()
+  // Step 2 is built from the model's reply, so it has no View.
+  expect(await ui.find({ key: 'sent:8' })).toBeUndefined()
   await ui.press({ key: 'sent:7' })
   expect(calls.argv.some((a) => a.includes('--sent-view') && a.includes('7'))).toBe(true)
   expect(await ui.find({ type: 'Text', text: /Exactly what was sent/ })).toBeDefined()
@@ -883,12 +899,30 @@ test('a tab, or opening the pane again, leaves the preview for the tabs', async 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'see-preview' })
   expect(await ui.find({ type: 'Text', text: /What the first model read would send/ })).toBeDefined()
-  await ui.press({ key: 'tab:health' })
+  await ui.press({ key: 'tab:status' })
   expect(await ui.find({ type: 'Text', text: /What the first model read would send/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Off until you say yes\./ })).toBeDefined()
   await ui.press({ key: 'tab:findings' })
   await ui.press({ key: 'see-preview' })
   await insights($)
   expect(await ui.find({ type: 'Text', text: /What the first model read would send/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the Sent tab pages through many calls, twenty at a time', async ($, on) => {
+  const sent: PaneSent[] = Array.from({ length: 25 }, (_, i) => ({ id: 25 - i, at: '2026-11-15T10:00:00.000Z', stage: 'extract', model: 'haiku', chars: 100, tokensIn: 1000 + i, usdMicros: 3000, sessions: 1 }))
+  const calls: Calls = { argv: [], filled: [], sent }
+  engine(on, DATA, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:sent' })
+  expect(await ui.find({ type: 'Text', text: /^1–20 of 25$/ })).toBeDefined()
+  expect(await ui.find({ key: 'sent-newer' })).toBeUndefined()
+  await ui.press({ key: 'sent-older' })
+  expect(await ui.find({ type: 'Text', text: /^21–25 of 25$/ })).toBeDefined()
+  expect(await ui.find({ key: 'sent:1' })).toBeDefined()
+  expect(await ui.find({ key: 'sent-older' })).toBeUndefined()
+  await ui.press({ key: 'sent-newer' })
+  expect(await ui.find({ type: 'Text', text: /^1–20 of 25$/ })).toBeDefined()
   await ui.unmount()
 })

@@ -122,11 +122,12 @@ export type PaneData = {
   progress?: PaneProgress;
   /** The rules Claude was given in this project, and nearby ones it never sees (D71). */
   rules?: PaneRules;
-  /** The most recent model calls: a record, never their text (D73). */
-  sent?: PaneSent[];
 };
 
-export type PaneSent = { id: number; at: string; stage: 'extract' | 'label'; model: string; chars: number; tokensIn?: number; sessions: number };
+/** One model call: a record, never its text (D73). */
+export type PaneSent = { id: number; at: string; stage: 'extract' | 'label'; model: string; chars: number; tokensIn?: number; usdMicros?: number; sessions: number };
+/** A page of the Sent tab, newest first. */
+export type PaneSentPage = { rows: PaneSent[]; total: number; offset: number };
 
 /** One instruction file Claude Code loaded here. `lines`: its current text, read live and redacted. */
 export type PaneRuleFile = {
@@ -199,8 +200,10 @@ declare module 'claude-code' {
       frame: Shaped<number>;
       /** What the next model read would send, while the person is looking at it (D72). Never persisted text. */
       preview: Shaped<PanePreview | null>;
-      /** "Not now" on the model reads card: it folds into the Health tab. */
+      /** "Not now" on the model reads card: it folds into the Status tab. */
       readsCardHidden: Shaped<boolean>;
+      /** The page of the Sent tab on screen; loaded when the tab opens. */
+      sentPage: Shaped<PaneSentPage | null>;
     };
   }
 }
