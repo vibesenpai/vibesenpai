@@ -18,8 +18,8 @@ const values = [
       ['No grades of you or your agent', `${base}/start/what-it-is/`],
     ],
     shot: 'finding-own',
-    alt: 'The insights pane with a constraint violation open: the developer’s words, “I also had asked you to drop the numbers in the tabs, which didn’t happen”, the four turns around them, Why, the developer’s answer that it was a real mistake, and the fix, applied Nov 8.',
-    caption: 'From the author’s own sessions, building vibesenpai.',
+    alt: 'The insights pane with an overreach open: the developer’s words, “Do we even need _generate_html_with_combined_link then?”, the four turns around them, Why, and the fix with Apply.',
+    caption: 'From the public test data of claude-code-log (MIT).',
   },
   {
     id: 'fix',
@@ -126,14 +126,14 @@ const faq = [
     <div class="pair">
       <figure class="claim">
         <figcaption>The developer asked to</figcaption>
-        <blockquote>“…hide the group instead of all items that belong to a group.”</blockquote>
+        <blockquote>“…replace them with a single link to the combined transcript instead.”</blockquote>
       </figure>
       <figure class="reality">
-        <figcaption>The agent started hiding each item. The developer, at turn 15:</figcaption>
-        <blockquote>“You can set group.visible using the vis library which is less work.”</blockquote>
+        <figcaption>The agent wrote a whole new function for it. The developer interrupted:</figcaption>
+        <blockquote>“Do we even need _generate_html_with_combined_link then?”</blockquote>
       </figure>
     </div>
-    <p class="caption">vibesenpai flagged it as <a href={`${base}/dimensions/misread-intent/`}>misread intent</a>, with the turn cited and the request it came from.</p>
+    <p class="caption">vibesenpai flagged it as <a href={`${base}/dimensions/overreach/`}>overreach</a>, with the turns cited and the request it came from.</p>
   </section>
 
   {values.map((v, i) => (

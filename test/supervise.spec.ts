@@ -108,6 +108,13 @@ describe('records on disk', () => {
     releaseHold(a, 'judge');
     expect(health(a, ['judge'])[0]?.state).toBe('never-ran');
   });
+
+  it('a release with no hold keeps a last run that went well: a yes does not read as never run', () => {
+    const a = mkdtempSync(join(tmpdir(), 'as-sup-'));
+    writeRecord(a, 'judge', { ...emptyRecord(), lastEnd: { at: iso(T0), status: 'ok' } });
+    releaseHold(a, 'judge');
+    expect(health(a, ['judge'])[0]?.state).toBe('ok');
+  });
 });
 
 describe('the core knows no harness', () => {

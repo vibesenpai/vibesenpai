@@ -10,7 +10,20 @@ of the history pass (which runs the free checks) and the model reads.
 /vibesenpai:insights
 ```
 
-It takes no arguments.
+With nothing after it, the pane opens where you left it. It can also open somewhere in
+particular:
+
+| | opens |
+|---|---|
+| `findings`, `rules`, `fixes`, `status`, `sent` | that tab |
+| `preview` | what the next model read would send ([How your data is used](/vibesenpai/start/sends-and-costs/)) |
+| `finding <session> [kind]` | the finding from that session, as if clicked; `kind` narrows it, e.g. `overreach` |
+
+```
+/vibesenpai:insights finding 37f83ec9 overreach
+```
+
+What it cannot find, it says in the pane.
 
 ## What it does
 

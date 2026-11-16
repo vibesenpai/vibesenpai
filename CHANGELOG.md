@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Model reads wait for your yes.** They are off at install, and installs from before pause too.
-  `/vibesenpai:insights` shows a card; **See what would be sent** builds the exact text the first
-  read would send, with the same code and redaction a real read uses, and sends it nowhere. It says
+  `/vibesenpai:insights` shows a card; **Turn on…** builds the exact text the first read would
+  send, with the same code and redaction a real read uses, and sends it nowhere, with **Turn on**
+  ready so Enter is the yes (**See what would be sent** opens the same, to read first). It says
   how long a yes lasts (until `/vibesenpai:judge off`) and what reads cost (usually a few cents a
   session at most). **Turn on** is the yes. `/vibesenpai:judge on` shows the same preview in the
   chat and `/vibesenpai:judge yes` turns reads on; `off` forgets the yes. `judge --dry-run` prints
@@ -21,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in a table, 20 to a page, with tokens and cost, and **View** cuts a step 1 call again from your
   transcript and checks it matches what went out.
 - **Health is now Status.** Same rows; the list of calls moved to the Sent tab.
+- **`/vibesenpai:insights` opens where you ask:** a tab (`findings`, `rules`, `fixes`, `status`,
+  `sent`), `preview`, or `finding <session> [kind]`, which opens that finding as if clicked.
+- **A finding's fix wraps where it is drawn.** Inside an open finding, its rule wrapped twice and
+  left a word alone on a line.
+- **The header keeps the logo's space** where Claude Code cannot draw the picture.
+- **Turning model reads on again no longer resets the judge to "never ran"** on the Status tab; a
+  yes still clears a hold left by failures.
+- **A store chosen with `VIBESENPAI_ARCHIVE` keeps its own "new since you last looked"**, so the
+  docs' demo and tests no longer reset yours.
+- **The docs' screenshots are taken by a script** (`npm run shots`) from the public demo data, at
+  2x, with the walkthrough rebuilt around an overreach finding.
 - **"How your data is used"** replaces "What leaves your machine": what stays on your machine, what
   a read sends with real packet examples, every safety layer in order, what is not redacted, and
   measured costs.

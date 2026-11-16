@@ -68,6 +68,22 @@ Step 5 is not optional. Three detectors passed every test and then produced 19
 false positives and 0 true positives on real sessions. It is the only check that
 has ever caught anything here.
 
+## Screenshots of the pane
+
+The pane's screenshots in the docs are taken by a script, never by hand and never from your own
+sessions: `npm run shots` starts a real Claude Code session with this plugin on the public demo
+corpus, presses through the pane with [VHS](https://github.com/charmbracelet/vhs), and writes each
+PNG into `site/src/assets/docs/`. One `.tape` file per shot lives in `site/shots/`.
+
+- Needs VHS (`brew install vhs`, which brings `ttyd` and `ffmpeg`) and the `claude` CLI, signed in.
+- The corpus and a demo store live in `~/.cache/vibesenpai-shots` (`--dir` or `VIBESENPAI_SHOTS`
+  to change it). The corpus is fetched once by `verify-corpus.sh`.
+- `npm run shots -- --read` first runs the model reads over the demo once, which costs about
+  $0.10, then turns them off. Every run after that reuses the store and spends nothing.
+- `npm run shots -- sent status` retakes only those shots.
+- Look at every PNG in the diff before committing it: a shot that lands on the wrong button still
+  produces a picture.
+
 ## Commits and PRs
 
 Explain *why*, with the number that motivated it. The commit log is part of how

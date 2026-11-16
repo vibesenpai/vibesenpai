@@ -926,3 +926,53 @@ test('the Sent tab pages through many calls, twenty at a time', async ($, on) =>
   expect(await ui.find({ type: 'Text', text: /^1–20 of 25$/ })).toBeDefined()
   await ui.unmount()
 })
+
+const insightsAt = ($: Parameters<TestBody>[0], args: string) => $.command.run({ command: 'vibesenpai:insights', args } as never)
+
+test('/vibesenpai:insights <tab> opens that tab', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], sent: [{ id: 3, at: '2026-11-15T10:00:00.000Z', stage: 'extract', model: 'haiku', chars: 10, tokensIn: 500, usdMicros: 2000, sessions: 1 }] }
+  engine(on, DATA, calls)
+  await insightsAt($, 'sent')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^Every model call, newest first/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/vibesenpai:insights finding <session> opens that finding as if clicked, and says so when there is none', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], excerpt: EXCERPT }
+  engine(on, DATA, calls)
+  await insightsAt($, 'finding aaaaaaaa')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(calls.argv.some((a) => a.includes('excerpt')), 'the conversation around it was fetched').toBe(true)
+  expect(await ui.find({ type: 'Text', text: /Show conversation/ })).toBeDefined()
+  await ui.unmount()
+  await insightsAt($, 'finding ffffffff')
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await again.find({ type: 'Text', text: /No finding from a session starting ffffffff/ })).toBeDefined()
+  await again.unmount()
+})
+
+test('/vibesenpai:insights finding <session> <kind> opens that kind of finding, and preview opens the preview', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], excerpt: EXCERPT, preview: PREVIEW }
+  engine(on, OFF, calls)
+  await insightsAt($, 'finding aaaaaaaa misread')
+  expect(calls.argv.some((a) => a.join(' ').includes('excerpt aaaaaaaa-1111 --turns')), 'a misread finding was opened').toBe(true)
+  await insightsAt($, 'preview')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /What the first model read would send/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Turn on… on the card opens the preview first, with Turn on ready; nothing is turned on until it is pressed', async ($, on) => {
+  const calls: Calls = { argv: [], filled: [], preview: PREVIEW }
+  engine(on, OFF, calls)
+  await insights($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Misread intent, broken rules and false claims are found only by the model reads/ })).toBeDefined()
+  await ui.press({ key: 'reads-turn-on-card' })
+  expect(await ui.find({ type: 'Text', text: /What the first model read would send/ })).toBeDefined()
+  expect(calls.argv.some((a) => a.includes('--yes')), 'the preview is shown before any yes').toBe(false)
+  await ui.press({ key: 'reads-turn-on' })
+  expect(calls.argv.some((a) => a.includes('--yes'))).toBe(true)
+  await ui.unmount()
+})

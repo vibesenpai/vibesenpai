@@ -22,7 +22,11 @@ function healthOf(job: string, r: JobRecord, leased: boolean): JobHealth {
   return { job, state: r.lastEnd === undefined ? 'never-ran' : 'ok' };
 }
 
-/** Clear a hold and the failure count. The only way out of a hold, and always an explicit act. */
+/**
+ * Clear a hold and the failure count. The only way out of a hold, and always an explicit act. A last run that
+ * went well is kept, so turning reads on again does not make the job read as never run.
+ */
 export function releaseHold(archive: string, job: string): void {
-  writeRecord(archive, job, emptyRecord());
+  const { lastEnd } = readRecord(archive, job);
+  writeRecord(archive, job, { ...emptyRecord(), ...(lastEnd?.status === 'ok' ? { lastEnd } : {}) });
 }

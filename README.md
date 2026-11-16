@@ -18,7 +18,7 @@ not score you and does not tell you how to work.
 [What it shows you](https://vibesenpai.github.io/vibesenpai/start/what-it-is/) ·
 [How your data is used](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/)
 
-<p align="center"><img src="assets/screenshots/pane-finding.png" width="560" alt="The insights pane beside the chat. Under Constraint violation, 19 times in 6 sessions, one finding is open: the developer's words, “I also had asked you to drop the numbers in the tabs, which didn't happen”, the four turns around them, Why the agent's reply missed an earlier request, the developer's answer that it was a real mistake, and the fix, applied Nov 8."></p>
+<p align="center"><img src="assets/screenshots/pane-finding.png" width="560" alt="The insights pane. Under Overreach, one finding is open: the developer's words, “Do we even need _generate_html_with_combined_link then?”, the four turns around them, Why the agent built more than the simple link it was asked for, and the fix with Apply."></p>
 
 ## Install
 
@@ -38,8 +38,8 @@ It needs Node 22.13 or later on your PATH, and Claude Code 2.1.299 or later.
 2. **Open the pane.** `/vibesenpai:insights` opens it beside the chat. Each
    finding leads with your own words and the turns where it went wrong.
    The model reads, which find misread requests, broken rules and false claims,
-   are off until you say yes: **See what would be sent** shows the exact text
-   first. Turned on, they keep running on Claude Haiku, in your own Claude Code
+   are off until you say yes: **Turn on…** shows the exact text first, and Enter
+   turns them on. Turned on, they keep running on Claude Haiku, in your own Claude Code
    account, after each turn ends, until `/vibesenpai:judge off`. They are cheap:
    usually a few cents a session at most, within 2M tokens a day.
 3. **Apply a fix you agree with.** Apply drafts the change into your prompt box.

@@ -35,9 +35,9 @@ file.
 The model reads find what structure cannot: a request misread, a rule broken, work claimed but
 not done. To do that, a model has to read the conversation.
 
-They start **off**. `/vibesenpai:insights` shows a card saying so, and **See what would be sent**
-builds the exact text of the first read, with the same code and the same redaction a real read
-uses, and sends it nowhere. You read it, then press **Turn on** or **Not now**.
+They start **off**. `/vibesenpai:insights` shows a card saying so. **Turn on…** on it builds the
+exact text of the first read, with the same code and the same redaction a real read uses, and
+sends it nowhere; you read it, then press **Turn on** or **Not now**.
 `/vibesenpai:judge on` shows the same preview in the chat, and `/vibesenpai:judge yes` is the yes.
 
 ![The preview: To, First read, and Costs rows, what is removed before sending, that reads run until /vibesenpai:judge off, the folded instructions, sessions and second step, then Turn on and Not now.](../../../assets/docs/reads-preview.png)
@@ -177,7 +177,7 @@ These are Claude Code's own cost figures, recorded with every call, measured on 
 the author's own sessions: $1.13 for 385 calls and about 12.9M tokens, most of each call's fixed
 overhead served from the prompt cache. Your sessions will differ; the Status tab shows your own.
 
-![The Status tab: 637k of 2.0M tokens today, 11 calls, 576k in, 61k out, $0.08 at API prices, and model reads on.](../../../assets/docs/health-spend.png)
+![The Status tab: 693k of 2.0M tokens today, 12 calls, 609k in, 83k out, $0.13 at API prices, and model reads on until /vibesenpai:judge off.](../../../assets/docs/health-spend.png)
 
 ## See it for yourself
 
@@ -196,6 +196,8 @@ transcript again, renders it the same way, and compares fingerprints: a match is
 what was sent. If Claude Code has deleted that transcript, or redaction has changed since, it
 says so instead. Step 2 is built from the model's own reply, so only its size and contents
 (records, earlier prompts, instruction lines) are kept.
+
+![View on a sent call: Exactly what was sent, rebuilt from your transcript, it matches the record of the call, with the instructions and the 24 sessions in the call, each opening to its text.](../../../assets/docs/sent-view.png)
 
 ## How to stop it
 

@@ -15,8 +15,8 @@ does the model reads.
 ```
 
 The model reads are **off until you say yes**, after seeing what they would send. The free
-checks run either way. The pane's **See what would be sent** and **Turn on** do the same as
-`on` and `yes`.
+checks run either way. The pane's **Turn on…** (or **See what would be sent**) and **Turn on** do the
+same as `on` and `yes`.
 
 ## Arguments
 

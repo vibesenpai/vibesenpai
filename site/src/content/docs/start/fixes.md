@@ -68,7 +68,7 @@ On the Fixes tab you can tick several fixes and apply them as one request.
 
 For a misread-intent rule, as drafted into the prompt box:
 
-![Add this line to .claude/rules/vibesenpai.md, then point CLAUDE.md at that file, ending with (vibesenpai fix 16ae85).](../../../assets/docs/apply-request.png)
+![Add this line to .claude/rules/vibesenpai.md, then point CLAUDE.md at that file, ending with (vibesenpai fix dea0d0).](../../../assets/docs/apply-request.png)
 
 Every request ends with a marker, `(vibesenpai fix <id>)`. When the history pass sees that
 marker in a prompt you sent, the fix counts as applied in that project. No button marks a fix

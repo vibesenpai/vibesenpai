@@ -19,7 +19,7 @@ The first time it opens, it says `Reading your history` with a seconds counter, 
 
 ## The header
 
-![The pane's header: the logo, 101/101 sessions read, updated 1m ago, and the refresh key.](../../../assets/docs/pane-header.png)
+![The pane's header: the logo, 101/101 sessions read, updated just now, the refresh key, and the five tabs.](../../../assets/docs/pane-header.png)
 
 - **How much has been read**, as `12/40 sessions read`, or a progress bar while the model reads
   are catching up.
@@ -32,13 +32,14 @@ The first time it opens, it says `Reading your history` with a seconds counter, 
 
 ## Findings tab
 
-![A misread-intent finding open in the pane: the developer's words, the turns around them, Why, and the kind's fix with Apply.](../../../assets/home/shots/finding.png)
+![An overreach finding open in the pane: the developer's words, the turns around them, Why, and the fix with Apply.](../../../assets/home/shots/finding.png)
 
 From top to bottom:
 
-1. **Model reads are off**, until you say yes. A card says what the model reads do, with **See
-   what would be sent**. That opens the exact text the first read would send, built by the same
-   code a real read uses and sent nowhere:
+1. **Model reads are off**, until you say yes. A card says what only the model reads can find,
+   with **Turn on…**, **See what would be sent** and **Not now**. **Turn on…** opens the exact text
+   the first read would send, built by the same code a real read uses and sent nowhere, with
+   **Turn on** ready, so Enter is the yes. **See what would be sent** opens the same, to read first:
    - **To**, **First read**, **Then** and **Costs**: where it goes, how much, and what it costs;
    - what is removed before sending, and that a yes lasts until `/vibesenpai:judge off`;
    - the instructions given to the model, the sessions it reads first (one row; it opens to five,
@@ -48,7 +49,7 @@ From top to bottom:
    opening the pane again goes back to the tabs.
    [How your data is used](/vibesenpai/start/sends-and-costs/) describes it.
 
-   ![The Model reads are off card on the Findings tab: what the reads find, that they send redacted session text to Claude Haiku on your own account only after you say yes, and See what would be sent.](../../../assets/docs/reads-card.png)
+   ![The Model reads are off card on the Findings tab: what only the model reads find, that they send redacted session text to Claude Haiku on your own account only after you say yes, and Turn on…, See what would be sent and Not now.](../../../assets/docs/reads-card.png)
 
    ![The preview: To, First read, and Costs rows, what is removed before sending, that reads run until /vibesenpai:judge off, the folded instructions, sessions and second step, then Turn on and Not now.](../../../assets/docs/reads-preview.png)
 2. **Model reads progress.** Once they are on, until they have found anything, a card shows how far
@@ -112,7 +113,7 @@ describes it.
 
 ## Fixes tab
 
-![The Fixes tab's Waiting list: five fixes, two ticked, and Apply 2.](../../../assets/docs/fixes-waiting.png)
+![The Fixes tab's Waiting list: one fix per kind, each with its rule and the file it is added to.](../../../assets/docs/fixes-waiting.png)
 
 **Waiting** lists every fix on offer in this project that is not in effect yet. Each shows what
 it is for (`For overreach, from 3 findings in 2 sessions.`), the change, and where it lands.
@@ -131,7 +132,7 @@ which sessions each count covers.
 
 ## Status tab
 
-![The Status tab with model reads off: the history pass and the judge, tokens today against the daily limit, what was spent, and Model reads: Off until you say yes, with See what would be sent.](../../../assets/docs/health-reads-off.png)
+![The Status tab with model reads off: the history pass and the judge, tokens today against the daily limit, what was spent, and Model reads: Off until you say yes, with Turn on….](../../../assets/docs/status.png)
 
 | row | what |
 |---|---|
@@ -140,7 +141,7 @@ which sessions each count covers.
 | **Today** | tokens used today against the daily limit, as `N of 2.0M tokens` |
 | **Spent** | all model reads so far: calls, tokens in and out, and dollars |
 | **Older** | past sessions the model reads skip. The first time, they read your 200 most recent past sessions (the catch-up); older ones are not read automatically |
-| **Model reads** | `On, until /vibesenpai:judge off.`, or `Off until you say yes.` with **See what would be sent** |
+| **Model reads** | `On, until /vibesenpai:judge off.`, or `Off until you say yes.` with **Turn on…** |
 | **Dismissed** | how many findings are hidden, with **Restore all** |
 
 The dollar figure is Claude Code's own, at API prices. On a subscription it is plan usage, not
@@ -149,6 +150,8 @@ a bill.
 ## Sent tab
 
 Every model call, newest first, 20 to a page; **Older** and **Newer** move between pages.
+
+![The Sent tab: six calls in a table with When, Step, Sessions, Tokens in and Cost; the three step 1 calls have View.](../../../assets/docs/sent.png)
 
 | column | what |
 |---|---|

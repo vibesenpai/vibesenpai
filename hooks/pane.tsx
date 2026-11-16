@@ -241,6 +241,12 @@ async function restoreAll($: EngineInterface): Promise<void> {
 }
 
 /** Build what the next model read would send and show it; nothing is sent (src/judge/preview.ts, D72). */
+/** "Turn on…": the preview first, as the yes must follow it (D72), with Turn on holding the focus, so Enter is the yes. */
+async function turnOnFromCard($: EngineInterface): Promise<void> {
+  await showPreview($)
+  if ((await read($, preview)) !== null) await $.ui.focus({ requestId: PANE, key: 'reads-turn-on' }).catch(() => undefined)
+}
+
 async function showPreview($: EngineInterface): Promise<void> {
   await update($, busy, () => true)
   try {
@@ -347,7 +353,7 @@ function autoRefresh($: EngineInterface): void {
 }
 
 /** Opens the pane, reading the analysis the first time. `since` is the previous visit, so "new" means new to you. */
-async function show($: EngineInterface): Promise<boolean> {
+async function show($: EngineInterface, where = ''): Promise<boolean> {
   const opened = await $.ui.open({ id: PANE, title: 'vibesenpai' })
   if (!opened.isPlaced) return false
   // A guess about the terminal must never keep the pane from opening.
@@ -357,14 +363,62 @@ async function show($: EngineInterface): Promise<boolean> {
   await update($, pictures, () => draws)
   // Opening the pane starts on the tabs, never on a preview left open last time.
   await update($, preview, () => null)
-  const previous = (await $.store.get(SEEN_KEY)) as string | undefined
+  // A store chosen by VIBESENPAI_ARCHIVE (the docs' demo, a test) keeps its own "last looked", apart from yours.
+  const chosen = await $.env.get('VIBESENPAI_ARCHIVE').catch(() => undefined)
+  const seenKey = chosen === undefined || chosen === '' ? SEEN_KEY : `${SEEN_KEY}:${chosen}`
+  const previous = (await $.store.get(seenKey)) as string | undefined
   await update($, since, () => previous ?? '')
-  await $.store.set(SEEN_KEY, new Date().toISOString())
+  await $.store.set(seenKey, new Date().toISOString())
   loadStarted = Date.now()
   if ((await read($, snapshot)) === null) animate($, true)
   await load($)
+  if (where.trim() !== '') await goTo($, where)
   autoRefresh($)
   return true
+}
+
+const TAB_NAMES = ['findings', 'rules', 'fixes', 'status', 'sent']
+
+/**
+ * `/vibesenpai:insights <tab>` opens that tab; `preview`, what the next model read would send; `finding <session> [kind]` opens the finding from that session
+ * (of that kind, e.g. `misread`), as if clicked. What it cannot find is said in the pane, never an error.
+ */
+async function goTo($: EngineInterface, where: string): Promise<void> {
+  const [what = '', arg = '', only = ''] = where.trim().toLowerCase().split(/\s+/)
+  if (what === 'preview') {
+    await showPreview($)
+    return
+  }
+  if (TAB_NAMES.includes(what)) {
+    await update($, tab, () => what)
+    if (what === 'sent') await loadSent($, 0)
+    return
+  }
+  const data = (await read($, snapshot)) as PaneData | null
+  if (what !== 'finding' || arg === '' || data === null) {
+    await update($, note, () => `Opens a tab (${TAB_NAMES.join(', ')}), the preview, or a finding: finding <session> [kind].`)
+    return
+  }
+  const blocks = view(data, undefined).blocks
+  for (const [n, b] of blocks.entries()) {
+    if (!b.dimension.startsWith(only.replace(/-/g, '_'))) continue
+    const i = b.items.find((x) => x.sessionId.startsWith(arg))
+    if (i === undefined) continue
+    // The first kind starts open, so its key records closing it; the others record opening.
+    const kind = n === 0 ? `closed:${b.dimension}` : `block:${b.dimension}`
+    const extra = b.items.indexOf(i) > BLOCK_SHOWN ? [`all:${b.dimension}`] : []
+    await update($, tab, () => 'findings')
+    // The first kind starts open; it is closed when the finding is elsewhere, so the finding is in view.
+    const first = blocks[0] === undefined || n === 0 ? [] : [`closed:${blocks[0].dimension}`]
+    await update($, open, (keys) => {
+      const shown = n === 0 ? keys.filter((k) => k !== kind) : keys.includes(kind) ? keys : [...keys, kind]
+      return [...shown, ...[`list:${b.dimension}`, ...extra, ...first].filter((k) => !shown.includes(k))]
+    })
+    const key = `item:${b.dimension}:${i.key}`
+    if (!((await read($, open)) as string[]).includes(key)) await openItem($, key, i)
+    return
+  }
+  await update($, note, () => `No finding from a session starting ${arg}.`)
 }
 
 export const register: Register = on => {
@@ -373,7 +427,7 @@ export const register: Register = on => {
   on('command.run', { command: 'vibesenpai:insights' }, async ($, e, next) => {
     const engine = await $.session.version().catch(() => undefined)
     if (olderThan(engine?.base ?? engine?.version)) return next(e)
-    return (await show($)) ? { text: 'Insights opened beside the chat.' } : next(e)
+    return (await show($, e.args)) ? { text: 'Insights opened beside the chat.' } : next(e)
   })
 
   // After each turn, re-read only if a background pass changed something.
@@ -508,9 +562,10 @@ export const register: Register = on => {
     const consentCard = () => (
       <Box flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1}>
         <Text weight="bold">Model reads are off</Text>
-        <Text dimColor>The free checks are running. Model reads find misread intent, broken rules and false claims. They send redacted session text to Claude Haiku on your own Claude Code account, and only after you say yes.</Text>
+        <Text dimColor>The free checks see structure only. Misread intent, broken rules and false claims are found only by the model reads. They send redacted session text to Claude Haiku on your own Claude Code account, and only after you say yes.</Text>
         <Box flexDirection="row" gap={1} marginTop={1}>
-          {primary('see-preview', 'See what would be sent', () => showPreview($))}
+          {primary('reads-turn-on-card', 'Turn on…', () => turnOnFromCard($))}
+          {secondary('see-preview', 'See what would be sent', () => showPreview($))}
           {secondary('reads-not-now', 'Not now', () => update($, readsCardHidden, () => true))}
         </Box>
       </Box>
@@ -661,7 +716,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Text color="success">✓ {SAID[a]}</Text>
-          {a === 'mistake' && fix !== undefined && <Box marginTop={1}>{fixSection(fix, `${i.key}:`)}</Box>}
+          {a === 'mistake' && fix !== undefined && <Box marginTop={1}>{fixSection(fix, `${i.key}:`, FINDING_DEPTH)}</Box>}
           <Box marginTop={1}>
             {secondary(`undo:${i.key}`, 'Undo', () => undo($, i, a))}
           </Box>
@@ -762,7 +817,7 @@ export const register: Register = on => {
           : (
             // No answer means the finding stands, so its fix shows. "Not the agent's fault" only when the quote is the developer's.
             <Box flexDirection="column" gap={1}>
-              {fixFor(i) !== undefined && fixSection(fixFor(i)!, `${i.key}:`)}
+              {fixFor(i) !== undefined && fixSection(fixFor(i)!, `${i.key}:`, FINDING_DEPTH)}
               <Box flexDirection="row" gap={1} flexWrap="wrap" alignItems="center">
                 {secondary(`wrong:${i.key}`, 'Finding is wrong', () => labelAs($, i, 'wrong'))}
                 {i.quote !== undefined && i.quoteBy === 'developer' && (
@@ -833,7 +888,10 @@ export const register: Register = on => {
           : draftedIds.includes(f.fixId) ? 'Fix drafted in your prompt box. Press Enter to apply it.'
             : undefined
     // `scope` keeps keys unique when a finding repeats its dimension's fix.
-    const fixSection = (f: PaneFixState, scope = '') => {
+    // `depth`: columns it sits deeper than a kind's own fix, so the rule wraps before Claude Code wraps it again.
+    // A finding's details sit two paddings (4 columns) deeper than its kind's fix.
+    const FINDING_DEPTH = 4
+    const fixSection = (f: PaneFixState, scope = '', depth = 0) => {
       const done = fixDone(f)
       if (done !== undefined) {
         return (
@@ -849,7 +907,7 @@ export const register: Register = on => {
       }
       return labelled('Fix', 'suggestion', [
         <Text dimColor>{fixKind(f)}</Text>,
-        prompt(fixWords(f), width - 10),
+        prompt(fixWords(f), width - 10 - depth),
         ...(f.refusal !== undefined
           ? [<Text dimColor>{f.refusal}</Text>]
           : [
@@ -1004,7 +1062,7 @@ export const register: Register = on => {
             <Box flexDirection="row">
               <Box width={16} flexShrink={0} flexDirection="row"><Text dimColor>Model reads</Text>{info(docs('start/sends-and-costs'), 'status:Model reads')}</Box>
               <Text>Off until you say yes.</Text>
-              <Box marginLeft={2}>{secondary('see-preview-status', 'See what would be sent', () => showPreview($))}</Box>
+              <Box marginLeft={2}>{secondary('see-preview-status', 'Turn on…', () => turnOnFromCard($))}</Box>
             </Box>
           )}
           <Box flexDirection="row">
@@ -1136,8 +1194,10 @@ export const register: Register = on => {
     // The mark: cells on a terminal, the SVG where a surface draws one; nothing where neither exists.
     // The mark as a picture where the terminal draws one, the SVG on the desktop, else the wordmark alone.
     const canDraw = (await read($, pictures)) as boolean
+    // Where Claude Code cannot draw the picture after all, the alt keeps its 10x5 cells, so the header holds its shape.
+    const MARK_ALT = Array.from({ length: 5 }, () => ' '.repeat(10)).join('\n')
     const mark = () => {
-      if (e.surface === 'terminal' && canDraw && 'Image' in els) { const { Image } = els; return <Image source={{ png: MARK_PNG }} columns={10} rows={5} alt=" " /> }
+      if (e.surface === 'terminal' && canDraw && 'Image' in els) { const { Image } = els; return <Image source={{ png: MARK_PNG }} columns={10} rows={5} alt={MARK_ALT} /> }
       if (e.surface !== 'terminal' && 'Svg' in els) { const { Svg } = els; return <Svg source={MARK_SVG} alt="vibesenpai" width={40} height={40} /> }
       return null
     }

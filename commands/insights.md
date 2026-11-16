@@ -1,5 +1,6 @@
 ---
 description: What vibesenpai found — this session and your history
+argument-hint: "[findings|rules|fixes|status|sent|preview|finding <session> [kind]]"
 allowed-tools: Bash(node:*)
 ---
 
