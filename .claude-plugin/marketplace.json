@@ -16,8 +16,8 @@
       "category": "Productivity",
       "source": {
         "source": "archive",
-        "url": "https://github.com/vibesenpai/vibesenpai/releases/download/v0.0.5/vibesenpai-0.0.5.zip",
-        "sha256": "590b3ba189929768a0c361d6ab46b7ce288798196cebd6f6866d04540de9b61e"
+        "url": "https://github.com/vibesenpai/vibesenpai/releases/download/v0.1.0/vibesenpai-0.1.0.zip",
+        "sha256": "4a225a96b5c2165c36c38acabdc667836875f968e0f85941a78ed89555e4c299"
       },
       "homepage": "https://github.com/vibesenpai/vibesenpai#readme"
     }
