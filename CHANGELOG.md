@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-16
+
 ### Changed
 
 - **Model reads wait for your yes.** They are off at install, and installs from before pause too.
@@ -171,7 +173,8 @@ candidates were the agent's own prior edit; `permission_denied`, where only 6
 of 398 denials were ever re-issued; and `file_churn`, which fires on 48% of
 sessions and could never be shown to be waste.
 
-[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.5...v0.1.0
 [0.0.5]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4-alpha...v0.0.4
 [0.0.4-alpha]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.3-alpha...v0.0.4-alpha
