@@ -125,7 +125,7 @@ one request.
 **Applied** lists each fix in effect in this project, newest first, with how often its kind of
 finding happened before and since:
 
-![The Applied list: a misread-intent rule, applied Jul 10, with Before 2 times in 4 sessions and Since 1 time in 13 sessions.](../../../assets/docs/fixes-applied.png)
+![The Applied list: an overreach rule, applied Jul 15, with Before 1 time in 7 sessions and Since 0 times in 10 sessions.](../../../assets/docs/fixes-applied.png)
 
 These are counts, not rates. [Fixes and Apply](/vibesenpai/start/fixes/#before-and-since) says
 which sessions each count covers.

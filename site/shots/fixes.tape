@@ -1,7 +1,9 @@
-# The Fixes tab: the fixes waiting, one per kind.
+# The Fixes tab: the fixes waiting, and one applied with its counts.
 # open: fixes
 # reads: on
-# crop: site/src/assets/home/shots/fixes.png 0 990
-# crop: site/src/assets/docs/fixes-waiting.png 200 750
-Wait+Screen@30s /Waiting/
+# state: applied
+# crop: site/src/assets/home/shots/fixes.png 0 1040
+# crop: site/src/assets/docs/fixes-waiting.png 200 630
+# crop: site/src/assets/docs/fixes-applied.png 840 160
+Wait+Screen@30s /Applied/
 Sleep 2s

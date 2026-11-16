@@ -48,6 +48,29 @@ if [ "$READ" = 1 ]; then
   cli judge --status | sed -n '3,4p'
 fi
 
+
+# `# state: applied` gives the demo one applied fix for the shot, and takes it away after.
+demo_state() {
+  node --experimental-strip-types -e "
+const { DatabaseSync } = require('node:sqlite');
+Promise.all([import('$ROOT/src/harness/claude-code.ts'), import('$ROOT/src/outcome.ts'), import('$ROOT/src/store.ts')]).then(([h, o, st]) => {
+  st.openStore(process.env.VIBESENPAI_ARCHIVE).close();
+  const db = new DatabaseSync(process.env.VIBESENPAI_ARCHIVE + '/store.db');
+  const here = h.projectKey('$ROOT');
+  const rule = o.ruleHash('- Do only what was asked. If something adjacent needs doing, say so and wait.');
+  db.prepare('DELETE FROM fix_applied WHERE fix_id = ? AND session_id = ?').run('dea0d0', 'demo');
+  db.prepare('DELETE FROM rule_seen WHERE rule_hash = ? AND project = ?').run(rule, here);
+  if ('$1' === 'on') {
+    db.prepare('UPDATE session SET project = ? WHERE project = ?').run(here, '-Users-dain-workspace-claude-code-log-sample');
+    const later = db.prepare(\"SELECT id FROM session WHERE project = ? AND first_ts >= '2025-07-16' ORDER BY first_ts LIMIT 1\").get(here);
+    db.prepare('INSERT INTO fix_applied(fix_id, project, session_id, at) VALUES (?, ?, ?, ?)').run('dea0d0', here, 'demo', '2025-07-15T09:00:00.000Z');
+    if (later) db.prepare('INSERT INTO rule_seen(rule_hash, project, session_id, at) VALUES (?, ?, ?, ?)').run(rule, here, later.id, '2025-07-16T09:51:45.996Z');
+  }
+  db.close();
+});
+"
+}
+
 # One Claude Code session per shot. The header opens the pane and lands on the Findings tab; the tape
 # moves on from there; Esc drops the focus ring; the pane is cut out of the 2000x1200 frame.
 # The pane draws its logo only where the terminal shows pictures; VHS's does not, so the shot
@@ -85,6 +108,8 @@ for name in "${NAMES[@]}"; do
   # `# reads: on` gives the demo a yes for this shot alone, as most people's pane is; no turn ends, so
   # nothing is read or sent. The yes is withdrawn after the shot.
   reads="$(sed -n 's/^# reads: *//p' "$tape")"
+  state="$(sed -n 's/^# state: *//p' "$tape")"
+  if [ "$state" = applied ]; then demo_state on; fi
   if [ "$reads" = on ]; then cli judge --enable >/dev/null && cli judge --yes --apply >/dev/null; fi
   # VHS's parser takes bare relative names for its outputs, so it runs inside $WORK.
   {
@@ -161,4 +186,5 @@ for name in "${NAMES[@]}"; do
     echo "shots: $ROOT/$file"
   done
   if [ "$reads" = on ]; then cli judge --disable --apply >/dev/null; fi
+  if [ "$state" = applied ]; then demo_state off; fi
 done

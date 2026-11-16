@@ -92,7 +92,7 @@ have been declined at the permission prompt; it stays on offer with **Apply agai
 Each applied fix shows how often its finding happened in this project before and since. For
 example:
 
-![An applied misread-intent rule: Applied Jul 10, Before 2 times in 4 sessions, Since 1 time in 13 sessions.](../../../assets/docs/fixes-applied.png)
+![An applied overreach rule: Applied Jul 15, Before 1 time in 7 sessions, Since 0 times in 10 sessions.](../../../assets/docs/fixes-applied.png)
 
 - These are **counts in one project, never rates**.
 - Neither count includes the session you applied it in, or a session where the rule loaded
