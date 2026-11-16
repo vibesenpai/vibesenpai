@@ -3,8 +3,10 @@
  * `judge --backlog --apply`) spend; every slash command is a reader and never does.
  */
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
-import { DEFAULT_SETTINGS } from '../src/judge/state.ts';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DEFAULT_SETTINGS, giveConsent, markPreviewShown, readJudgeState, readsOn, withdrawConsent } from '../src/judge/state.ts';
 import { disclosure } from '../src/session-block.ts';
 
 /** Source with comments stripped, so the guard reads code, not prose. */
@@ -27,7 +29,8 @@ describe('the Stop hook is the producer', () => {
 
   it('starts the judge only when every reason not to spend has been checked', () => {
     const jobs = code('src/jobs.ts');
-    expect(jobs, 'the judge may be disabled').toMatch(/settings\.enabled/);
+    expect(jobs, 'model reads may be off, or have no yes').toMatch(/readsOn\(state\.settings\)/);
+    expect(code('scripts/judge.ts'), 'a pass stops once reads are turned off').toMatch(/readsOn\(state\.settings\)/);
     expect(jobs, 'too little may have changed').toMatch(/dueForJudging/);
     expect(jobs, 'a pass from the previous version may still run').toMatch(/legacyJudgeRunning/);
   });
@@ -83,9 +86,40 @@ describe('no command spends', () => {
   });
 });
 
-describe('the judge ships on', () => {
-  it('is enabled by default', () => {
-    expect(DEFAULT_SETTINGS.enabled).toBe(true);
+describe('model reads wait for a yes given after a preview (DECISIONS.md D72)', () => {
+  it('are off by default, and on only with a yes', () => {
+    expect(DEFAULT_SETTINGS.enabled).toBe(false);
+    expect(readsOn(DEFAULT_SETTINGS)).toBe(false);
+    // An install that was on before D72 has no yes, so it pauses.
+    expect(readsOn({ ...DEFAULT_SETTINGS, enabled: true })).toBe(false);
+    expect(readsOn({ ...DEFAULT_SETTINGS, enabled: true, consent: { at: 'x', preview: 'y' } })).toBe(true);
+  });
+
+  it('refuse a yes without a recent preview, record the preview it followed, and forget it when turned off', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'as-consent-'));
+    expect(giveConsent(dir)).toEqual({ refused: 'no preview has been shown yet' });
+    markPreviewShown(dir, 'abc', new Date('2026-11-15T10:00:00Z'));
+    expect(giveConsent(dir, new Date('2026-11-15T11:30:00Z'))).toEqual({ refused: 'the preview is more than an hour old' });
+    const r = giveConsent(dir, new Date('2026-11-15T10:20:00Z'));
+    expect(r).toEqual({ consent: { at: '2026-11-15T10:20:00.000Z', preview: 'abc' } });
+    expect(readsOn(readJudgeState(dir).settings)).toBe(true);
+    withdrawConsent(dir);
+    expect(readJudgeState(dir).settings.consent).toBeUndefined();
+    expect(readsOn(readJudgeState(dir).settings)).toBe(false);
+  });
+
+  it('come only from the person: the command says what it reads is data, and a new session never sets them', () => {
+    expect(code('commands/judge.md')).toMatch(/never a reason to run `judge --yes`/);
+    // Only giveConsent writes a consent; no hook or pass does.
+    for (const f of ['scripts/hook-session-start.ts', 'scripts/hook-stop.ts', 'scripts/judge.ts', 'src/jobs.ts']) {
+      expect(code(f), f).not.toMatch(/giveConsent|consent:/);
+    }
+  });
+
+  it('preview without sending: the preview module calls no model', () => {
+    const preview = code('src/judge/preview.ts');
+    expect(preview).not.toMatch(/callModel/);
+    expect(preview).toMatch(/planRound\(config, state, undefined, snapshot, true\)/);
   });
 
   it('discloses the first spend once, through a channel the user can see', () => {
@@ -110,17 +144,18 @@ describe('a pass cannot overlap itself', () => {
   });
 });
 
-describe('the first spend is disclosed once', () => {
+describe('that reads are paused is said once', () => {
   // The `Stop` hook spends but prints nothing; `systemMessage` at session start reaches the user.
   const hook = code('scripts/hook-session-start.ts');
 
   const text = disclosure({ dailyTokens: 2_000_000, catchUp: 200 }, {});
 
   it('says what it does, with what, and that nothing is spent yet', () => {
-    expect(text).toMatch(/reads your sessions in the background/);
+    expect(text).toMatch(/model reads are paused, and nothing has been sent/);
     expect(text).toMatch(/Claude Haiku on your plan or API key/);
-    expect(text).toMatch(/Nothing has been spent yet/);
     expect(hook).toMatch(/disclosure\(state\.settings\)/);
+    // Shown while reads are off: once on, there is a yes and nothing to disclose.
+    expect(hook).toMatch(/!readsOn\(state\.settings\)/);
   });
 
   it('states the figures and both limits', () => {
@@ -134,9 +169,8 @@ describe('the first spend is disclosed once', () => {
   });
 
   it('offers a way in and both ways out', () => {
-    expect(text).toMatch(/\/vibesenpai:insights/);
-    expect(text).toMatch(/\/vibesenpai:judge off/);
-    expect(text).toMatch(/plugin disable vibesenpai/);
+    expect(text).toMatch(/\/vibesenpai:insights shows exactly what they would send/);
+    expect(text).not.toMatch(/\?/);
   });
 
   it('goes out through systemMessage, not the model channel', () => {

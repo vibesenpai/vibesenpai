@@ -38,6 +38,12 @@ const TOKEN = (k: RedactionKind): string => `[REDACTED:${k}]`;
 const SECRET_KEY =
   /\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|PRIVATE_KEY|ACCESS_KEY|API_KEY|APIKEY|AUTH)[A-Z0-9_]*)\b/i;
 
+/**
+ * Bumped whenever RULES change, so a rebuilt packet can say when today's redaction differs from what was
+ * sent. `test/redact.spec.ts` pins it to the rules' text.
+ */
+export const REDACT_VERSION = 1;
+
 /** Order matters: multi-line first, then contextual, then standalone shapes; paths last. */
 const RULES: Rule[] = [
   // PEM blocks — multi-line, so they must be removed before anything splits lines.

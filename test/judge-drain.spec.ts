@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { readLease, readRecord, takeLease } from '../src/supervise/record.ts';
 import { LEASE_ENV } from '../src/supervise/types.ts';
 import { readJudgeState } from '../src/judge/state.ts';
-import { openStore } from '../src/store.ts';
+import { openStore, readSent } from '../src/store.ts';
+import { rebuildSent } from '../src/judge/sent.ts';
 import { renderExtract } from '../src/judge/prompt.ts';
 import { buildSession, estimateTokens } from '../src/judge/packet.ts';
 import { parseTranscript, withFullText } from '../src/parsers/claude-code.ts';
@@ -70,7 +71,7 @@ process.stdin.on('end', () => setTimeout(() => {
 function settings(over: Record<string, unknown>): void {
   writeFileSync(
     join(archive, 'judge-settings.json'),
-    JSON.stringify({ enabled: true, model: 'haiku', cadence: 50, maxBatchTokens: 60_000, concurrency: 3, ...over }),
+    JSON.stringify({ enabled: true, consent: { at: '2026-11-15T00:00:00.000Z', preview: 'test' }, model: 'haiku', cadence: 50, maxBatchTokens: 60_000, concurrency: 3, ...over }),
   );
 }
 
@@ -176,6 +177,7 @@ describe('a pass drains the backlog, three calls at a time', () => {
 
   it('sends the packet on stdin, never as an argument (Linux caps one argument at 128 KiB)', () => {
     session('s0', 2000);
+    settings({});
     fakeClaude();
 
     runPass();
@@ -187,6 +189,42 @@ describe('a pass drains the backlog, three calls at a time', () => {
       expect(stdin, 'the packet arrived on stdin').toBeGreaterThan(5_000);
       expect(argv, 'and not in argv').toBeLessThan(200);
     }
+  });
+
+  it('records every call it sends, and step 1 rebuilds to exactly what was sent (DECISIONS.md D73)', () => {
+    session('s0', 300);
+    session('s1', 300);
+    settings({});
+    fakeClaude();
+
+    runPass();
+
+    const db = openStore(archive);
+    const rows = readSent(db);
+    db.close();
+    expect(rows.length, 'one row per call').toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(JSON.stringify(row), 'no session text is kept').not.toMatch(/word120/);
+      const back = rebuildSent(row);
+      expect(back.ok).toBe(true);
+      if (back.ok) {
+        expect(back.matched, 'the rebuilt text hashes to what was sent').toBe(true);
+        expect(back.text).toMatch(/word120/);
+      }
+    }
+  });
+
+  it('says plainly when a transcript is gone and the text cannot be shown', () => {
+    session('s0', 300);
+    settings({});
+    fakeClaude();
+    runPass();
+    rmSync(join(sources, 's0.jsonl'));
+    const db = openStore(archive);
+    const [row] = readSent(db);
+    db.close();
+    expect(row && rebuildSent(row)).toEqual({ ok: false, reason: 'the transcript of session s0 is no longer on disk' });
   });
 
   it('stops at the first failing round, and counts it as one fault', () => {

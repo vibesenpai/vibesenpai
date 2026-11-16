@@ -28,10 +28,11 @@ does the model reads.
 | phase | what it does | spends? |
 |---|---|---|
 | `SessionStart` | shows the last pass's summary in a message to you, not the agent; starts the history pass if stale | no |
-| `Stop` | starts the history pass if stale, and the judge if due and within limits | **yes**, within limits |
+| `Stop` | starts the history pass if stale, and the judge if you said yes, it is due, and within limits | **yes**, after your yes, within limits |
 | `/vibesenpai:insights` | reads what the passes stored | no |
 | `/vibesenpai:report` | writes the HTML report from what the passes stored | no |
-| `/vibesenpai:judge on` / `off` | changes a setting | no |
+| `/vibesenpai:judge on` | builds what the first read would send, and sends it nowhere | no |
+| `/vibesenpai:judge yes` / `off` | records your yes, or turns reads off and forgets it | no |
 
 The history pass computes the free checks over every session. The judge does
 the model reads.
@@ -45,7 +46,7 @@ apply ([`src/judge/limits.ts`](https://github.com/vibesenpai/vibesenpai/blob/mai
 - **A catch-up of 200 past sessions**, newest first, fixed the first time the
   pass runs.
 
-[What leaves your machine](/vibesenpai/start/sends-and-costs/)
+[How your data is used](/vibesenpai/start/sends-and-costs/)
 
 ## What happens when a job fails or hangs?
 
@@ -64,7 +65,7 @@ Failed passes retry on a schedule:
 | kind of failure | what happens |
 |---|---|
 | **free** (nothing was billed) | retries after 5 minutes, 30 minutes, 2 hours, 12 hours, then every 24 hours |
-| **paid** (a model call was billed) | retries the same way; after **3 in a row**, the judge holds until `/vibesenpai:judge on` |
+| **paid** (a model call was billed) | retries the same way; after **3 in a row**, the judge holds until `/vibesenpai:judge on`, then `yes` |
 
 One success clears the count. A failing job is stated at session start as one
 plain fact.

@@ -1,26 +1,30 @@
 ---
 title: /vibesenpai:judge
-description: Turns the model reads on or off, and shows how far they have got and what they have spent.
+description: Shows what the model reads would send, turns them on after your yes or off, and shows how far they have got.
 ---
 
-Turns the model reads on or off, and shows how far they have got and what they have spent.
-It is the one switch for spending. The judge is what does the model reads.
+Shows what the model reads would send, turns them on after your yes or off, and shows how far
+they have got and what they have spent. It is the one switch for spending. The judge is what
+does the model reads.
 
 ```
 /vibesenpai:judge on
+/vibesenpai:judge yes
 /vibesenpai:judge off
 /vibesenpai:judge
 ```
 
-The model reads are **on by default**: installing the plugin turns them on. The free checks
-run whether the model reads are on or off.
+The model reads are **off until you say yes**, after seeing what they would send. The free
+checks run either way. The pane's **See what would be sent** and **Turn on** do the same as
+`on` and `yes`.
 
 ## Arguments
 
 | | |
 |---|---|
-| `off` | stops the model reads. Prints `judge disabled. nothing further will be sent.` The free checks keep running |
-| `on` | turns the model reads back on. It prints what one pass would send (sessions and tokens of transcript, the fixed overhead per call, the batch ceiling and the daily limits), then `judge enabled. it runs detached, after your turn ends.` It also lifts a hold after repeated failures ([below](#when-it-fails)) |
+| `on` | turns nothing on. It builds what the first model read would send, sends it nowhere, and summarises it: where it goes, how many sessions and tokens, what is removed and what is not, how long a yes lasts and what it costs. The full text is in the pane |
+| `yes` | turns the model reads on. Refused unless `on` or the pane showed the preview in the last hour. Prints `Model reads are on.` and how long that lasts: until `/vibesenpai:judge off`. It also lifts a hold after repeated failures ([below](#when-it-fails)) |
+| `off` | stops the model reads and forgets the yes; turning them on again shows a new preview. The free checks keep running |
 | *(nothing)* | shows the status |
 
 ## Status
@@ -30,7 +34,7 @@ over the public test data of
 [claude-code-log](https://github.com/daaain/claude-code-log) (MIT), before any model call:
 
 ```
-judge · enabled · model haiku
+judge: model reads on, model haiku
 
   read       17 session(s) · 0 finding(s)
   pending    84 never read
@@ -56,7 +60,7 @@ The free checks keep running.
 
 ## When it runs
 
-Only when a turn ends. The `Stop` hook starts a model read in the background, so your session
+Only after your yes, and then only when a turn ends. The `Stop` hook starts a model read in the background, so your session
 never waits on it. No slash command spends: [`/vibesenpai:insights`](/vibesenpai/commands/insights/)
 and the pane only show results.
 
@@ -79,7 +83,7 @@ Both limits are in `judge-settings.json` ([Reference](/vibesenpai/reference/#mod
 - **A failure that cost nothing** (a pass that could not start, crashed or timed out) is
   retried, with a longer wait each time.
 - **A failure after a model call** counts separately. After 3 in a row with no success between,
-  the model reads stop until you run `/vibesenpai:judge on`.
+  the model reads stop until you run `/vibesenpai:judge on`, then `/vibesenpai:judge yes`.
 
 While a job is failing, each session start says so in one line, and so does the pane's Health tab.
 
@@ -91,7 +95,7 @@ While a job is failing, each session start says so in one line, and so does the 
 - **What it sends:** a redacted part of each session. If redaction would still change anything
   just before a call, the call is not made.
 
-[What leaves your machine](/vibesenpai/start/sends-and-costs/) has the details.
+[How your data is used](/vibesenpai/start/sends-and-costs/) has the details.
 [The judge pipeline](/vibesenpai/architecture/judge/) explains how the reads work.
 
 ## Turning everything off

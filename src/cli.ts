@@ -80,9 +80,12 @@ report
 judge
   --status           what has been read, what is left, what it cost
   --backlog          what a full pass would cost; sends nothing without --apply
-  --dry-run          build a real packet and price it, calling nothing
+  --dry-run          print the real next packet, calling nothing
+  --enable           show what the model reads would send; --yes --apply turns them on
+  --disable --apply  turn them off, and forget the yes
+  --sent [--json]    every model call made: when, what kind, how much
+  --sent-view <id>   rebuild one call's text from its transcript and check it against what was sent
   --gated [--limit <n>]  what the lookback gate dropped, newest first (default 20)
-  --enable / --disable [--apply]
 
 standing
   --refresh          recompute from every transcript now, in the foreground

@@ -6,7 +6,7 @@
 import { existsSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Config } from './config.ts';
-import { readJudgeState } from './judge/state.ts';
+import { readJudgeState, readsOn } from './judge/state.ts';
 import { dueForJudging, oldestUnread } from './judge/schedule.ts';
 import { batchCost, catchUpFrom, eligible, LIMITS_ENV, todayLeft } from './judge/limits.ts';
 import { resolveCurrentSession, sessionSizes } from './read.ts';
@@ -64,7 +64,7 @@ export function jobsFor(config: Pick<Config, 'archive' | 'sources'>, opts: JobOp
 function judgeDue(config: Pick<Config, 'archive' | 'sources'>, limits: boolean): boolean {
   if (legacyJudgeRunning(config.archive)) return false;
   const state = readJudgeState(config.archive);
-  if (!state.settings.enabled) return false;
+  if (!readsOn(state.settings)) return false;
   // Not enough left for even an empty batch: no worker is spawned just to stop.
   if (limits && (todayLeft(config.archive, state.settings.dailyTokens) ?? 0) < batchCost(0)) return false;
   const current = resolveCurrentSession(config.sources);

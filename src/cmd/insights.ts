@@ -6,7 +6,7 @@ import { type Config } from '../config.ts';
 import { detectVersion, parse } from '../parsers/index.ts';
 import { olderThan, updateMessage } from '../harness/claude-code.ts';
 import { projectOf, readSession, resolveCurrentSession, sessionSizes } from '../read.ts';
-import { findingsFor, readJudgeState, tallyByDimension, type JudgeState } from '../judge/state.ts';
+import { findingsFor, readJudgeState, readsOn, tallyByDimension, type JudgeState } from '../judge/state.ts';
 import { analysisBlock, pendingWork } from '../judge/schedule.ts';
 import { JUDGE_STALE_MS, jobsHealth } from '../jobs.ts';
 import { runDetectors } from '../detect/index.ts';
@@ -177,7 +177,7 @@ export async function cmdInsights(a: Argv): Promise<number> {
       denominators: res.denominators,
       sessionId: current.sessionId,
       events: parsed.events,
-      ...(judgeState.settings.enabled
+      ...(readsOn(judgeState.settings)
         ? {
             judged: {
               findings: judgedFindings,

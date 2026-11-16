@@ -17,7 +17,7 @@ Everything you can set, and every file the plugin keeps, in one place.
 
 ## Settings
 
-None are required. Apart from `/vibesenpai:judge on|off`, settings live in the config file or
+None are required. Apart from `/vibesenpai:judge on|yes|off`, settings live in the config file or
 in the environment Claude Code runs in.
 
 If a setting is given in more than one place, the environment variable wins over the config
@@ -76,11 +76,13 @@ Without either, colour is on only when the output is a terminal.
 ### Model-read settings
 
 Kept in `judge-settings.json` in the store. Until a setting has been written, the defaults
-apply. `/vibesenpai:judge on` and `off` set `enabled`; the others have no slash command.
+apply. `/vibesenpai:judge yes` sets `enabled` and `consent`, after `/vibesenpai:judge on` or the pane
+has shown what would be sent; `off` clears both. The others have no slash command.
 
 | key | default | what |
 |---|---|---|
-| `enabled` | `true` | whether the model reads run |
+| `enabled` | `false` | whether the model reads run; they also need `consent` |
+| `consent` | none | your yes: when you gave it, and the hash of the preview you saw. Written only by `/vibesenpai:judge yes` or the pane's **Turn on** |
 | `model` | `haiku` | the model passed to `claude -p --model` |
 | `dailyTokens` | `2000000` | tokens, in and out, the automatic reads may use per local day |
 | `catchUp` | `200` | past sessions read once, newest first |
@@ -96,10 +98,10 @@ copied into it; they are read where Claude Code keeps them, under `~/.claude/pro
 
 | file | holds | if you delete it |
 |---|---|---|
-| `store.db` | model findings and their quotes; what the lookback gate dropped; the paths of the instruction files your sessions loaded; how far each session has been read; tokens and dollars spent; your answers; when each fix was requested and first seen loaded | **you lose the most.** Model findings come back only by reading again, which spends tokens again, and only for transcripts Claude Code still keeps. The 200-session catch-up starts over. Hidden findings reappear. Fix history comes back only from transcripts still kept |
+| `store.db` | model findings and their quotes; what the lookback gate dropped; the paths of the instruction files your sessions loaded; a record of each model call, never its text; how far each session has been read; tokens and dollars spent; your answers; when each fix was requested and first seen loaded | **you lose the most.** Model findings come back only by reading again, which spends tokens again, and only for transcripts Claude Code still keeps. The 200-session catch-up starts over. Hidden findings reappear. Fix history comes back only from transcripts still kept |
 | `standing.json` | your history from the free checks | nothing: the next history pass rebuilds it |
 | `finding-fixes.json` | each model finding's own fix | nothing: the next history pass rebuilds it |
-| `judge-settings.json` | the model-read settings above | the defaults return, **including `enabled: true`**: model reads you turned off come back on |
+| `judge-settings.json` | the model-read settings above | the defaults return: model reads are off until you say yes again |
 | `disclosed` | that the one-time notice was shown | the notice is shown again |
 | `last-session-start` | when the last session started | the next session-start summary shows no "new since your last session" count |
 | `jobs/` | each background job's last run, failures and hold | the record starts fresh; a hold on the model reads is released |

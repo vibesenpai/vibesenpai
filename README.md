@@ -16,7 +16,7 @@ not score you and does not tell you how to work.
 
 **[Documentation](https://vibesenpai.github.io/vibesenpai/)** ·
 [What it shows you](https://vibesenpai.github.io/vibesenpai/start/what-it-is/) ·
-[What leaves your machine](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/)
+[How your data is used](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/)
 
 <p align="center"><img src="assets/screenshots/pane-finding.png" width="560" alt="The insights pane beside the chat. Under Constraint violation, 19 times in 6 sessions, one finding is open: the developer's words, “I also had asked you to drop the numbers in the tabs, which didn't happen”, the four turns around them, Why the agent's reply missed an earlier request, the developer's answer that it was a real mistake, and the fix, applied Nov 8."></p>
 
@@ -33,12 +33,15 @@ It needs Node 22.13 or later on your PATH, and Claude Code 2.1.299 or later.
 
 ## Getting started
 
-1. **Keep working.** The free checks read every session. Model reads run in the
-   background after a turn ends, within about 2M tokens a day, on your own
-   Claude Code account (plan or API key). A one-time notice at session start
-   says so.
+1. **Keep working.** The free checks read every session, on your machine, and
+   send nothing.
 2. **Open the pane.** `/vibesenpai:insights` opens it beside the chat. Each
    finding leads with your own words and the turns where it went wrong.
+   The model reads, which find misread requests, broken rules and false claims,
+   are off until you say yes: **See what would be sent** shows the exact text
+   first. Turned on, they keep running on Claude Haiku, in your own Claude Code
+   account, after each turn ends, until `/vibesenpai:judge off`. They are cheap:
+   usually a few cents a session at most, within 2M tokens a day.
 3. **Apply a fix you agree with.** Apply drafts the change into your prompt box.
    Your Enter is the yes, and the agent makes the change under Claude Code's own
    permission prompt.
@@ -46,7 +49,7 @@ It needs Node 22.13 or later on your PATH, and Claude Code 2.1.299 or later.
 | Command | What it does |
 |---|---|
 | `/vibesenpai:insights` | the pane: findings, their fixes, and Apply |
-| `/vibesenpai:judge` | model reads on or off; no argument shows their status |
+| `/vibesenpai:judge` | `on` shows what model reads would send, `yes` turns them on, `off` turns them off; no argument shows their status |
 | `/vibesenpai:report` | a self-contained HTML report of your history |
 
 `/vibesenpai:judge off` stops the model reads and keeps the free checks.
@@ -55,15 +58,16 @@ It needs Node 22.13 or later on your PATH, and Claude Code 2.1.299 or later.
 To update to a new release: `/plugin`, then **Installed**, vibesenpai, **Update
 now**; or `claude plugin update vibesenpai@vibesenpai` from a terminal.
 
-## What leaves your machine
+## How your data is used
 
 Your transcripts are read where Claude Code keeps them and are never copied.
-With model reads on, a redacted, length-capped copy of session text goes to
+Nothing is sent until you turn the model reads on, after seeing exactly what
+they would send. Then a redacted, length-capped copy of session text goes to
 Claude Haiku on your own Claude Code account (plan or API key), and the send
 stops if redaction left anything behind. Session text includes what the agent's
 tools returned, such as files it read and command output, so code from a
 session can be part of it. vibesenpai never opens your repository or writes
-your files; a fix is made by the agent, after you press Enter. [The full terms](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/).
+your files; a fix is made by the agent, after you press Enter. [How your data is used](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/), with packet examples.
 
 ## Contributing
 

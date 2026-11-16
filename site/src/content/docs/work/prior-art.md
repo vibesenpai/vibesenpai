@@ -40,7 +40,7 @@ Two differences:
 
 - **Running locally.** vibe-log is local-first too, and the judge here
   sends session content to a model
-  ([What leaves your machine](/vibesenpai/start/sends-and-costs/)).
+  ([How your data is used](/vibesenpai/start/sends-and-costs/)).
 - **Covering many harnesses.** The history viewer covers 11; this tool covers
   one.
 

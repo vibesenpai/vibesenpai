@@ -239,3 +239,18 @@ describe('redact: a provider prefix must start a token', () => {
     expect(out.text).not.toMatch(/AbCdEf1234567890|abcdefghijklmnop|AbCdEfGhIjKl/);
   });
 });
+
+describe('the redactor version follows its rules', () => {
+  // A rebuilt packet compares this version with the one recorded at the send (src/judge/sent.ts).
+  it('is bumped whenever RULES change: update both values together', async () => {
+    const { createHash } = await import('node:crypto');
+    const { readFileSync } = await import('node:fs');
+    const { REDACT_VERSION } = await import('../src/redact.ts');
+    const s = readFileSync('src/redact.ts', 'utf8');
+    const rules = s.slice(s.indexOf('const RULES'), s.indexOf('\n];', s.indexOf('const RULES')));
+    expect({ version: REDACT_VERSION, rules: createHash('sha256').update(rules).digest('hex') }).toEqual({
+      version: 1,
+      rules: '41e1ba54a4d5ad51f2819fd80da6232b22ac5c2101de8572d6da8e8bfaea29b0',
+    });
+  });
+});

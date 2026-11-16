@@ -120,12 +120,42 @@ sends no telemetry. GitHub counts downloads of a release zip.
 ## Three slash commands; the pane is where findings are acted on (D70)
 
 **Why:** separate fix, apply and dismiss commands each duplicated the pane. What
-remains: `/vibesenpai:insights`, `/vibesenpai:judge on|off` (the one switch for
+remains: `/vibesenpai:insights`, `/vibesenpai:judge on|yes|off` (the one switch for
 spending) and `/vibesenpai:report`. Apply drafts a request into the prompt box;
 your Enter is the yes.
 
 **Cost:** a finding's own fix appears after the next history pass, not the
 moment it is judged. Until then its dimension's fix shows.
+
+## A Rules tab shows what Claude was told (D71)
+
+**Why:** a rule written in a parent folder's memory never loaded in the project
+below it, so neither the agent nor the model reads saw it. The tab lists the
+instruction files each session loaded, from the transcript, and nearby memory
+that does not load by itself. Only paths are stored; the text is read live.
+
+**Cost:** it shows where rules live, not whether they are good: its checks are
+facts about the files, never a verdict on their wording.
+
+## Model reads wait for your yes (D72)
+
+**Why:** an automatic send should start off, show exactly what goes out, and
+wait for a yes, as a plugin directory's reviewer asked and as this product's own
+thesis says. The pane builds the real next packet with the pass's own code,
+sends it nowhere, and **Turn on** is the yes. It is kept in the plugin's own
+settings, and turning reads off forgets it.
+
+**Cost:** fewer people will turn the model reads on, and the free checks alone
+find much less.
+
+## What was sent is a recipe and a hash, never a copy (D73)
+
+**Why:** you can see every call made, and the text of each one, without a second
+copy of your sessions existing anywhere. The text is cut again from your own
+transcript and checked against the fingerprint taken when it was sent.
+
+**Cost:** once Claude Code deletes a transcript, its calls can still be listed but
+no longer shown.
 
 ---
 

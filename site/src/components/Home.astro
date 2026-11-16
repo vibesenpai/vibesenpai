@@ -88,14 +88,14 @@ const dimensions = {
 
 const terms = [
   ['Reads your sessions in place.', 'Transcripts are never copied. What it keeps is redacted when it is written.'],
-  ['Sends only redacted text, on your account.', 'Model reads go to Claude Haiku on your own Claude Code account (plan or API key). The send stops if anything redaction should have removed is still there.'],
+  ['Sends nothing until you say yes.', 'Model reads are off until you have seen exactly what they would send. Then redacted text goes to Claude Haiku on your own Claude Code account, and the send stops if anything redaction should have removed is still there.'],
   ['Never writes your files.', 'A fix is a request in your prompt box. The agent makes the change, under Claude Code’s permission prompt.'],
   ['Stops with one command.', '/vibesenpai:judge off stops the model reads. /plugin disable vibesenpai stops everything.'],
 ];
 
 const faq = [
-  ['Does it send my code anywhere?', 'It never opens your repository, but a session’s text includes what the agent’s tools returned, such as files it read and command output. With model reads on, which is the default, a redacted and length-capped copy of that text goes to Claude Haiku on your own Claude Code account (plan or API key). It cannot judge code the agent never looked at. With model reads off, nothing leaves your machine.'],
-  ['What does it cost?', 'The free checks cost nothing. Model reads use about 60,000 tokens a session on your own Claude Code account (plan or API key), within about 2 million tokens a day.'],
+  ['Does it send my code anywhere?', 'It never opens your repository, but a session’s text includes what the agent’s tools returned, such as files it read and command output. Model reads are off until you say yes, after seeing exactly what they would send. Then a redacted and length-capped copy of that text goes to Claude Haiku on your own Claude Code account (plan or API key). It cannot judge code the agent never looked at. Until then, nothing leaves your machine.'],
+  ['What does it cost?', 'The free checks cost nothing. Model reads, once you turn them on, are usually a few cents a session at most at API prices, within 2 million tokens a day (about $0.26). On a Claude subscription they count toward your plan’s usage instead.'],
   ['Which agents does it read?', 'Claude Code only.'],
   ['How do I turn it off?', '/vibesenpai:judge off stops the model reads and keeps the free checks. /plugin disable vibesenpai turns everything off.'],
 ];
@@ -175,7 +175,7 @@ const faq = [
   </section>
 
   <section class="terms reveal">
-    <h2>What leaves your machine</h2>
+    <h2>How your data is used</h2>
     <div class="lines">
       {terms.map(([head, body]) => <p><strong>{head}</strong> <span>{body}</span></p>)}
     </div>

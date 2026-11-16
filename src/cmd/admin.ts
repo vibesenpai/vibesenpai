@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { claudeDir, type Layer } from '../config.ts';
 import { describeCatalog, readCatalog, runScan } from '../catalog.ts';
 import { parse, registry } from '../parsers/index.ts';
-import { readJudgeState, tallyByDimension } from '../judge/state.ts';
+import { readJudgeState, readsOn, tallyByDimension } from '../judge/state.ts';
 import { detectorsFor, unknownDimensions } from '../detect/index.ts';
 import { leadSegments } from '../render.ts';
 import { jobsHealth, superviseAll } from '../jobs.ts';
@@ -118,7 +118,7 @@ export function cmdDoctor(a: Argv): number {
       j.state === 'retrying'
         ? `retrying · ${j.failures} failure(s) since ${localStamp(j.since)} · next try ${localStamp(j.retryAt)}`
         : j.state === 'held'
-          ? `held after ${j.paidFailures} failed paid calls · \`judge --enable --apply\` releases it`
+          ? `held after ${j.paidFailures} failed paid calls · \`judge --enable\`, then \`judge --yes --apply\`, releases it`
           : j.state;
     console.log(`  ${`job ${j.job}`.padEnd(13)}${state}`);
     if (j.state === 'retrying' || j.state === 'held') console.log(`             ${j.reason}`);
@@ -182,7 +182,7 @@ export function cmdDoctor(a: Argv): number {
     }
   }
   // Must match .claude/rules/judge.md.
-  const judgeOn = readJudgeState(config.archive).settings.enabled;
+  const judgeOn = readsOn(readJudgeState(config.archive).settings);
   console.log(`  network    ${judgeOn ? 'the judge is ON and sends session content' : 'no network calls, with one opt-in exception'}`);
   if (judgeOn) {
     console.log('             redacted transcript text leaves this machine when the judge');

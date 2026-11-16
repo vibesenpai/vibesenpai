@@ -139,6 +139,29 @@ CREATE TABLE IF NOT EXISTS rule_seen (
 `;
 
 /**
+ * One row per model call: what it was built from and a hash of the exact text, never the text itself.
+ * The text is rebuilt from the transcript to show what was sent (src/judge/sent.ts). DECISIONS.md D73.
+ */
+const SENT_DDL = `
+CREATE TABLE IF NOT EXISTS sent (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  at             TEXT NOT NULL,
+  run_id         TEXT,
+  stage          TEXT NOT NULL,     -- 'extract' | 'label'
+  model          TEXT NOT NULL,
+  recipes        TEXT,              -- extract: JSON SentRecipe[]; never text
+  composition    TEXT,              -- label: JSON counts of what it held
+  chars          INTEGER NOT NULL,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  usd_micros     INTEGER,
+  redact_version INTEGER NOT NULL,
+  sha256         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sent_at ON sent(at);
+`;
+
+/**
  * The instruction files Claude Code loaded in a project's sessions: paths and counts only, never their
  * text (the Rules tab reads each file live). Replaced per project by every history pass. D71.
  */
@@ -261,6 +284,7 @@ ${LABEL_DDL}
 ${FIX_DDL}
 ${GATED_DDL}
 ${RULE_FILE_DDL}
+${SENT_DDL}
 `;
 
 /** Open the store, creating it if needed. WAL lets readers read during a write; busy_timeout waits rather than throws. */
@@ -334,6 +358,7 @@ export function openStore(archive: string): Db {
     db.exec(FIX_DDL);
     db.exec(GATED_DDL);
     db.exec(RULE_FILE_DDL);
+    db.exec(SENT_DDL);
 
     // `session` gained `packet_tokens` the same way.
     const scols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map(
@@ -622,6 +647,60 @@ export function readRuleFiles(db: Db, project: string): { cwd?: string; files: R
     ...(cwd === undefined ? {} : { cwd }),
     files: rows.map((r) => ({ path: r.path, kind: r.kind, sessions: r.sessions, atStartSessions: r.at_start_sessions, firstAt: r.first_at, lastAt: r.last_at })),
   };
+}
+
+export type SentRow = {
+  id?: number;
+  at: string;
+  runId?: string;
+  stage: 'extract' | 'label';
+  model: string;
+  recipes?: unknown;
+  composition?: Record<string, number>;
+  chars: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  usdMicros?: number;
+  redactVersion: number;
+  sha256: string;
+};
+
+/** Record one model call. Written right after the call returns, whatever happens next. */
+export function putSent(db: Db, r: SentRow): void {
+  db.prepare(
+    `INSERT INTO sent(at, run_id, stage, model, recipes, composition, chars, tokens_in, tokens_out, usd_micros, redact_version, sha256)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    r.at, r.runId ?? null, r.stage, r.model,
+    r.recipes === undefined ? null : JSON.stringify(r.recipes),
+    r.composition === undefined ? null : JSON.stringify(r.composition),
+    r.chars, r.tokensIn ?? null, r.tokensOut ?? null, r.usdMicros ?? null, r.redactVersion, r.sha256,
+  );
+}
+
+type SentDbRow = { id: number; at: string; run_id: string | null; stage: string; model: string; recipes: string | null; composition: string | null; chars: number; tokens_in: number | null; tokens_out: number | null; usd_micros: number | null; redact_version: number; sha256: string };
+
+function sentFrom(r: SentDbRow): SentRow {
+  return {
+    id: r.id, at: r.at, stage: r.stage === 'label' ? 'label' : 'extract', model: r.model, chars: r.chars,
+    redactVersion: r.redact_version, sha256: r.sha256,
+    ...(r.run_id === null ? {} : { runId: r.run_id }),
+    ...(r.recipes === null ? {} : { recipes: JSON.parse(r.recipes) as unknown }),
+    ...(r.composition === null ? {} : { composition: JSON.parse(r.composition) as Record<string, number> }),
+    ...(r.tokens_in === null ? {} : { tokensIn: r.tokens_in }),
+    ...(r.tokens_out === null ? {} : { tokensOut: r.tokens_out }),
+    ...(r.usd_micros === null ? {} : { usdMicros: r.usd_micros }),
+  };
+}
+
+/** The most recent model calls, newest first. */
+export function readSent(db: Db, limit = 20): SentRow[] {
+  return (db.prepare('SELECT * FROM sent ORDER BY id DESC LIMIT ?').all(limit) as SentDbRow[]).map(sentFrom);
+}
+
+export function readSentOne(db: Db, id: number): SentRow | undefined {
+  const r = db.prepare('SELECT * FROM sent WHERE id = ?').get(id) as SentDbRow | undefined;
+  return r === undefined ? undefined : sentFrom(r);
 }
 
 /** Record that a pass has started and which session it is reading. */

@@ -20,11 +20,11 @@ constraint violation. [More below](#one-finding-more-than-one-kind).
 
 | Dimension | Tier | On by default | In the paper |
 |---|---|---|---|
-| [Constraint violation](/vibesenpai/dimensions/constraint-violation/) | model read | yes | S3 Developer Constraint Violation |
-| [Misread intent](/vibesenpai/dimensions/misread-intent/) | model read | yes | S2 Misread Developer Intent |
-| [Inaccurate self report](/vibesenpai/dimensions/inaccurate-self-report/) | model read | yes | S7 Inaccurate Self-Reporting |
-| [Overreach](/vibesenpai/dimensions/overreach/) | model read | yes | S4 Self-Initiated Overreach |
-| [Other](/vibesenpai/dimensions/other/) | model read | yes | |
+| [Constraint violation](/vibesenpai/dimensions/constraint-violation/) | model read | after your yes | S3 Developer Constraint Violation |
+| [Misread intent](/vibesenpai/dimensions/misread-intent/) | model read | after your yes | S2 Misread Developer Intent |
+| [Inaccurate self report](/vibesenpai/dimensions/inaccurate-self-report/) | model read | after your yes | S7 Inaccurate Self-Reporting |
+| [Overreach](/vibesenpai/dimensions/overreach/) | model read | after your yes | S4 Self-Initiated Overreach |
+| [Other](/vibesenpai/dimensions/other/) | model read | after your yes | |
 | [Edit retry](/vibesenpai/dimensions/edit-retry/) | free check | yes | |
 | [Repeated call](/vibesenpai/dimensions/redundant-call/) | free check | no | |
 | [Cache rebuilds](/vibesenpai/dimensions/cache-rebuilds/) | a statistic, not a finding | yes | |
@@ -32,18 +32,56 @@ constraint violation. [More below](#one-finding-more-than-one-kind).
 *In the paper* is the matching kind in the research the model reads are built on
 ([below](#where-the-dimensions-come-from)).
 
-There are two tiers:
+## Free checks and model reads
 
-- **Model reads** send a redacted copy of the session to a model. They are on
-  from installation and run in the background, started from Claude Code's
-  `Stop` hook, within a daily limit.
-  `/vibesenpai:judge off` turns them off; the free checks keep running. The
-  judge is what does the model reads. See
-  [What leaves your machine](/vibesenpai/start/sends-and-costs/) and
-  [the judge pipeline](/vibesenpai/architecture/judge/).
-- **The free checks** read the transcript's structure on your machine, with no
-  model and no network. The default preset, `core`, runs Edit retry. The
-  `standard` preset adds Repeated call ([Reference](/vibesenpai/reference/)).
+vibesenpai finds problems in two ways: fixed rules on your machine, and a model
+that reads the conversation.
+
+### Free checks
+
+The free checks are **fixed rules** over the structure Claude Code records:
+which tool ran, whether it failed and the reason it gave, a hash of its output,
+timestamps. Each rule looks for one pattern, such as an edit refused and then
+tried again on the same file. There is no model and no network, and nothing
+leaves your machine.
+
+They never read what you or the agent wrote: the code that runs them is not
+given any text, so a check that tried would not build
+([The two tiers](/vibesenpai/architecture/two-tiers/)). A free-check finding is
+a fact Claude Code recorded, not a reading of one.
+
+| Free check | Runs |
+|---|---|
+| [Edit retry](/vibesenpai/dimensions/edit-retry/) | always (the default `core` preset) |
+| [Repeated call](/vibesenpai/dimensions/redundant-call/) | with the `standard` preset ([Reference](/vibesenpai/reference/)) |
+
+[Cache rebuilds](/vibesenpai/dimensions/cache-rebuilds/) are counted the same
+way, but shown as a statistic, not as findings.
+
+### Model reads
+
+The model reads are an **LLM judge**: a model reads the conversation itself and
+finds what structure cannot show, such as a request misread, a rule broken, or
+work claimed but not done. The judge is Claude Haiku by default, run through
+your own `claude` CLI with no tools ([the judge pipeline](/vibesenpai/architecture/judge/)).
+
+- A first step describes each moment the collaboration broke down, with a
+  verbatim quote; a second step names the kind.
+- A finding whose quote is not in what was sent is discarded. A misread
+  intent, constraint violation or other finding must also cite where the
+  expectation was set, earlier in the session.
+- They send redacted session text, so they are **off until you say yes** after
+  seeing exactly what they would send. Then they run in the background after
+  each turn ends, within a daily limit, until `/vibesenpai:judge off`
+  ([How your data is used](/vibesenpai/start/sends-and-costs/)).
+
+| Model read | Finds |
+|---|---|
+| [Constraint violation](/vibesenpai/dimensions/constraint-violation/) | a rule or instruction you gave, broken |
+| [Misread intent](/vibesenpai/dimensions/misread-intent/) | a request done differently from what you meant |
+| [Inaccurate self report](/vibesenpai/dimensions/inaccurate-self-report/) | work claimed but not done |
+| [Overreach](/vibesenpai/dimensions/overreach/) | something done that nobody asked for |
+| [Other](/vibesenpai/dimensions/other/) | a breakdown that fits none of the above |
 
 Model findings can be wrong; free-check findings are facts Claude Code
 recorded. Each finding stores how it was flagged, but the pane shows only that

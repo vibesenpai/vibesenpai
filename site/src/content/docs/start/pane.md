@@ -15,7 +15,7 @@ If Claude Code cannot place a pane, the command prints a
 [text version](/vibesenpai/commands/insights/) instead.
 
 The first time it opens, it says `Reading your history` with a seconds counter, and
-`The free checks come first. Model reads begin when this turn ends.`
+`The free checks come first.`
 
 ## The header
 
@@ -27,7 +27,7 @@ The first time it opens, it says `Reading your history` with a seconds counter, 
   also checks for new results every 30 seconds and after each turn.
 - **A failing job**, if there is one, in one line: `The history pass is retrying: <reason>` or
   `The judge is held: <reason>`. *Held* means the model reads stopped after 3 failed paid calls
-  in a row; they stay stopped until you run `/vibesenpai:judge on`.
+  in a row; they stay stopped until you run `/vibesenpai:judge on`, then `/vibesenpai:judge yes`.
 - **Four tabs:** Findings, Rules, Fixes, Health. `⇥` moves between buttons; `⏎` presses one.
 
 ## Findings tab
@@ -36,19 +36,34 @@ The first time it opens, it says `Reading your history` with a seconds counter, 
 
 From top to bottom:
 
-1. **Model reads progress.** Until the model reads have found anything, a card shows how far
+1. **Model reads are off**, until you say yes. A card says what the model reads do, with **See
+   what would be sent**. That opens the exact text the first read would send, built by the same
+   code a real read uses and sent nowhere:
+   - **To**, **First read**, **Then** and **Costs**: where it goes, how much, and what it costs;
+   - what is removed before sending, and that a yes lasts until `/vibesenpai:judge off`;
+   - the instructions given to the model, the sessions it reads first (one row; it opens to five,
+     then all) and what the second step adds, each opening to its exact text.
+
+   **Turn on** is the yes. **Not now** folds the card into the Health tab. A tab, **Close**, or
+   opening the pane again goes back to the tabs.
+   [How your data is used](/vibesenpai/start/sends-and-costs/) describes it.
+
+   ![The Model reads are off card on the Findings tab: what the reads find, that they send redacted session text to Claude Haiku on your own account only after you say yes, and See what would be sent.](../../../assets/docs/reads-card.png)
+
+   ![The preview: To, First read, and Costs rows, what is removed before sending, that reads run until /vibesenpai:judge off, the folded instructions, sessions and second step, then Turn on and Not now.](../../../assets/docs/reads-preview.png)
+2. **Model reads progress.** Once they are on, until they have found anything, a card shows how far
    they have got (`N of M`) and what happens next, for example `Begins when this turn ends.`
    or `Today's limit is reached; it continues tomorrow.` After the first model finding, it
    becomes the progress bar in the header.
-2. **New since you last looked.** Up to three findings that arrived since you last opened the
+3. **New since you last looked.** Up to three findings that arrived since you last opened the
    pane.
-3. **What went wrong, by kind.** One block per kind of finding, most frequent first, each with
+4. **What went wrong, by kind.** One block per kind of finding, most frequent first, each with
    `N times in M sessions`. Inside, `▸ N findings` lists them three at a time. The kind's fix,
    if it has one, is below the list.
-4. **Cache rebuilds.** When the prompt cache was thrown away and written again from scratch:
+5. **Cache rebuilds.** When the prompt cache was thrown away and written again from scratch:
    `N times, N tokens written again`. Opened, it lists the three largest.
    ([Cache rebuilds](/vibesenpai/dimensions/cache-rebuilds/))
-5. **Open full report** writes and opens the [HTML report](/vibesenpai/commands/report/).
+6. **Open full report** writes and opens the [HTML report](/vibesenpai/commands/report/).
    **Hide all** hides every finding and takes them out of the counts.
 
 When nothing has been flagged, the tab says `Nothing flagged in N sessions read.` That is a
@@ -116,7 +131,7 @@ which sessions each count covers.
 
 ## Health tab
 
-![The Health tab: the history pass and the judge, tokens used today against the daily limit, what was spent, and the model reads switch.](../../../assets/home/shots/health.png)
+![The Health tab with model reads off: the history pass and the judge, tokens today against the daily limit, what was spent, and Model reads: Off until you say yes, with See what would be sent.](../../../assets/docs/health-reads-off.png)
 
 | row | what |
 |---|---|
@@ -125,7 +140,8 @@ which sessions each count covers.
 | **Today** | tokens used today against the daily limit, as `N of 2.0M tokens` |
 | **Spent** | all model reads so far: calls, tokens in and out, and dollars |
 | **Older** | past sessions the model reads skip. The first time, they read your 200 most recent past sessions (the catch-up); older ones are not read automatically |
-| **Model reads** | `on` or `off`, with the command that changes it |
+| **Model reads** | `On, until /vibesenpai:judge off.`, or `Off until you say yes.` with **See what would be sent** |
+| **What was sent** | the last model calls: when, which step, how many sessions, how much text. **View** rebuilds a step 1 call from your transcript and says whether it matches what was sent |
 | **Dismissed** | how many findings are hidden, with **Restore all** |
 
 The dollar figure is Claude Code's own, at API prices. On a subscription it is plan usage, not

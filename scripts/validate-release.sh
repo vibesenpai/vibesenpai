@@ -172,7 +172,9 @@ if [ "$spend" = 1 ]; then
     || fail "could not fetch the known-failure session from claude-code-log@$ccl_sha"
   pass "a public session with a known failure is in place ($known)"
 
-  cli judge --enable --apply >/dev/null
+  # A yes needs a preview first, as for a person (DECISIONS.md D72).
+  cli judge --enable >/dev/null
+  cli judge --yes --apply >/dev/null
   pass "model reads on"
   # This session's Stop hook starts a read; the known session has never been read, so it is due.
   (cd "$work/project" && claude -p 'Reply with the single word ok.' </dev/null >/dev/null 2>"$work/p4.err") \

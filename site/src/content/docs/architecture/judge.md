@@ -7,8 +7,10 @@ This page explains how the judge turns a session into findings, and what stops
 a wrong or leaky result. The judge is what does the model reads. It is one
 model, Claude Haiku by default
 ([the `model` setting](/vibesenpai/reference/#model-read-settings)), called
-through your own `claude` CLI. The `Stop` hook starts it in the
-background ([Phases of a run](/vibesenpai/architecture/phases/)).
+through your own `claude` CLI. It runs only after you have said yes, having seen
+what it would send; then the `Stop` hook starts it in the background
+([Phases of a run](/vibesenpai/architecture/phases/),
+[How your data is used](/vibesenpai/start/sends-and-costs/)).
 
 ![The two judge stages](../../../diagrams/judge-stages.svg)
 
@@ -103,6 +105,11 @@ The check is equality, not "redacting twice gives the same answer". That
 weaker test passes for text that redaction would still change.
 
 ## What stops a stale or runaway pass?
+
+- **Your yes.** Every pass, and every round within one, checks that the reads are on and that
+  you said yes after a preview (`readsOn`). Turning them off stops the next round; a call
+  already in flight finishes. The preview is built by the pass's own planning code
+  (`src/judge/preview.ts`) with nothing recorded, so it is the batch a real read would send.
 
 - **Fencing.** A pass holds a lease from the job supervisor. Before every model
   call and every write it checks it still holds it. A replaced pass, for

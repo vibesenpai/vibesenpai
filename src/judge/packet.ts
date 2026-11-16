@@ -226,6 +226,22 @@ export type JudgePacketSession = {
   carry?: JudgeCarry;
   /** Earlier prompts and loaded instructions, for the label stage. Present when the `lookback` setting is on. */
   lookback?: LookbackSource;
+  /** How this packet was cut from its transcript, so it can be rebuilt to show what was sent (src/judge/sent.ts). */
+  recipe?: SentRecipe;
+};
+
+/**
+ * Inputs that rebuild one session's packet exactly: the bytes read, the first event, and the cut.
+ * No session text: the transcript is read again. DECISIONS.md D73.
+ */
+export type SentRecipe = {
+  sessionId: string;
+  source: string;
+  /** Bytes of the transcript read, in whole lines. */
+  size: number;
+  fromSeq: number;
+  cut: { kind: 'whole' } | { kind: 'window'; events: number } | { kind: 'part'; budget: number; resume?: { seq: number; chars: number } };
+  carry?: JudgeCarry;
 };
 
 /**

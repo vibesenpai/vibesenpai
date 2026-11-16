@@ -16,13 +16,16 @@ leaving the machine, say which version and whether the judge was enabled.
 | **reads** | `~/.claude/projects/**`, in place — never modified, never copied |
 | **writes** | `~/.local/share/vibesenpai`, mode 0600 |
 | **never writes** | your project files or `~/.claude/settings.json`; a fix is a request the developer approves in Claude Code |
-| **sends** | redacted session text to Claude Haiku through your own Claude Code login, from the `Stop` hook, within 2M tokens a day; `/vibesenpai:judge off` stops it |
+| **sends** | nothing until the developer says yes after a preview; then redacted session text to Claude Haiku through their own Claude Code login, from the `Stop` hook, within 2M tokens a day; `/vibesenpai:judge off` stops it |
 
 ## The judge, which is the part that matters
 
-The judge is **on from installation**, after a one-time notice at session start.
-It runs detached from the `Stop` hook only, never from session start, within a
-daily token limit; `test/spend-boundary.spec.ts` asserts that boundary. Session
+The judge is **off until the developer says yes**, after a preview of the exact
+text it would send, built by the same code and sent nowhere (`src/judge/preview.ts`).
+The yes is stored in the plugin's own settings, with the hash of the preview seen;
+no hook, pass or new session sets it. Then it runs detached from the `Stop` hook
+only, never from session start, within a daily token limit.
+`test/spend-boundary.spec.ts` asserts that boundary. Session
 text includes what the agent's tools returned, so code and command output from
 a session can be part of what is sent.
 

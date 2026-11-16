@@ -1,13 +1,15 @@
 /** One judge round: plan what to send, pack it into batches, send a batch and record the result. */
 
 import { readFileSync } from 'node:fs';
-import { endRun, markSkipped, openStore, startRun, withStore } from '../store.ts';
+import { endRun, markSkipped, openStore, putSent, startRun, withStore } from '../store.ts';
+import { createHash } from 'node:crypto';
+import { REDACT_VERSION } from '../redact.ts';
 import { callModelAsync, wouldLeak } from './model.ts';
 import { parseTranscript, withFullText } from '../parsers/claude-code.ts';
 import { parseExtract, parseLabels, renderExtract, renderLabel } from './prompt.ts';
 import {
   buildSession, estimateTokens, isHarnessNoise, largestFittingWindow, openFailuresBefore, partOfTurn,
-  type JudgeCarry, type JudgePacketSession,
+  type JudgeCarry, type JudgePacketSession, type SentRecipe,
 } from './packet.ts';
 import { gatedRows, recordPass, recordSpend, type JudgeState } from './state.ts';
 import type { Event } from '../types.ts';
@@ -67,6 +69,8 @@ export function planRound(
   state: JudgeState,
   only: string | undefined,
   snapshot: Map<string, { source: string; size: number }>,
+  /** A preview: plan exactly as a pass would, but record nothing (src/judge/preview.ts). */
+  dry = false,
 ): Batch {
   // Batched because the per-call overhead dwarfs a typical session.
   const sessions: JudgePacketSession[] = [];
@@ -122,12 +126,17 @@ export function planRound(
     const fresh = events.filter((e) => e.seq >= fromSeq);
     if (fresh.length === 0) continue;
 
-    const packet = buildSession(
+    const wholeCarry = judged === 0 ? undefined : carryFor(state, sessionId, events, fromSeq);
+    const packet = buildSession(sessionId, fresh, fullText, wholeCarry);
+    // How to cut this session again from its transcript, for the record of what was sent.
+    const recipe = (cut: SentRecipe['cut'], carry: JudgeCarry | undefined): SentRecipe => ({
       sessionId,
-      fresh,
-      fullText,
-      judged === 0 ? undefined : carryFor(state, sessionId, events, fromSeq),
-    );
+      source,
+      size,
+      fromSeq,
+      cut,
+      ...(carry === undefined ? {} : { carry }),
+    });
     if (packet.packet.turns.length === 0) {
       // Nothing worth judging, but record the bytes as read.
       offsets.set(sessionId, size);
@@ -153,10 +162,10 @@ export function planRound(
         const part = partOfTurn(sessionId, fresh, fullText, carry, state.settings.maxBatchTokens, resume);
         if (part === undefined) {
           // Only the carry can leave no room; a property of the data, so a skip, not a breaker failure.
-          skipSession(config.archive, sessionId, 'what is carried leaves no room for the next turn');
+          if (!dry) skipSession(config.archive, sessionId, 'what is carried leaves no room for the next turn');
           continue;
         }
-        sessions.push(attach(part.session));
+        sessions.push(attach({ ...part.session, recipe: recipe({ kind: 'part', budget: state.settings.maxBatchTokens, ...(resume === undefined ? {} : { resume }) }, carry) }));
         if (part.end < part.length) {
           parts.set(sessionId, { seq: part.seq, chars: part.end });
         } else {
@@ -165,7 +174,7 @@ export function planRound(
         }
         continue;
       }
-      sessions.push(attach(win.session));
+      sessions.push(attach({ ...win.session, recipe: recipe({ kind: 'window', events: win.turns }, carry) }));
 
       // Where this window stopped, in bytes. `byteAfter`, not round-down: rounding down can
       // resume a one-event window on itself, so the session never advances and bills every pass.
@@ -173,7 +182,7 @@ export function planRound(
       continue;
     }
 
-    sessions.push(attach(packet));
+    sessions.push(attach({ ...packet, recipe: recipe({ kind: 'whole' }, wholeCarry) }));
     offsets.set(sessionId, size);
   }
 
@@ -190,6 +199,7 @@ export function packBatches(
   round: Batch,
   maxBatchTokens: number,
   k: number,
+  dry = false,
 ): { batches: Batch[]; quiet: Batch } {
   // First-fit whole sessions up to the ceiling; the rest wait for the next pass. Never a truncated session.
   const batches: JudgePacketSession[][] = [];
@@ -203,7 +213,7 @@ export function packBatches(
     }
     if (estimateTokens(renderExtract([session])) > maxBatchTokens) {
         // Unreachable (packets are windowed as built); a skip, not a breaker failure, if that ever breaks.
-        skipSession(archive, session.sessionId, 'did not fit a packet of its own');
+        if (!dry) skipSession(archive, session.sessionId, 'did not fit a packet of its own');
       continue;
     }
     if (batches.length < k) batches.push([session]);
@@ -271,6 +281,9 @@ export async function runBatch(
     // Spend is recorded now (we paid); the watermark moves only with the findings,
     // so a stage-B failure re-bills instead of losing episodes.
     pay(extracted);
+    logSent(archive, runId, 'extract', state.settings.model, extractPacket, extracted, {
+      recipes: batch.sessions.flatMap((s) => (s.recipe === undefined ? [] : [s.recipe])),
+    });
 
     const { episodes, dropped } = parseExtract(extracted.reply, batch.sessions);
     // An unreadable reply is a failure, not "nothing found": the watermark must not move past unread bytes.
@@ -297,6 +310,13 @@ export async function runBatch(
       return fail(`judge label call failed; ${episodes.length} episode(s) unlabelled`);
     }
     pay(labelled);
+    logSent(archive, runId, 'label', state.settings.model, labelPacket, labelled, {
+      composition: {
+        records: episodes.length,
+        lookbackSessions: lookbacks?.size ?? 0,
+        lookbackItems: [...(lookbacks?.values() ?? [])].reduce((n, b) => n + b.items.length, 0),
+      },
+    });
 
     const labels = parseLabels(labelled.reply, episodes, lookbacks);
     const findings = labels.findings;
@@ -312,6 +332,33 @@ export async function runBatch(
   } finally {
     if (runId !== undefined) withStore(archive, (db) => endRun(db, runId, 'done', callMs, packetTokens, gated, spent));
   }
+}
+
+/** The record of one model call: what it was cut from and the hash of the exact text, never the text (D73). */
+function logSent(
+  archive: string,
+  runId: string | undefined,
+  stage: 'extract' | 'label',
+  model: string,
+  packet: string,
+  reply: { inputTokens: number; outputTokens: number; usd: number },
+  what: { recipes?: unknown; composition?: Record<string, number> },
+): void {
+  withStore(archive, (db) =>
+    putSent(db, {
+      at: new Date().toISOString(),
+      ...(runId === undefined ? {} : { runId }),
+      stage,
+      model,
+      ...what,
+      chars: packet.length,
+      tokensIn: reply.inputTokens,
+      tokensOut: reply.outputTokens,
+      usdMicros: Math.round(reply.usd * 1_000_000),
+      redactVersion: REDACT_VERSION,
+      sha256: createHash('sha256').update(packet).digest('hex'),
+    }),
+  );
 }
 
 /**

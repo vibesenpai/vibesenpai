@@ -25,20 +25,18 @@ own hooks and commands, and your `~/.claude/settings.json` is not touched.
 
 ## What happens the first time
 
-When your next session starts, a one-time notice says what the model reads will do:
+When your next session starts, the free checks begin, and a one-time notice says the model
+reads are paused:
 
 ```
-vibesenpai is on. Starting when this turn ends, it reads your sessions in the background
-with Claude Haiku on your plan or API key: up to 200 recent past sessions first,
-then each new one, at most 2.0M tokens a day.
-Nothing has been spent yet.
+vibesenpai is running its free checks. Its model reads are paused, and nothing has been sent.
+Turned on, they read your sessions with Claude Haiku on your plan or API key after each turn ends:
+up to 200 recent past sessions first, then each new one, at most 2.0M tokens a day.
+/vibesenpai:insights shows exactly what they would send, and turns them on if you say yes.
 ```
 
-It then lists three commands:
-
-- `/vibesenpai:insights` shows what it has found.
-- `/vibesenpai:judge off` stops the model reads. The free checks keep running.
-- `/plugin disable vibesenpai` stops everything.
+Nothing is sent until you look at what would be sent and press **Turn on**.
+[How your data is used](/vibesenpai/start/sends-and-costs/) describes what that means.
 
 On an API key, Bedrock or Vertex, it says "on your API key" instead of "on your plan or API key".
 The notice is shown once.
@@ -54,7 +52,7 @@ After that, three things happen on their own:
   the model reads finish.
 
 What is sent to the model, and what it costs, is on
-[What leaves your machine](/vibesenpai/start/sends-and-costs/).
+[How your data is used](/vibesenpai/start/sends-and-costs/).
 
 ## Update
 

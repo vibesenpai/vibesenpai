@@ -44,11 +44,16 @@ type JudgeSettings = {
   dailyTokens: number;
   /** Never-read past sessions the automatic pass catches up on, newest first, once. */
   catchUp: number;
+  /**
+   * The person's yes, given after a preview of what would be sent: when, and the preview's hash.
+   * Model reads run only with it (`readsOn`). Turning reads off clears it. DECISIONS.md D72.
+   */
+  consent?: { at: string; preview: string };
 };
 
 export const DEFAULT_SETTINGS: JudgeSettings = {
-  // On by default: `/plugin install` is the consent. See .claude/rules/judge.md.
-  enabled: true,
+  // Off until the person says yes after a preview (DECISIONS.md D72); installing is not the consent.
+  enabled: false,
   model: 'haiku',
   // ~50 turns, so a long session is judged a handful of times; each call costs ~26k tokens overhead.
   cadence: 50,
@@ -123,6 +128,52 @@ function readSettings(archive: string): JudgeSettings {
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
+}
+
+/** Model reads may run: switched on, with a yes given after a preview. Every spender checks this. */
+export function readsOn(settings: JudgeSettings): boolean {
+  return settings.enabled && settings.consent !== undefined;
+}
+
+/** How long a preview stays valid for a yes: the yes must follow a preview the person could see. */
+const PREVIEW_VALID_MS = 60 * 60_000;
+
+function pendingPath(archive: string): string {
+  return join(archive, 'pending-preview.json');
+}
+
+/** Record that a preview was built: its hash and when. Never its text. */
+export function markPreviewShown(archive: string, hash: string, now = new Date()): void {
+  try {
+    writeJson(pendingPath(archive), { hash, at: now.toISOString() });
+  } catch {
+    // Without the marker the yes is refused, which is the safe direction.
+  }
+}
+
+/**
+ * Turn model reads on from the person's yes. Refused without a preview built in the last hour, so the
+ * yes always follows a look at what would be sent. Returns the consent, or why it was refused.
+ */
+export function giveConsent(archive: string, now = new Date()): { consent: { at: string; preview: string } } | { refused: string } {
+  let pending: { hash?: unknown; at?: unknown };
+  try {
+    pending = JSON.parse(readFileSync(pendingPath(archive), 'utf8')) as { hash?: unknown; at?: unknown };
+  } catch {
+    return { refused: 'no preview has been shown yet' };
+  }
+  if (typeof pending.hash !== 'string' || typeof pending.at !== 'string') return { refused: 'no preview has been shown yet' };
+  if (now.getTime() - Date.parse(pending.at) > PREVIEW_VALID_MS) return { refused: 'the preview is more than an hour old' };
+  const consent = { at: now.toISOString(), preview: pending.hash };
+  const settings = readSettings(archive);
+  if (!writeSettings(archive, { ...settings, enabled: true, consent })) return { refused: 'the settings could not be written' };
+  return { consent };
+}
+
+/** Turn model reads off, and forget the yes: turning them on again needs a new preview. */
+export function withdrawConsent(archive: string): boolean {
+  const { consent: _gone, ...rest } = readSettings(archive);
+  return writeSettings(archive, { ...rest, enabled: false });
 }
 
 /** Write the settings only. The one user-initiated write; a background pass never touches it. */
@@ -350,15 +401,20 @@ export function tallyByDimension(state: JudgeState): { dimension: string; count:
   return [...by].map(([dimension, count]) => ({ dimension, count }));
 }
 
-/** Has the one-time spend disclosure been shown? A marker file, so a store rebuild cannot re-show it. */
+/**
+ * Has the one-time notice been shown? A marker file, so a store rebuild cannot re-show it. Its name changed
+ * with D72, so an install that saw the old "it is on" notice sees once that reads are paused.
+ */
+const DISCLOSED = 'disclosed-paused';
+
 export function hasDisclosed(archive: string): boolean {
-  return existsSync(join(archive, 'disclosed'));
+  return existsSync(join(archive, DISCLOSED));
 }
 
 export function markDisclosed(archive: string): void {
   try {
     mkdirSync(archive, { recursive: true, mode: 0o700 });
-    writeFileSync(join(archive, 'disclosed'), new Date().toISOString(), { mode: 0o600 });
+    writeFileSync(join(archive, DISCLOSED), new Date().toISOString(), { mode: 0o600 });
   } catch {
     // Worst case the notice shows twice. Never worth failing a command over.
   }

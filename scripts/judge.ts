@@ -9,7 +9,7 @@ import { basename } from 'node:path';
 import { resolveConfig } from '../src/config.ts';
 import { discoverTranscripts } from '../src/read.ts';
 
-import { readJudgeState, recordPass } from '../src/judge/state.ts';
+import { readJudgeState, readsOn, recordPass } from '../src/judge/state.ts';
 import { clean, JUDGE_DEADLINE_MS } from '../src/jobs.ts';
 import { runJob, type Outcome } from '../src/supervise/index.ts';
 import { packBatches, planRound, runBatch, type BatchFailure } from '../src/judge/run.ts';
@@ -51,7 +51,7 @@ async function drain(holds: () => boolean, limits: boolean): Promise<Outcome> {
     if (!holds()) return { status: 'ok' };
     // Dismissed findings included, so the model is not invited to report them again.
     const state = readJudgeState(config.archive, { dismissed: 'include' });
-    if (!state.settings.enabled) return { status: 'ok' };
+    if (!readsOn(state.settings)) return { status: 'ok' };
 
     // No change in ledger or part cursors since last round means another round would repeat it.
     const progress = JSON.stringify([state.ledger, state.parts ?? {}]);

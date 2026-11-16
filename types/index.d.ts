@@ -122,7 +122,11 @@ export type PaneData = {
   progress?: PaneProgress;
   /** The rules Claude was given in this project, and nearby ones it never sees (D71). */
   rules?: PaneRules;
+  /** The most recent model calls: a record, never their text (D73). */
+  sent?: PaneSent[];
 };
+
+export type PaneSent = { id: number; at: string; stage: 'extract' | 'label'; model: string; chars: number; tokensIn?: number; sessions: number };
 
 /** One instruction file Claude Code loaded here. `lines`: its current text, read live and redacted. */
 export type PaneRuleFile = {
@@ -147,6 +151,20 @@ export type PaneMemory = {
   listed: boolean;
   lines?: string[];
   total?: number;
+};
+
+/** `judge --preview --json`: the packets the first model read would send, and the terms of a yes. */
+export type PanePreview = {
+  first: { text: string; tokens: number; sessions: { sessionId: string; turns: number; chars: number }[] }[];
+  then: { sessions: number; tokens: number };
+  model: string;
+  dailyTokens: number;
+  catchUp: number;
+  hash: string;
+  /** Absent when showing a call already made. */
+  terms?: { to: string; costs: string; costsNote: string; redaction: string; lasts: string };
+  /** Set when this is a call already made, rebuilt from its transcript (D73). */
+  sent?: { at: string; matched: boolean; note?: string; reason?: string };
 };
 
 export type PaneRuleCheck =
@@ -179,6 +197,10 @@ declare module 'claude-code' {
       excerpts: Shaped<Record<string, { around: number; excerpt?: PaneExcerpt }>>;
       /** The animation's frame, ticking only while something is loading or reading. */
       frame: Shaped<number>;
+      /** What the next model read would send, while the person is looking at it (D72). Never persisted text. */
+      preview: Shaped<PanePreview | null>;
+      /** "Not now" on the model reads card: it folds into the Health tab. */
+      readsCardHidden: Shaped<boolean>;
     };
   }
 }

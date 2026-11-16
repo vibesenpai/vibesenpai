@@ -1,20 +1,19 @@
 /** `judge`: status, backlog, and the on/off switch for the model pass. */
 
-import { readFileSync } from 'node:fs';
 import { bold, dim } from '../style.ts';
-import { basename, join } from 'node:path';
-import { discoverTranscripts, sessionSizes } from '../read.ts';
-import { readJudgeState, writeSettings } from '../judge/state.ts';
+import { join } from 'node:path';
+import { sessionSizes } from '../read.ts';
+import { giveConsent, readJudgeState, readsOn, withdrawConsent, writeSettings } from '../judge/state.ts';
+import { previewNextPacket } from '../judge/preview.ts';
+import { READS_COST, READS_LAST, READS_REDACTION, READS_SHORT, READS_WHERE } from '../judge/terms.ts';
 import { pendingWork } from '../judge/schedule.ts';
 import { clean, jobsFor } from '../jobs.ts';
 import { releaseHold, supervise, type JobSpec } from '../supervise/index.ts';
 import type { Config } from '../config.ts';
-import { renderExtract } from '../judge/prompt.ts';
-import { buildSession, estimateTokens, JUDGE_OVERHEAD_TOKENS } from '../judge/packet.ts';
-import { parseTranscript, withFullText } from '../parsers/claude-code.ts';
 import { dollars, duration, human, plural } from '../format.ts';
 import { resetCatchUp, todayLeft, waitingOnRequest } from '../judge/limits.ts';
-import { readGated, readSpend, withStore } from '../store.ts';
+import { readGated, readSent, readSentOne, readSpend, withStore } from '../store.ts';
+import { rebuildSent } from '../judge/sent.ts';
 import { type Argv, configFromFlags } from './common.ts';
 
 /** Start the judge now through the supervisor, as the Stop hook would. False if a pass already holds it. */
@@ -33,7 +32,7 @@ export function cmdJudge(a: Argv): number {
   if (f['status'] === true) {
     const { judged, pending, unread, behind } = pendingWork(state, sessionSizes(config.sources));
 
-    console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
+    console.log(`judge: model reads ${readsOn(state.settings) ? 'on' : 'off until you say yes'}, model ${state.settings.model}`);
     console.log('');
 
     // An unreadable store has no count; printing `judged 0` would be a false report.
@@ -62,9 +61,9 @@ export function cmdJudge(a: Argv): number {
       // The `Stop` hook triggers the pass.
       console.log(
         `  ${dim(
-          state.settings.enabled
+          readsOn(state.settings)
             ? 'read in the background from when a turn ends, within the daily limit.'
-            : 'disabled — nothing will be read or sent.',
+            : 'off until you say yes: nothing will be read or sent. /vibesenpai:judge on shows what would be.',
         )}`,
       );
     }
@@ -118,8 +117,8 @@ export function cmdJudge(a: Argv): number {
       console.log('nothing pending — every session is up to date');
       return 0;
     }
-    if (!state.settings.enabled) {
-      console.log('the judge is disabled; nothing would run');
+    if (!readsOn(state.settings)) {
+      console.log('model reads are off until you say yes; nothing would run');
       return 1;
     }
     if (f['apply'] !== true) {
@@ -145,8 +144,8 @@ export function cmdJudge(a: Argv): number {
       console.log('would disable the judge. re-run with --apply.');
       return 0;
     }
-    writeSettings(config.archive, { ...state.settings, enabled: false });
-    console.log('judge disabled. nothing further will be sent.');
+    withdrawConsent(config.archive);
+    console.log('Model reads are off. Nothing further will be sent. Turning them on again shows a new preview.');
     return 0;
   }
 
@@ -173,62 +172,108 @@ export function cmdJudge(a: Argv): number {
     return 0;
   }
 
-  // Priced from a real packet, not an average.
-  const sessions = [];
-  for (const source of discoverTranscripts(config.sources).slice(0, 5)) {
-    const id = basename(source, '.jsonl');
-    try {
-      const r = withFullText(() => parseTranscript(readFileSync(source, 'utf8').split('\n'), id));
-      const ev = [...r.result.events].sort((x, y) => x.seq - y.seq);
-      if (ev.length === 0) continue;
-      const p = buildSession(id, ev, r.fullText);
-      if (p.packet.turns.length > 0) sessions.push(p);
-    } catch {
-      // Unreadable here is not an error; the runner counts those.
+  // What was sent: the record of each call, and its text rebuilt from the transcript (DECISIONS.md D73).
+  if (f['sent'] === true) {
+    const limit = Number(f['limit'] ?? 20);
+    const rows = withStore(config.archive, (db) => readSent(db, Number.isFinite(limit) && limit > 0 ? limit : 20)) ?? [];
+    if (f['json'] === true) {
+      process.stdout.write(`${JSON.stringify(rows.map(({ recipes, ...r }) => ({ ...r, sessions: Array.isArray(recipes) ? recipes.length : 0 })))}\n`);
+      return 0;
     }
+    if (rows.length === 0) {
+      console.log('Nothing has been sent.');
+      return 0;
+    }
+    for (const r of rows) {
+      const sessions = Array.isArray(r.recipes) ? `${plural(r.recipes.length, 'session')}, ` : '';
+      console.log(`${r.id}  ${r.at.slice(0, 16).replace('T', ' ')}  step ${r.stage === 'extract' ? 1 : 2}  ${sessions}${r.chars.toLocaleString()} characters, ${(r.tokensIn ?? 0).toLocaleString()} tokens in, ${r.model}`);
+    }
+    console.log(dim('\n  `judge --sent-view <id>` rebuilds a step 1 call from its transcript and checks it against what was sent.'));
+    return 0;
   }
-
-  const packetTokens = sessions.length === 0 ? 0 : estimateTokens(renderExtract(sessions));
-
-  console.log(`judge · ${state.settings.enabled ? 'enabled' : 'disabled'} · model ${state.settings.model}`);
-  console.log('');
-  console.log('  what one pass would send');
-  console.log(`    stage 1  ${sessions.length} session(s) · ~${packetTokens.toLocaleString()} tokens of transcript`);
-  // Stage 2 reads stage 1's records, so its packet is small, but it pays the overhead again.
-  console.log('    stage 2  the episodes stage 1 found · a few hundred tokens each');
-  // The overhead is Claude Code's own system prompt and tools; not ours to shrink.
-  console.log(`    ${JUDGE_OVERHEAD_TOKENS.toLocaleString()} tokens of invocation overhead per stage, whatever we send`);
-  console.log('    output is roughly 98% thinking — measured, not estimated');
-  console.log('');
-  console.log(`  cadence  every ~${state.settings.cadence} turns of new transcript`);
-  console.log(`  ceiling  ${state.settings.maxBatchTokens.toLocaleString()} tokens per batch`);
-  if (state.usage.calls > 0) {
+  if (typeof f['sent-view'] === 'string') {
+    const row = withStore(config.archive, (db) => readSentOne(db, Number(f['sent-view'])));
+    if (row === undefined) {
+      console.log('No such call.');
+      return 1;
+    }
+    const back = rebuildSent(row);
+    if (f['json'] === true) {
+      process.stdout.write(`${JSON.stringify({ row: { ...row, recipes: undefined }, back })}\n`);
+      return 0;
+    }
+    if (!back.ok) {
+      console.log(`Not shown: ${back.reason}.`);
+      return 0;
+    }
+    console.log(back.matched ? 'Exactly what was sent (it hashes to the record of the call):' : `${back.note ?? 'This differs from what was sent.'}`);
     console.log('');
-    console.log(
-      `  spent so far  ${state.usage.calls} call(s) · ` +
-        `${state.usage.inputTokens.toLocaleString()} in · ` +
-        `${state.usage.outputTokens.toLocaleString()} out`,
-    );
-  }
-  console.log(`  limits   ${human(state.settings.dailyTokens)} tokens a day · catch-up on ${state.settings.catchUp} past sessions`);
-
-  if (f['dry-run'] === true) {
-    console.log('\n  --dry-run: nothing was sent.');
-    return 0;
-  }
-  if (f['enable'] !== true) {
-    console.log('\n  --enable to turn it on, --dry-run to see a packet, --disable to stop.');
-    return 0;
-  }
-  if (f['apply'] !== true) {
-    console.log('\n  nothing written. re-run with --enable --apply to turn it on.');
+    console.log(back.text);
     return 0;
   }
 
-  writeSettings(config.archive, { ...state.settings, enabled: true });
-  // Enabling is also the explicit act that releases a hold after repeated paid failures.
-  releaseHold(config.archive, 'judge');
-  console.log('\n  judge enabled. it runs detached, after your turn ends.');
-  console.log('  /vibesenpai:judge off stops it.');
+  // What the next read would send, built by the pass's own code and sent nowhere (src/judge/preview.ts).
+  if (f['preview'] === true && f['json'] === true) {
+    process.stdout.write(`${JSON.stringify({ ...previewNextPacket(config), terms: READS_SHORT })}\n`);
+    return 0;
+  }
+
+  // The person's yes: refused unless a preview was built in the last hour (DECISIONS.md D72).
+  if (f['yes'] === true) {
+    if (f['apply'] !== true) {
+      console.log('would turn model reads on. re-run with --yes --apply.');
+      return 0;
+    }
+    const r = giveConsent(config.archive);
+    if ('refused' in r) {
+      console.log(`model reads stay off: ${r.refused}. /vibesenpai:judge on shows the preview first.`);
+      return 1;
+    }
+    // A yes is also the explicit act that releases a hold after repeated paid failures.
+    releaseHold(config.archive, 'judge');
+    console.log('Model reads are on.');
+    console.log(READS_LAST);
+    return 0;
+  }
+
+  const on = readsOn(state.settings);
+  console.log(`judge: model reads ${on ? 'on' : 'off until you say yes'}, model ${state.settings.model}`);
+  console.log(`  limits   ${human(state.settings.dailyTokens)} tokens a day, catch-up on ${state.settings.catchUp} past sessions`);
+  if (state.usage.calls > 0) {
+    console.log(`  spent so far  ${state.usage.calls} call(s), ${state.usage.inputTokens.toLocaleString()} in, ${state.usage.outputTokens.toLocaleString()} out`);
+  }
+
+  if (f['dry-run'] === true || f['enable'] === true) {
+    // The dry run shows the text itself, so it records nothing; `on` records the preview a yes will refer to.
+    const p = previewNextPacket(config, f['dry-run'] !== true);
+    console.log('');
+    console.log(READS_WHERE);
+    if (p.first.length === 0) {
+      console.log('Nothing is waiting to be read right now.');
+    } else {
+      const ids = p.first.flatMap((x) => x.sessions);
+      const tokens = p.first.reduce((n, x) => n + x.tokens, 0);
+      console.log(`The first read would send ${plural(ids.length, 'session')} in ${plural(p.first.length, 'packet')}, about ${tokens.toLocaleString()} tokens.`);
+      console.log(`After that, the reads would go through ${plural(p.then.sessions, 'session')} waiting now, about ${human(p.then.tokens)} tokens in all.`);
+    }
+    console.log(READS_REDACTION);
+    console.log('');
+    if (f['dry-run'] === true) {
+      for (const [n, x] of p.first.entries()) {
+        console.log(`----- packet ${n + 1} of ${p.first.length}: ${x.sessions.map((s) => s.sessionId.slice(0, 8)).join(', ')} -----`);
+        console.log(x.text);
+      }
+      console.log('\n--dry-run: nothing was sent.');
+      return 0;
+    }
+    console.log('The exact text is in /vibesenpai:insights.');
+    console.log(READS_LAST);
+    console.log(READS_COST);
+    console.log('');
+    console.log(on ? 'Model reads are already on.' : 'Nothing has been sent. /vibesenpai:judge yes turns them on.');
+    return 0;
+  }
+
+  console.log('\n  --enable to see what would be sent, --dry-run to print it, --disable to stop.');
   return 0;
 }

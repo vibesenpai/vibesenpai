@@ -2,7 +2,7 @@
 // The dead-dimension check covers only the README; GRAVEYARD.md and docs/dimensions.md name the dead on purpose.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -208,19 +208,21 @@ describe('the plugin is the only front door', () => {
     expect(readFileSync('README.md', 'utf8')).toContain('/plugin disable vibesenpai');
   });
 
-  it('no user-facing surface still calls the judge opt-in', () => {
-    // The judge ships on. Pages may quote the retired claim, so this matches present-tense claims only.
+  it('no user-facing surface says the model reads are on by default', () => {
+    // Off until a yes given after a preview (DECISIONS.md D72). CHANGELOG may quote the old claim.
     const CLAIMS = [
-      /judge is \*\*off by default\*\*/i,
-      /the opt-in model pass/i,
-      /judge --enable/,
+      /model reads are (\*\*)?on by default/i,
+      /on from installation/i,
+      /installing the plugin turns them on/i,
+      /judge is \*\*on from installation/i,
+      /Nothing has been spent yet/,
     ];
-    const files = [...userFacingDocs(), 'SECURITY.md', 'CHANGELOG.md', 'src/cli.ts'];
+    const files = [...userFacingDocs(), 'SECURITY.md', 'src/cli.ts', 'src/session-block.ts', 'hooks/pane.tsx'];
     for (const file of files) {
       if (!existsSync(file)) continue;
       const text = readFileSync(file, 'utf8');
       for (const claim of CLAIMS) {
-        expect(text, `${file} still describes the judge as opt-in`).not.toMatch(claim);
+        expect(text, `${file} still describes the model reads as on by default`).not.toMatch(claim);
       }
     }
   });
@@ -312,8 +314,8 @@ describe('documented output samples match the shape the code produces', () => {
         encoding: 'utf8',
         env,
       });
-    // The documented sample is the enabled branch.
-    run('judge', '--enable', '--apply');
+    // The documented sample is the branch with model reads on: a yes recorded (DECISIONS.md D72).
+    writeFileSync(join(archive, 'judge-settings.json'), JSON.stringify({ enabled: true, consent: { at: '2026-11-15T00:00:00.000Z', preview: 'test' } }));
     const real = run('judge', '--status');
     const produced = new Set(real.split('\n').map(shape).filter((l) => l !== ''));
 

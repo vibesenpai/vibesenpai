@@ -1,0 +1,21 @@
+flowchart TB
+  T["Your transcript<br/>read in place, never copied"]
+  T --> P1["Step 1 packet<br/>prompts, agent turns, tool output, cut to caps"]
+  P1 --> R1{"Redacted, and redaction<br/>would change nothing more?"}
+  R1 -. no .-> X1["Not sent"]
+  R1 -- yes --> S1["Claude Haiku, step 1<br/>finds where the collaboration broke down,<br/>each with a verbatim quote"]
+  S1 --> N{"Anything found?"}
+  N -. no .-> Done["Session marked read"]
+  N -- yes --> P2["Step 2 packet<br/>step 1's notes, earlier prompts, up to 8 instruction lines<br/>redacted and checked the same way"]
+  P2 --> S2["Claude Haiku, step 2<br/>names the dimension of each moment"]
+  S2 --> Q{"Is the quote in<br/>what was sent?"}
+  Q -. no .-> D["Discarded"]
+  Q -- yes --> L{"Misread intent, constraint violation, other:<br/>does it cite where the expectation was set?"}
+  L -. no .-> K["Kept aside, not shown"]
+  L -- "yes, or another dimension" --> F["Finding, with its dimension<br/>shown in the pane"]
+  classDef model fill:#3b2f5c,stroke:#a08ce0,color:#fff
+  classDef bad color:#f0a39a
+  classDef good stroke:#7fc79a,stroke-width:2px
+  class S1,S2 model
+  class X1,D bad
+  class F good

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { writeAtomic } from '../src/files.ts';
 import { jobsHealth, superviseAll } from '../src/jobs.ts';
 import {
-  hasDisclosed, markDisclosed, readJudgeState, tallyByDimension,
+  hasDisclosed, markDisclosed, readJudgeState, readsOn, tallyByDimension,
 } from '../src/judge/state.ts';
 import { resolveConfig } from '../src/config.ts';
 import { readStanding } from '../src/standing.ts';
@@ -34,9 +34,8 @@ function main(): void {
     standing?.rules?.[projectKey(process.cwd())],
   );
 
-  // One-time disclosure, prepended so it is one message. Only this hook can say it:
-  // the `Stop` hook that spends prints nothing.
-  const notice = state.settings.enabled && !hasDisclosed(config.archive) ? disclosure(state.settings) : '';
+  // One-time notice that model reads are paused, prepended so it is one message. Nothing is sent before a yes.
+  const notice = !readsOn(state.settings) && !hasDisclosed(config.archive) ? disclosure(state.settings) : '';
   if (notice !== '') markDisclosed(config.archive);
 
   const message = `${notice}${block}`;

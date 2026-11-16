@@ -14,7 +14,7 @@ another way.
 | In the pane | Misread intent |
 | Key | `misread_intent` |
 | Tier | model read |
-| On by default | yes, with the model reads (`/vibesenpai:judge off` turns them off) |
+| On by default | no: it comes with the model reads, which wait for your yes (`/vibesenpai:judge on` shows what they send) |
 | Confidence | the model's own rating (high, medium or low), stored per finding |
 
 ## Description

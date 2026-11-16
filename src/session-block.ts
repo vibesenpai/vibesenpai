@@ -174,22 +174,18 @@ function healthLines(jobs: JobHealth[]): string[] {
 }
 
 /**
- * Said once per machine, before anything is spent: the Stop hook that spends runs only after this
- * session's first turn. A statement of fact with the figures and the off switch (.claude/rules/judge.md).
+ * Said once per machine while model reads are paused: nothing is sent until the person sees a preview and
+ * says yes in the pane (DECISIONS.md D72). A statement of fact, with where to look; never a question.
  */
 export function disclosure(settings: { dailyTokens: number; catchUp: number }, env: NodeJS.ProcessEnv = process.env): string {
   // Only these say how the person is billed; their absence proves nothing.
   const api = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX'].some((k) => (env[k] ?? '') !== '');
   return [
     '',
-    'vibesenpai is on. Starting when this turn ends, it reads your sessions in the background',
-    `with Claude Haiku ${api ? 'on your API key' : 'on your plan or API key'}: up to ${settings.catchUp} recent past sessions first,`,
-    `then each new one, at most ${human(settings.dailyTokens)} tokens a day.`,
-    'Nothing has been spent yet.',
-    '',
-    '  /vibesenpai:insights         what it has found',
-    '  /vibesenpai:judge off        stop the model reads; the free checks keep running',
-    '  /plugin disable vibesenpai   stop everything',
+    'vibesenpai is running its free checks. Its model reads are paused, and nothing has been sent.',
+    `Turned on, they read your sessions with Claude Haiku ${api ? 'on your API key' : 'on your plan or API key'} after each turn ends:`,
+    `up to ${settings.catchUp} recent past sessions first, then each new one, at most ${human(settings.dailyTokens)} tokens a day.`,
+    '/vibesenpai:insights shows exactly what they would send, and turns them on if you say yes.',
     '',
   ].join('\n');
 }

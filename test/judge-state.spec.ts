@@ -12,9 +12,9 @@ import { BYTES_PER_TURN, FALLBACK_MS_PER_TOKEN, analysisBlock, dueForJudging, ol
 const archive = (): string => mkdtempSync(join(tmpdir(), 'as-judge-'));
 
 describe('settings live alone, and that is the point', () => {
-  it('is ON, because the trigger moved rather than the consent', () => {
-    expect(DEFAULT_SETTINGS.enabled).toBe(true);
-    expect(readJudgeState(archive()).settings.enabled).toBe(true);
+  it('is off until the person says yes after a preview (DECISIONS.md D72)', () => {
+    expect(DEFAULT_SETTINGS.enabled).toBe(false);
+    expect(readJudgeState(archive()).settings.consent).toBeUndefined();
   });
 
   it('round-trips', () => {

@@ -6,7 +6,7 @@ import { resolveConfig } from '../config.ts';
 import { readCatalog } from '../catalog.ts';
 import { parse } from '../parsers/index.ts';
 import { findSessionSource, projectOf, readSession, sessionSizes } from '../read.ts';
-import { readJudgeState } from '../judge/state.ts';
+import { readJudgeState, readsOn } from '../judge/state.ts';
 import { pendingWork } from '../judge/schedule.ts';
 import { buildSkeletons, renderSkeleton } from '../skeleton.ts';
 import { detectorsFor, unknownDimensions } from '../detect/index.ts';
@@ -134,7 +134,7 @@ export function printSkeletons(
 /** One line, only while a judge pass still has work, so "found nothing" differs from "not done yet". */
 export function judgePendingLine(config: { archive: string; sources: string[] }): string | undefined {
   const state = readJudgeState(config.archive);
-  if (!state.settings.enabled) return undefined;
+  if (!readsOn(state.settings)) return undefined;
   const { pending, seconds } = pendingWork(state, sessionSizes(config.sources));
   if (pending === 0) return undefined;
   return dim(

@@ -15,7 +15,7 @@ It takes no arguments.
 ## What it does
 
 It shows what the history pass and the model reads have already found. It sends nothing to a model and
-spends no tokens; the model reads run only when a turn ends.
+spends no tokens; the model reads, once you have said yes, run only when a turn ends.
 
 ![The session-start summary from vibesenpai, then /vibesenpai:insights and the reply: Insights opened beside the chat.](../../../assets/docs/insights-open.png)
 

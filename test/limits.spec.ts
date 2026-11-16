@@ -143,6 +143,8 @@ describe('only the automatic pass is held to them', () => {
     const sources = mkdtempSync(join(tmpdir(), 'as-src-'));
     mkdirSync(join(sources, 'p'));
     writeFileSync(join(sources, 'p', 'aaaa.jsonl'), '{}\n');
+    // Model reads on, with a yes (DECISIONS.md D72).
+    writeFileSync(join(archive, 'judge-settings.json'), JSON.stringify({ enabled: true, consent: { at: '2026-11-15T00:00:00.000Z', preview: 'test' } }));
     return { archive, sources: [sources] };
   };
   const due = (config: { archive: string; sources: string[] }, limits: boolean): boolean =>

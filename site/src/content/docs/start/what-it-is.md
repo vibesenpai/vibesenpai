@@ -44,9 +44,9 @@ There are two kinds of check:
 | **The free checks** | the structure of a session: edits Claude Code refused and the agent retried, times the prompt cache was rebuilt | nothing |
 | **The model reads** | a redacted part of each session, sent to Claude Haiku on your own Claude Code account (plan or API key), to find what structure cannot show: a broken constraint, a claim that was not true | tokens, within a daily limit |
 
-The model reads are on by default. [`/vibesenpai:judge`](/vibesenpai/commands/judge/) has their
-limits and the off switch. [What leaves your machine](/vibesenpai/start/sends-and-costs/)
-says exactly what is sent. Every kind of finding is listed under
+The model reads are off until you say yes, after seeing exactly what they would send.
+[`/vibesenpai:judge`](/vibesenpai/commands/judge/) has their limits and switches.
+[How your data is used](/vibesenpai/start/sends-and-costs/) says exactly what is sent. Every kind of finding is listed under
 [Dimensions](/vibesenpai/dimensions/).
 
 ## How you use it

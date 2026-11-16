@@ -4,7 +4,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState, PaneMemory, PaneRuleFile } from '../types'
+import type { PaneData, PaneExcerpt, PaneExcerptEntry, PaneFixState, PaneMemory, PanePreview, PaneRuleFile } from '../types'
 import { BLOCK_SHOWN, SPINNER, aboutTime, barRuns, blockCount, clip, clock, costNote, dimensionDocs, docs, finishDay, fixKind, fixOrigin, fixQuote, loadsLater, outcomeText, shortDay, spendText, wrapLines, fixWhere, fixWords, fixesView, human, memoryName, ruleMeta, rulesView, tabStrip, timesIn, view, when, windowText, words, type Item } from './shape.ts'
 import { applyRequest, olderThan } from '../src/harness/claude-code.ts'
 import { MARK_PNG, MARK_SVG } from './logo.ts'
@@ -27,6 +27,8 @@ const pictures = atom({ plugin: 'vibesenpai', key: 'pictures' } as const, false,
 const note = atom({ plugin: 'vibesenpai', key: 'note' } as const, '', { shape: 'note-1' })
 const excerpts = atom({ plugin: 'vibesenpai', key: 'excerpts' } as const, {}, { shape: 'excerpts-1' })
 const frame = atom({ plugin: 'vibesenpai', key: 'frame' } as const, 0, { shape: 'frame-1' })
+const preview = atom({ plugin: 'vibesenpai', key: 'preview' } as const, null, { shape: 'preview-1' })
+const readsCardHidden = atom({ plugin: 'vibesenpai', key: 'readsCardHidden' } as const, false, { shape: 'reads-card-1' })
 
 /** When the person last looked: what "new" is measured from, kept across sessions. */
 const SEEN_KEY = 'lastSeen'
@@ -237,6 +239,45 @@ async function restoreAll($: EngineInterface): Promise<void> {
   await load($)
 }
 
+/** Build what the next model read would send and show it; nothing is sent (src/judge/preview.ts, D72). */
+async function showPreview($: EngineInterface): Promise<void> {
+  await update($, busy, () => true)
+  try {
+    const r = await $.process.run(cli($, ['judge', '--preview', '--json']), { env: ENV, timeoutMs: 120_000 })
+    if (r.exitCode !== 0) {
+      await update($, note, () => 'Could not build the preview. Try again in a moment.')
+      return
+    }
+    await update($, preview, () => JSON.parse(r.stdout) as PanePreview)
+  } catch {
+    await update($, note, () => 'Could not build the preview. Try again in a moment.')
+  } finally {
+    await update($, busy, () => false)
+  }
+}
+
+/** A call already made, rebuilt from its transcript and checked against what was sent (D73). */
+async function viewSent($: EngineInterface, id: number): Promise<void> {
+  const r = await $.process.run(cli($, ['judge', '--sent-view', String(id), '--json']), { env: ENV, timeoutMs: 120_000 }).catch(() => undefined)
+  if (r === undefined || r.exitCode !== 0) {
+    await update($, note, () => 'Could not rebuild that call.')
+    return
+  }
+  const { row, back } = JSON.parse(r.stdout) as { row: { at: string; model: string; sha256: string }; back: { ok: true; text: string; matched: boolean; note?: string; sessions: { sessionId: string; turns: number; chars: number }[] } | { ok: false; reason: string } }
+  const view: PanePreview = back.ok
+    ? { first: [{ text: back.text, tokens: Math.round((back.text.length / 4) * 1.9), sessions: back.sessions }], then: { sessions: 0, tokens: 0 }, model: row.model, dailyTokens: 0, catchUp: 0, hash: row.sha256, sent: { at: row.at, matched: back.matched, ...(back.note === undefined ? {} : { note: back.note }) } }
+    : { first: [], then: { sessions: 0, tokens: 0 }, model: row.model, dailyTokens: 0, catchUp: 0, hash: row.sha256, sent: { at: row.at, matched: false, reason: back.reason } }
+  await update($, preview, () => view)
+}
+
+/** The person's yes, pressed after the preview; the CLI refuses it without a recent preview. */
+async function turnReadsOn($: EngineInterface): Promise<void> {
+  const r = await $.process.run(cli($, ['judge', '--yes', '--apply']), { env: ENV, timeoutMs: 30_000 })
+  await update($, applied, (m) => ({ ...m, [BULK]: r.exitCode === 0 ? 'Model reads are on. They run after each turn ends, until /vibesenpai:judge off.' : 'Model reads stay off: the preview has to be opened again.' }))
+  await update($, preview, () => null)
+  await load($)
+}
+
 /** Where Hide all and Restore all say what they did, in the same map as Apply's messages. */
 const BULK = 'bulk'
 /** Both recompute the standing in the foreground. */
@@ -304,6 +345,8 @@ async function show($: EngineInterface): Promise<boolean> {
     .then(([program, term, tmux]) => drawsPictures(program, term, tmux))
     .catch(() => false)
   await update($, pictures, () => draws)
+  // Opening the pane starts on the tabs, never on a preview left open last time.
+  await update($, preview, () => null)
   const previous = (await $.store.get(SEEN_KEY)) as string | undefined
   await update($, since, () => previous ?? '')
   await $.store.set(SEEN_KEY, new Date().toISOString())
@@ -381,7 +424,7 @@ export const register: Register = on => {
           {message === ''
             ? <Text><Text color="claude">{spin}</Text> Reading your history <Text dimColor>({secs}s)</Text></Text>
             : <Text>{message}</Text>}
-          <Text dimColor>The free checks come first. Model reads begin when this turn ends.</Text>
+          <Text dimColor>The free checks come first.</Text>
         </Box>
       )
     }
@@ -389,6 +432,10 @@ export const register: Register = on => {
     const width = Math.max(30, (e.props as { bodyColumns?: number }).bodyColumns ?? 60)
     const active = (await read($, tab)) as string
     const opened = (await read($, open)) as string[]
+    const looking = (await read($, preview)) as PanePreview | null
+    const cardHidden = (await read($, readsCardHidden)) as boolean
+    // Model reads wait for a yes given after a preview (DECISIONS.md D72); the free checks run regardless.
+    const readsOff = data.spend !== undefined && !data.spend.enabled
     const picks = (await read($, picked)) as string[]
     const seen = (await read($, since)) as string
     const now = new Date()
@@ -444,7 +491,123 @@ export const register: Register = on => {
         )}
       </Box>
     )
-    const showCard = behind && !modelFound
+    const showCard = behind && !modelFound && !readsOff
+    // While reads are off: what they would do, and a way to see exactly what they would send.
+    const consentCard = () => (
+      <Box flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1}>
+        <Text weight="bold">Model reads are off</Text>
+        <Text dimColor>The free checks are running. Model reads find misread intent, broken rules and false claims. They send redacted session text to Claude Haiku on your own Claude Code account, and only after you say yes.</Text>
+        <Box flexDirection="row" gap={1} marginTop={1}>
+          {primary('see-preview', 'See what would be sent', () => showPreview($))}
+          {secondary('reads-not-now', 'Not now', () => update($, readsCardHidden, () => true))}
+        </Box>
+      </Box>
+    )
+    // The exact text the first read would send, in sections; a long one shows its start and says how much more.
+    const PREVIEW_LINES = 300
+    // Sessions listed before "… N more" when a read holds many.
+    const SESSIONS_SHOWN = 5
+    const previewView = (p: PanePreview) => {
+      const sections = p.first.flatMap((pk, n) => {
+        const [head, ...rest] = pk.text.split(/\n(?==== SESSION )/)
+        return [
+          ...(n === 0 ? [{ key: 'instructions', title: 'The instructions vibesenpai gives the model', text: head ?? '', session: false }] : []),
+          ...rest.map((t, i) => {
+            const s = pk.sessions[i]
+            const title = s === undefined ? 'A session' : `Session ${s.sessionId.slice(0, 8)}: ${s.turns} turn${s.turns === 1 ? '' : 's'}, ${s.chars.toLocaleString('en-US')} characters`
+            return { key: `${n}:${i}`, title, text: t, session: true }
+          }),
+        ]
+      })
+      if (p.terms !== undefined) {
+        sections.push({ key: 'second', title: 'What the second step adds', text: "The model's own notes on the first step, not the session again.\nUp to 8 lines of your CLAUDE.md, rules and memory.\nYour earlier prompts in the session, 300 characters each.", session: false })
+      }
+      // A bold label column, so the facts scan down the left edge; an optional dim note under the value.
+      const labelRow = (label: string, value: string, note?: string) => (
+        <Box flexDirection="row">
+          <Box width={12} flexShrink={0}><Text weight="bold">{label}</Text></Box>
+          <Box flexDirection="column" flexShrink={1}>
+            <Text {...(label === 'Costs' ? {} : { dimColor: true })}>{value}</Text>
+            {note !== undefined && <Text dimColor>{note}</Text>}
+          </Box>
+        </Box>
+      )
+      const total = p.first.reduce((x, pk) => x + pk.tokens, 0)
+      const sessions = p.first.reduce((x, pk) => x + pk.sessions.length, 0)
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text weight="bold">{p.sent !== undefined ? `What was sent on ${day(p.sent.at)} at ${clock(p.sent.at)}` : 'What the first model read would send'}</Text>
+            {tertiary('close-preview', 'Close', () => update($, preview, () => null))}
+          </Box>
+          {p.sent !== undefined && (p.sent.reason !== undefined
+            ? <Text>Not shown: {p.sent.reason}.</Text>
+            : <Text {...(p.sent.matched ? { color: 'success' } : {})}>{p.sent.matched ? 'Exactly what was sent: rebuilt from your transcript, it matches the record of the call.' : (p.sent.note ?? 'This differs from what was sent.')}</Text>)}
+          {p.terms !== undefined && (
+            <Box flexDirection="column">
+              {labelRow('To', p.terms.to)}
+              {labelRow('First read', p.first.length === 0 ? 'nothing is waiting to be read right now' : `${sessions} session${sessions === 1 ? '' : 's'}, about ${total.toLocaleString('en-US')} tokens`)}
+              {p.then.sessions > sessions && labelRow('Then', `${p.then.sessions - sessions} more session${p.then.sessions - sessions === 1 ? '' : 's'} waiting, about ${human(p.then.tokens)} tokens`)}
+              {labelRow('Costs', p.terms.costs, p.terms.costsNote)}
+            </Box>
+          )}
+          {p.terms !== undefined && (
+            <Box flexDirection="column">
+              <Text dimColor>{p.terms.redaction}</Text>
+              <Text>{p.terms.lasts}</Text>
+            </Box>
+          )}
+          <Box flexDirection="column">
+            {(() => {
+              const section = (x: (typeof sections)[number], indent: number) => {
+                const k = `preview:${x.key}`
+                const lines = x.text.split('\n')
+                return (
+                  <Box key={k} flexDirection="column" paddingLeft={indent}>
+                    <Button key={k} plain label={`${caret(k)} ${x.title}`} onPress={() => toggle($, k)}>
+                      <Text>{caret(k)} {x.title}</Text>
+                    </Button>
+                    {isOpen(k) && (
+                      <Box flexDirection="column" paddingLeft={4}>
+                        {lines.slice(0, PREVIEW_LINES).map((l) => <Text dimColor>{l.trim() === '' ? ' ' : clip(l, width - 6 - indent)}</Text>)}
+                        {lines.length > PREVIEW_LINES && <Text dimColor>{lines.length - PREVIEW_LINES} more lines not shown.</Text>}
+                      </Box>
+                    )}
+                  </Box>
+                )
+              }
+              // Many sessions fold into one row that opens to the first few, so a long first read stays short.
+              const sessionRows = sections.filter((x) => x.session)
+              const group = 'preview:sessions'
+              const all = isOpen(`${group}:all`)
+              const groupTitle = `The ${sessionRows.length} sessions ${p.sent !== undefined ? 'in this call' : 'it reads first'}`
+              const grouped = sessionRows.length > 1 && (
+                <Box key={group} flexDirection="column">
+                  <Button key={group} plain label={`${caret(group)} ${groupTitle}`} onPress={() => toggle($, group)}>
+                    <Text>{caret(group)} {groupTitle}</Text>
+                  </Button>
+                  {isOpen(group) && (all ? sessionRows : sessionRows.slice(0, SESSIONS_SHOWN)).map((x) => section(x, 4))}
+                  {isOpen(group) && !all && sessionRows.length > SESSIONS_SHOWN && (
+                    <Box paddingLeft={4}>{tertiary(`${group}:all`, `… ${sessionRows.length - SESSIONS_SHOWN} more`, () => toggle($, `${group}:all`))}</Box>
+                  )}
+                </Box>
+              )
+              return [
+                ...sections.filter((x) => x.key === 'instructions').map((x) => section(x, 0)),
+                ...(sessionRows.length === 1 ? sessionRows.map((x) => section(x, 0)) : [grouped]),
+                ...sections.filter((x) => x.key === 'second').map((x) => section(x, 0)),
+              ]
+            })()}
+          </Box>
+          {p.terms !== undefined && (
+            <Box flexDirection="row" gap={1}>
+              {primary('reads-turn-on', 'Turn on', () => turnReadsOn($))}
+              {secondary('reads-not-now-preview', 'Not now', async () => { await update($, preview, () => null); await update($, readsCardHidden, () => true) })}
+            </Box>
+          )}
+        </Box>
+      )
+    }
 
     // Actions are solid. Primary, in the accent colour, is the one action to take, at most one per section;
     // secondary, neutral, is every other action. A dim link only opens or shows something.
@@ -691,6 +854,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column" gap={1}>
           {showCard && readsCard()}
+          {readsOff && !cardHidden && consentCard()}
           {v.newItems.length > 0 && (
             <Box flexDirection="column">
               <Text weight="bold">New since you last looked</Text>
@@ -823,12 +987,30 @@ export const register: Register = on => {
           {today !== undefined && line(['Today', docs('start/sends-and-costs')], `${human(today.tokens)} of ${human(today.limit)} tokens${today.tokens >= today.limit ? '. The limit is reached; reads continue tomorrow.' : ''}`)}
           {sp?.allTime !== undefined && sp.allTime.calls > 0 && line('Spent', spendText(sp.allTime), ...(sp.allTime.usdMicros !== undefined ? [costNote(subscribed ? 'subscription' : sp.billing)] : []))}
           {sp !== undefined && sp.older > 0 && line('Older', `${sp.older} past session${sp.older === 1 ? '' : 's'} not read`)}
-          {sp !== undefined && line(['Model reads', docs('commands/judge')], sp.enabled ? 'On. /vibesenpai:judge off stops them.' : 'Off. /vibesenpai:judge on starts them.')}
+          {sp !== undefined && sp.enabled && line(['Model reads', docs('commands/judge')], 'On, until /vibesenpai:judge off.')}
+          {sp !== undefined && !sp.enabled && (
+            <Box flexDirection="row">
+              <Box width={16} flexShrink={0} flexDirection="row"><Text dimColor>Model reads</Text>{info(docs('start/sends-and-costs'), 'health:Model reads')}</Box>
+              <Text>Off until you say yes.</Text>
+              <Box marginLeft={2}>{secondary('see-preview-health', 'See what would be sent', () => showPreview($))}</Box>
+            </Box>
+          )}
           <Box flexDirection="row">
             <Box width={16} flexShrink={0}><Text dimColor>Dismissed</Text></Box>
             <Text>{data.dismissed ?? 0} finding{data.dismissed === 1 ? '' : 's'}</Text>
             {(data.dismissed ?? 0) > 0 && <Box marginLeft={2}>{secondary('restore-all', 'Restore all', () => restoreAll($))}</Box>}
           </Box>
+          {(data.sent ?? []).length > 0 && (
+            <Box flexDirection="column">
+              <Box flexDirection="row"><Text dimColor>What was sent</Text>{info(docs('start/sends-and-costs'), 'health:sent')}</Box>
+              {(data.sent ?? []).map((x) => (
+                <Box key={`sent:${x.id}`} flexDirection="row" paddingLeft={2} gap={2}>
+                  <Text>{day(x.at)} {clock(x.at)}, step {x.stage === 'extract' ? 1 : 2}{x.stage === 'extract' ? `, ${x.sessions} session${x.sessions === 1 ? '' : 's'}` : ''}, {x.chars.toLocaleString('en-US')} characters</Text>
+                  {x.stage === 'extract' && tertiary(`sent:${x.id}`, 'View', () => viewSent($, x.id))}
+                </Box>
+              ))}
+            </Box>
+          )}
           {sayLines(BULK, width)}
         </Box>
       )
@@ -952,7 +1134,7 @@ export const register: Register = on => {
           <Text color="claude">{strip.top}</Text>
           <Box flexDirection="row">
             {strip.cells.map((c) => (
-              <Button key={`tab:${c.key}`} plain label={c.text.trim()} onPress={() => update($, tab, () => c.key)}>
+              <Button key={`tab:${c.key}`} plain label={c.text.trim()} onPress={async () => { await update($, preview, () => null); await update($, tab, () => c.key) }}>
                 <Text {...(c.active ? { color: 'claude', weight: 'bold' as const } : { dimColor: true })}>{c.text}</Text>
               </Button>
             ))}
@@ -962,7 +1144,7 @@ export const register: Register = on => {
 
         {message !== '' && <Text color="suggestion">{message === RECORDING ? `${spin} ` : ''}{message}</Text>}
 
-        {active === 'fixes' ? fixesTab() : active === 'health' ? healthTab() : active === 'rules' ? rulesTab() : findingsTab()}
+        {looking !== null ? previewView(looking) : active === 'fixes' ? fixesTab() : active === 'health' ? healthTab() : active === 'rules' ? rulesTab() : findingsTab()}
 
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>{'─'.repeat(width)}</Text>

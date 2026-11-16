@@ -188,7 +188,7 @@ process.stdin.on('end', () => process.stdout.write(JSON.stringify({ result: 'thi
 `,
     );
     chmodSync(join(bin, 'claude'), 0o755);
-    writeFileSync(join(archive, 'judge-settings.json'), JSON.stringify({ enabled: true, model: 'haiku', cadence: 50, maxBatchTokens: 60_000, concurrency: 3 }));
+    writeFileSync(join(archive, 'judge-settings.json'), JSON.stringify({ enabled: true, consent: { at: '2026-11-15T00:00:00.000Z', preview: 'test' }, model: 'haiku', cadence: 50, maxBatchTokens: 60_000, concurrency: 3 }));
 
     const env = { ...process.env, PATH: `${bin}:${process.env['PATH'] ?? ''}`, VIBESENPAI_SOURCES: join(root, 'projects'), VIBESENPAI_ARCHIVE: archive, NODE_NO_WARNINGS: '1' };
     for (let i = 0; i < 6; i += 1) {

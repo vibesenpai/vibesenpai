@@ -13,7 +13,7 @@ finding shows where the rule was set and the turn where it was broken.
 | In the pane | Constraint violation |
 | Key | `constraint_violation` |
 | Tier | model read |
-| On by default | yes, with the model reads (`/vibesenpai:judge off` turns them off) |
+| On by default | no: it comes with the model reads, which wait for your yes (`/vibesenpai:judge on` shows what they send) |
 | Confidence | the model's own rating (high, medium or low), stored per finding |
 
 ## Description

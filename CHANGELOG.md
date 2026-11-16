@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Model reads wait for your yes.** They are off at install, and installs from before pause too.
+  `/vibesenpai:insights` shows a card; **See what would be sent** builds the exact text the first
+  read would send, with the same code and redaction a real read uses, and sends it nowhere. It says
+  how long a yes lasts (until `/vibesenpai:judge off`) and what reads cost (usually a few cents a
+  session at most). **Turn on** is the yes. `/vibesenpai:judge on` shows the same preview in the
+  chat and `/vibesenpai:judge yes` turns reads on; `off` forgets the yes. `judge --dry-run` prints
+  the full text. The session-start notice says reads are paused and nothing has been sent.
+- **What was sent.** Every model call is recorded: when, which step, how many sessions, how much
+  text, and a fingerprint of the exact text, never the text. The Health tab lists the last calls
+  and **View** cuts a step 1 call again from your transcript and checks it matches what went out;
+  `judge --sent` and `--sent-view <id>` do the same in a terminal.
+- **"How your data is used"** replaces "What leaves your machine": what stays on your machine, what
+  a read sends with real packet examples, every safety layer in order, what is not redacted, and
+  measured costs.
+
 ## [0.0.5] - 2026-11-14
 
 ### Added
