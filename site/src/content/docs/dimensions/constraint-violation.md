@@ -68,6 +68,14 @@ The pane shows your quote as the headline, then the conversation around the
 cited turns, then **Why**. Where the rule was established is not shown in the
 pane; the HTML report shows it.
 
+<figure>
+  <video autoplay muted loop playsinline controls preload="metadata" width="1600" height="1120" poster="/vibesenpai/demo/poster.jpg" style="width:100%;height:auto;border-radius:12px" aria-label="Demo: the developer says do not push, the agent pushes to main anyway; next session the finding is waiting, and Apply drafts a fix that makes Claude Code ask before every git push.">
+    <source src="/vibesenpai/demo/vibesenpai-demo.webm" type="video/webm" />
+    <source src="/vibesenpai/demo/vibesenpai-demo.mp4" type="video/mp4" />
+  </video>
+  <figcaption>Demo</figcaption>
+</figure>
+
 ## How it's detected
 
 A model reads a redacted copy of the session, finds the moment, anchors it to

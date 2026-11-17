@@ -121,6 +121,16 @@ const faq = [
     </div>
   </section>
 
+  <section class="demo rise r5" aria-label="Demo">
+    <p class="kicker">Demo</p>
+    <video data-demo autoplay muted loop playsinline preload="metadata" width="1600" height="1120"
+      poster={`${base}/demo/poster.jpg`}
+      aria-label="Demo: the developer says do not push, the agent pushes to main anyway; next session the finding is waiting, with the developer's own words and the turn that broke them, and Apply drafts a fix that makes Claude Code ask before every git push.">
+      <source src={`${base}/demo/vibesenpai-demo.webm`} type="video/webm" />
+      <source src={`${base}/demo/vibesenpai-demo.mp4`} type="video/mp4" />
+    </video>
+  </section>
+
   <section class="proof reveal">
     <p class="kicker">A real session from the public test data of <a href="https://github.com/daaain/claude-code-log">claude-code-log</a> (MIT)</p>
     <div class="pair">
@@ -202,6 +212,14 @@ const faq = [
 </div>
 
 <script>
+  // Reduced motion: the demo waits on its poster with controls instead of playing by itself.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    for (const v of document.querySelectorAll<HTMLVideoElement>('[data-demo]')) {
+      v.autoplay = false;
+      v.pause();
+      v.controls = true;
+    }
+  }
   for (const b of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
     b.addEventListener('click', async () => {
       try {
@@ -263,6 +281,13 @@ const faq = [
     background: var(--vs-hat); border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer;
   }
   .install button:hover { filter: brightness(1.1); }
+
+  /* Demo: the full-width recording right under the hero. */
+  .demo { margin-top: clamp(48px, 6vw, 80px); text-align: center; }
+  .demo video {
+    display: block; width: 100%; height: auto; aspect-ratio: 1600 / 1120; background: #0d1117;
+    border-radius: 16px; border: 1px solid var(--vs-line); box-shadow: 0 40px 120px -40px var(--vs-glow);
+  }
 
   /* Proof: the claim, then the reality beside it. */
   .proof { text-align: center; }

@@ -6,6 +6,14 @@ description: Your own words, the turns where the agent went wrong, and a change 
 vibesenpai reads the session transcripts Claude Code already keeps on your disk and shows you
 where the agent went wrong. This page says what a finding contains and what the tool does not do.
 
+<figure>
+  <video autoplay muted loop playsinline controls preload="metadata" width="1600" height="1120" poster="/vibesenpai/demo/poster.jpg" style="width:100%;height:auto;border-radius:12px" aria-label="Demo: the developer says do not push, the agent pushes to main anyway; next session the finding is waiting, and Apply drafts a fix that makes Claude Code ask before every git push.">
+    <source src="/vibesenpai/demo/vibesenpai-demo.webm" type="video/webm" />
+    <source src="/vibesenpai/demo/vibesenpai-demo.mp4" type="video/mp4" />
+  </video>
+  <figcaption>Demo</figcaption>
+</figure>
+
 ## What a finding contains
 
 Each finding is shown in a pane beside the chat, with three parts:

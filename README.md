@@ -18,7 +18,7 @@ not score you and does not tell you how to work.
 [What it shows you](https://vibesenpai.github.io/vibesenpai/start/what-it-is/) ·
 [How your data is used](https://vibesenpai.github.io/vibesenpai/start/sends-and-costs/)
 
-<p align="center"><img src="assets/screenshots/pane-finding.png" width="560" alt="The insights pane. Under Overreach, one finding is open: the developer's words, “Do we even need _generate_html_with_combined_link then?”, the four turns around them, Why the agent built more than the simple link it was asked for, and the fix with Apply."></p>
+<p align="center"><a href="https://vibesenpai.github.io/vibesenpai/"><img src="site/public/demo/vibesenpai-demo.gif" width="800" alt="Demo: the developer says do not push, and the agent pushes to main anyway. Next session, the finding is waiting, with the developer's own words and the turn that broke them, and Apply drafts a fix that makes Claude Code ask before every git push."></a></p>
 
 ## Install
 
