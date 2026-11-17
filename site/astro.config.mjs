@@ -28,6 +28,8 @@ export default defineConfig({
         { tag: 'meta', attrs: { property: 'og:image', content: 'https://vibesenpai.github.io/vibesenpai/og.jpg' } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
         { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://vibesenpai.github.io/vibesenpai/og.jpg' } },
+        // Docs-site page counts only; the plugin sends nothing (start/sends-and-costs).
+        { tag: 'script', attrs: { defer: true, src: 'https://cloud.umami.is/script.js', 'data-website-id': '138ff862-6d71-493b-841a-157932d3886f' } },
       ],
       description:
         "Discover how your agents failed you. vibesenpai reads the sessions already on your disk and shows you where they went wrong: the exact turns, in your own words, and a fix you can apply.",

@@ -206,3 +206,9 @@ says so instead. Step 2 is built from the model's own reply, so only its size an
 | `/vibesenpai:judge off` | stops the model reads and forgets the yes. The free checks keep running |
 | `/plugin disable vibesenpai` | stops everything, hooks included |
 | `VIBESENPAI_DISABLE=1` | the same as disabling, from the environment Claude Code runs in |
+
+## This website
+
+This documentation site counts page visits with [Umami](https://umami.is): no cookies and no
+personal data. That is the website only. The plugin itself sends nothing except the model reads
+described above, and only after your yes.
