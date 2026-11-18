@@ -31,7 +31,7 @@ In Claude Code:
 
 It needs Node 22.13 or later on your PATH, and Claude Code 2.1.299 or later.
 
-## Getting started
+## Usage
 
 1. **Keep working.** The free checks read every session, on your machine, and
    send nothing.
