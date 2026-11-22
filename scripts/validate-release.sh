@@ -73,11 +73,15 @@ pass "claude plugin validate accepts the zip"
 
 npm_latest=$(npm view vibesenpai dist-tags.latest 2>/dev/null || true)
 if [ "$npm_latest" = "$version" ]; then
-  files=$(npm view "vibesenpai@$version" dist.fileCount)
-  [ "$files" -le 3 ] || fail "npm vibesenpai@$version holds $files files; the pointer package holds README, LICENSE, package.json"
-  pass "npm latest is $version, a pointer with no code"
+  meta=$(npm view "vibesenpai@$version" --json)
+  files=$(printf '%s' "$meta" | json "j.dist.fileCount")
+  [ "$files" -le 5 ] || fail "npm vibesenpai@$version holds $files files; the installer holds 5 (DECISIONS.md D74)"
+  [ -z "$(printf '%s' "$meta" | json "j.scripts")" ] || fail "npm vibesenpai@$version has scripts; the installer has none"
+  [ -z "$(printf '%s' "$meta" | json "j.dependencies")" ] || fail "npm vibesenpai@$version has dependencies; the installer has none"
+  [ "$(printf '%s' "$meta" | json "j.bin?.vibesenpai")" != "" ] || fail "npm vibesenpai@$version has no vibesenpai command"
+  pass "npm latest is $version: the installer, with no scripts or dependencies"
 else
-  warn "npm latest is '${npm_latest:-none}', not $version: publish the pointer package"
+  warn "npm latest is '${npm_latest:-none}', not $version: publish npm/ with npm publish"
 fi
 
 for p in "" start/install/ dimensions/; do
