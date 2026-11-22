@@ -43,6 +43,14 @@ source. The install command does not change.
 A release requires Claude Code 2.1.224 or later, the version that added the
 `archive` source.
 
+## The npm package
+
+`npx vibesenpai install` comes from the `npm/` folder: a small installer that shows Claude Code's
+own install command, asks, and runs it ([DECISIONS.md D74](https://github.com/vibesenpai/vibesenpai/blob/main/DECISIONS.md)).
+It has no install script and no dependencies, and its version matches the plugin's (a test
+checks). It is published by hand after a release's tag, with `npm publish` from `npm/`. npm's
+download counts are not install counts: most come from mirrors on the day a version is published.
+
 ## What does one download mean?
 
 | event | downloads the zip |

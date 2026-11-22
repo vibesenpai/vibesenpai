@@ -14,8 +14,26 @@ In Claude Code:
 /plugin install vibesenpai@vibesenpai
 ```
 
-That is all. There is nothing to install from npm and nothing to configure. The plugin brings its
-own hooks and commands, and your `~/.claude/settings.json` is not touched.
+That is all. There is nothing to configure. The plugin brings its own hooks and commands, and
+vibesenpai never writes your `~/.claude/settings.json`.
+
+### From a terminal
+
+```
+npx vibesenpai install
+```
+
+It checks for Node 22.13+ and Claude Code 2.1.299+, shows the one command it will run, and asks
+before running it:
+
+```
+claude plugin install vibesenpai --marketplace vibesenpai/vibesenpai
+```
+
+That is Claude Code's own installer: it adds the marketplace and installs the plugin. The npm
+package has no install script, no dependencies and no network calls of its own, and writes no
+files. `--scope user|project|local` picks where Claude Code installs it (default: user). With no
+terminal attached, such as in a script, add `--yes` or run that command yourself.
 
 ## Requirements
 

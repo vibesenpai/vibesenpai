@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`npx vibesenpai install`.** From a terminal, it checks for Node 22.13+ and Claude Code
+  2.1.299+, shows the command it will run (`claude plugin install vibesenpai --marketplace
+  vibesenpai/vibesenpai`), and asks before running it. `--scope` picks where Claude Code installs
+  it; `--yes` skips the question. The npm package has no install script and no dependencies, and
+  writes nothing itself.
+
 ## [0.1.0] - 2026-11-16
 
 ### Changed

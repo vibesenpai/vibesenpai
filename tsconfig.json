@@ -25,11 +25,14 @@
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
     "sourceMap": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true
   },
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "npm/**/*.mjs"
   ]
 }

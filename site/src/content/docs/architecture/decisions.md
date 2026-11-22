@@ -157,6 +157,16 @@ transcript and checked against the fingerprint taken when it was sent.
 **Cost:** once Claude Code deletes a transcript, its calls can still be listed but
 no longer shown.
 
+## npm installs only through Claude Code, after a yes (D74)
+
+**Why:** `npx vibesenpai install` gives directories and terminal users one command to copy. It
+shows Claude Code's own install command, asks, and runs it; it writes nothing itself. There is
+no install script, because installing into your agent from `npm install` would act without a
+yes, the thing this tool exists to show.
+
+**Cost:** one more package to publish with each release, and a terminal install still needs
+Claude Code on your PATH.
+
 ---
 
 Detectors that were built and then removed are in

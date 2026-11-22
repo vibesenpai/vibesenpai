@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6.43.0/schema.json",
-  "entry": ["scripts/*.ts", "hooks/pane.tsx", "hooks/pane.test.tsx", "test/**/*.ts"],
-  "project": ["src/**/*.ts", "scripts/**/*.ts", "hooks/**/*.{ts,tsx}", "test/**/*.ts"],
+  "entry": ["scripts/*.ts", "hooks/pane.tsx", "hooks/pane.test.tsx", "test/**/*.ts", "npm/bin/*.mjs"],
+  "project": ["src/**/*.ts", "scripts/**/*.ts", "hooks/**/*.{ts,tsx}", "test/**/*.ts", "npm/**/*.mjs"],
   "ignoreDependencies": ["claude-code"]
 }

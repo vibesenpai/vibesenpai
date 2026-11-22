@@ -282,3 +282,19 @@ gh api repos/vibesenpai/vibesenpai/releases \
 
 *Extracted from the planning document (2026-10-12/15). Reasoning is kept with each
 conclusion deliberately — see [DECISIONS.md](../DECISIONS.md) for the index.*
+
+### npm installer (2026-11-21)
+
+`npx vibesenpai install` replaces the npm pointer package, which held no code (DECISIONS.md D74).
+It prints and runs one Claude Code command, `claude plugin install vibesenpai --marketplace
+vibesenpai/vibesenpai`, after a `[y/N]`; with no terminal it needs `--yes`. A postinstall was
+rejected: it would install into the developer's agent without a yes, pnpm 10 and Bun skip it, and
+it is what npm malware looks like. `claude-code-mods` and `claude-mem` both install through an
+explicit `npx … install` and neither has an install script (npm metadata, 2026-11-21).
+
+Observed in a throwaway `CLAUDE_CONFIG_DIR` on Claude Code 2.1.328: the command clones the repo to
+add the marketplace, installs 0.1.0 at user scope and exits 0; run again, it exits 0 with "already
+installed". So a terminal install shows up as a clone and a zip download, like one from `/plugin`.
+
+Release step: after the tag, `npm publish` from `npm/`. A test keeps `npm/package.json`'s version
+equal to the plugin's.

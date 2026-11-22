@@ -1,0 +1,31 @@
+{
+  "name": "vibesenpai",
+  "version": "0.1.0",
+  "description": "Discover how your agents failed you. A Claude Code plugin: `npx vibesenpai install` installs it through Claude Code's own installer, after you say yes.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "vibesenpai": "bin/vibesenpai.mjs"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vibesenpai/vibesenpai.git",
+    "directory": "npm"
+  },
+  "homepage": "https://vibesenpai.github.io/vibesenpai/",
+  "bugs": "https://github.com/vibesenpai/vibesenpai/issues",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "claude-code-mod",
+    "coding-agent",
+    "ai-agent"
+  ]
+}
