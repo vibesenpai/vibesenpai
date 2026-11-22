@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-22
+
 ### Added
 
 - **`npx vibesenpai install`.** From a terminal, it checks for Node 22.13+ and Claude Code
@@ -14,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vibesenpai/vibesenpai`), and asks before running it. `--scope` picks where Claude Code installs
   it; `--yes` skips the question. The npm package has no install script and no dependencies, and
   writes nothing itself.
+
+### Changed
+
+- **Install leads with `npx vibesenpai install`** in the README, the docs and the home page; the
+  two `/plugin` commands inside Claude Code follow it.
 
 ## [0.1.0] - 2026-11-16
 
@@ -181,7 +188,8 @@ candidates were the agent's own prior edit; `permission_denied`, where only 6
 of 398 denials were ever re-issued; and `file_churn`, which fires on 48% of
 sessions and could never be shown to be waste.
 
-[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/vibesenpai/vibesenpai/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.5...v0.1.0
 [0.0.5]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4-alpha...v0.0.4

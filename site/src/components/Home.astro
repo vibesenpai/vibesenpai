@@ -5,6 +5,7 @@ import sensei from '../assets/home/sensei.jpg';
 import Shot from './Shot.astro';
 
 const base = '/vibesenpai';
+const npx = 'npx vibesenpai install';
 const install = '/plugin marketplace add vibesenpai/vibesenpai\n/plugin install vibesenpai@vibesenpai';
 
 const values = [
@@ -111,9 +112,17 @@ const faq = [
         <a class="primary" href={`${base}/start/install/`}>Get started</a>
         <a class="quiet" href="#dimensions">What it looks for</a>
       </div>
-      <div class="install rise r4">
-        <pre><code>{install}</code></pre>
-        <button type="button" data-copy={install}>Copy</button>
+      <div class="installs rise r4">
+        <p class="via">From a terminal</p>
+        <div class="install">
+          <pre><code>{npx}</code></pre>
+          <button type="button" data-copy={npx}>Copy</button>
+        </div>
+        <p class="via">Or inside Claude Code</p>
+        <div class="install second">
+          <pre><code>{install}</code></pre>
+          <button type="button" data-copy={install}>Copy</button>
+        </div>
       </div>
     </div>
     <div class="art rise r5">
@@ -203,9 +212,17 @@ const faq = [
 
   <section class="closing reveal">
     <h2>See where your last session went wrong.</h2>
-    <div class="install">
-      <pre><code>{install}</code></pre>
-      <button type="button" data-copy={install}>Copy</button>
+    <div class="installs">
+      <p class="via">From a terminal</p>
+      <div class="install">
+        <pre><code>{npx}</code></pre>
+        <button type="button" data-copy={npx}>Copy</button>
+      </div>
+      <p class="via">Or inside Claude Code</p>
+      <div class="install second">
+        <pre><code>{install}</code></pre>
+        <button type="button" data-copy={install}>Copy</button>
+      </div>
     </div>
     <div class="next"><a class="primary" href={`${base}/start/install/`}>Get started</a></div>
   </section>
@@ -281,6 +298,12 @@ const faq = [
     background: var(--vs-hat); border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer;
   }
   .install button:hover { filter: brightness(1.1); }
+  /* Two ways in: npx first, the plugin commands below it in a quieter box. */
+  .installs { display: inline-flex; flex-direction: column; align-items: stretch; text-align: left; max-width: 100%; }
+  .installs .via { margin: 0 0 8px; font: 500 14px var(--sl-font); color: var(--vs-quiet); }
+  .installs .install + .via { margin-top: 18px; }
+  .install.second { background: var(--vs-panel); border-color: var(--vs-line); box-shadow: none; }
+  .install.second button { background: transparent; color: var(--vs-text); border: 1px solid var(--vs-line); }
 
   /* Demo: the full-width recording right under the hero. */
   .demo { margin-top: clamp(48px, 6vw, 80px); text-align: center; }

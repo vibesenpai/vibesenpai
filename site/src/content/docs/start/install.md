@@ -1,23 +1,13 @@
 ---
 title: Install and update
-description: Two commands in Claude Code, what happens the first time, and how to update or turn it off.
+description: One command in a terminal or two in Claude Code, what happens the first time, and how to update or turn it off.
 ---
 
 How to install the plugin, what happens after you do, and how to update it or turn it off.
 
 ## Install
 
-In Claude Code:
-
-```
-/plugin marketplace add vibesenpai/vibesenpai
-/plugin install vibesenpai@vibesenpai
-```
-
-That is all. There is nothing to configure. The plugin brings its own hooks and commands, and
-vibesenpai never writes your `~/.claude/settings.json`.
-
-### From a terminal
+From a terminal:
 
 ```
 npx vibesenpai install
@@ -34,6 +24,18 @@ That is Claude Code's own installer: it adds the marketplace and installs the pl
 package has no install script, no dependencies and no network calls of its own, and writes no
 files. `--scope user|project|local` picks where Claude Code installs it (default: user). With no
 terminal attached, such as in a script, add `--yes` or run that command yourself.
+
+### Inside Claude Code
+
+Or install from the plugin marketplace inside Claude Code:
+
+```
+/plugin marketplace add vibesenpai/vibesenpai
+/plugin install vibesenpai@vibesenpai
+```
+
+Either way there is nothing to configure. The plugin brings its own hooks and commands, and
+vibesenpai never writes your `~/.claude/settings.json`.
 
 ## Requirements
 

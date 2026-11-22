@@ -22,17 +22,19 @@ not score you and does not tell you how to work.
 
 ## Install
 
-In Claude Code:
+From a terminal:
+
+```
+npx vibesenpai install
+```
+
+It shows Claude Code's own install command and asks before running it.
+
+Or install from the plugin marketplace inside Claude Code:
 
 ```
 /plugin marketplace add vibesenpai/vibesenpai
 /plugin install vibesenpai@vibesenpai
-```
-
-Or from a terminal, where it shows Claude Code's own install command and asks before running it:
-
-```
-npx vibesenpai install
 ```
 
 It needs Node 22.13 or later on your PATH, and Claude Code 2.1.299 or later.
