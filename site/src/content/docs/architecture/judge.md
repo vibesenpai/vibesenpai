@@ -114,8 +114,12 @@ weaker test passes for text that redaction would still change.
 - **Fencing.** A pass holds a lease from the job supervisor. Before every model
   call and every write it checks it still holds it. A replaced pass, for
   example one reclaimed as hung, sends and writes nothing more.
+- **Consent before every call.** A pass also checks that reads are still on
+  before each model call. Turning them off stops it before its next call; a call
+  already in flight finishes, and its sessions stay unread.
 - **Isolation.** The model runs in a child process with:
   - `VIBESENPAI_DISABLE=1`, so the child's own hooks do nothing
   - a working directory that transcript discovery skips, so the judge never
     reads its own sessions as yours
-  - `--allowed-tools ''`, so it can read and answer but cannot act
+  - `--tools ''`, so it has no tools and can only answer
+  - `--strict-mcp-config`, so none of your MCP servers load

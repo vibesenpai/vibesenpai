@@ -241,12 +241,15 @@ export type BatchFailure = { reason: string; paid: boolean };
  * One batch: extract, label if anything was found, record.
  * Returns the failure rather than recording it, so one rate limit across a round counts once.
  * `holds` is the lease check: false means another pass took over, so nothing more is sent or written.
+ * `consented` is checked before each call: false means reads were turned off, so the batch ends
+ * quietly, sends nothing more and records nothing.
  */
 export async function runBatch(
   archive: string,
   state: JudgeState,
   batch: Batch,
   holds: () => boolean = () => true,
+  consented: () => boolean = () => true,
 ): Promise<BatchFailure | undefined> {
   let callMs: number | undefined;
   let paid = false;
@@ -272,6 +275,7 @@ export async function runBatch(
   try {
     if (wouldLeak(extractPacket)) return fail(redactionRefusal(ids));
     if (!holds()) return fenced();
+    if (!consented()) return undefined;
 
     const extracted = await callModelAsync(extractPacket, state.settings.model, { timeoutMs: TIMEOUT_MS, maxBufferBytes: 32 * 1024 * 1024 });
     if (extracted?.durationMs !== undefined) callMs = (callMs ?? 0) + extracted.durationMs;
@@ -302,6 +306,8 @@ export async function runBatch(
     const labelPacket = renderLabel(episodes, lookbacks);
     if (wouldLeak(labelPacket)) return fail(redactionRefusal(ids));
     if (!holds()) return fenced();
+    // Reads turned off during the extract call: nothing further is sent, and the bytes stay unread.
+    if (!consented()) return undefined;
 
     const labelled = await callModelAsync(labelPacket, state.settings.model, { timeoutMs: TIMEOUT_MS, maxBufferBytes: 32 * 1024 * 1024 });
     if (labelled?.durationMs !== undefined) callMs = (callMs ?? 0) + labelled.durationMs;

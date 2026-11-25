@@ -60,6 +60,7 @@ let stdinBytes = 0;
 process.stdin.on('data', (d) => { stdinBytes += d.length; });
 process.stdin.on('end', () => setTimeout(() => {
   appendFileSync(${JSON.stringify(log)}, 'io ' + stdinBytes + ' ' + process.argv.slice(2).join(' ').length + '\\n');
+  appendFileSync(${JSON.stringify(log)}, 'argv ' + JSON.stringify(process.argv.slice(2)) + '\\n');
   appendFileSync(${JSON.stringify(log)}, 'end ' + Date.now() + '\\n');
   ${opts.fail === true ? 'process.exit(1);' : `process.stdout.write(JSON.stringify({ result: JSON.stringify({ sessions: [] }), usage: { input_tokens: 100, output_tokens: 10 }, duration_ms: ${opts.ms ?? 400} }));`}
 }, ${opts.ms ?? 400}));
@@ -189,6 +190,13 @@ describe('a pass drains the backlog, three calls at a time', () => {
       expect(stdin, 'the packet arrived on stdin').toBeGreaterThan(5_000);
       expect(argv, 'and not in argv').toBeLessThan(200);
     }
+    const argv = readFileSync(log, 'utf8').split('\n').filter((l) => l.startsWith('argv ')).map((l) => JSON.parse(l.slice(5)) as string[]);
+    expect(argv.length).toBeGreaterThan(0);
+    for (const a of argv) {
+      expect(a[a.indexOf('--tools') + 1], 'no built-in tools').toBe('');
+      expect(a, 'no MCP servers').toContain('--strict-mcp-config');
+      expect(a).not.toContain('--allowed-tools');
+    }
   });
 
   it('records every call it sends, and step 1 rebuilds to exactly what was sent (DECISIONS.md D73)', () => {
@@ -251,6 +259,38 @@ describe('a pass drains the backlog, three calls at a time', () => {
 
     expect(readLease(archive, 'judge'), 'released, not left to age out').toBeUndefined();
     expect(readRecord(archive, 'judge').lastEnd?.status).toBe('ok');
+  });
+
+  it('sends nothing more once reads are turned off during a call, and ends quietly', () => {
+    // Two prompts, so a quote of the first is not the end of an unfinished session.
+    const said = 'please keep the public api unchanged while you refactor this module';
+    const lines = [
+      { type: 'user', uuid: 'u1', sessionId: 's0', timestamp: '2026-10-20T10:00:00.000Z', version: '2.1.296', message: { role: 'user', content: said } },
+      { type: 'assistant', uuid: 'a1', sessionId: 's0', timestamp: '2026-10-20T10:00:05.000Z', version: '2.1.296', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+      { type: 'user', uuid: 'u2', sessionId: 's0', timestamp: '2026-10-20T10:01:00.000Z', version: '2.1.296', message: { role: 'user', content: 'you renamed the exported function' } },
+      { type: 'assistant', uuid: 'a2', sessionId: 's0', timestamp: '2026-10-20T10:01:05.000Z', version: '2.1.296', message: { role: 'assistant', content: [{ type: 'text', text: 'sorry' }] } },
+    ];
+    writeFileSync(join(sources, 's0.jsonl'), lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
+    settings({});
+    const episode = { sessionId: 's0', episodes: [{ name: 'api renamed', description: 'renamed an export', alignment_goal: 'instruction', confidence: 'high', evidence: [{ quote: said, context: 'the request' }] }] };
+    // The first call is the extract; while it runs, the developer turns reads off.
+    writeFileSync(
+      join(bin, 'claude'),
+      `#!${process.execPath}
+const { appendFileSync, writeFileSync } = require('node:fs');
+appendFileSync(${JSON.stringify(log)}, 'start ' + Date.now() + '\\n');
+writeFileSync(${JSON.stringify(join(archive, 'judge-settings.json'))}, JSON.stringify({ enabled: false }));
+process.stdin.resume();
+process.stdin.on('end', () => process.stdout.write(JSON.stringify({ result: ${JSON.stringify(JSON.stringify({ sessions: [episode] }))}, usage: { input_tokens: 100, output_tokens: 10 } })));
+`,
+    );
+    chmodSync(join(bin, 'claude'), 0o755);
+
+    runPass();
+
+    expect(peakConcurrency().calls, 'the label call was never sent').toBe(1);
+    expect(readRecord(archive, 'judge').lastEnd?.status, 'a revoke is not a failure').toBe('ok');
+    expect(readJudgeState(archive).ledger['s0'], 'the bytes stay unread').toBeUndefined();
   });
 
   it('does nothing when its lease was reclaimed before it started', () => {

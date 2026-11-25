@@ -135,6 +135,11 @@ export function readsOn(settings: JudgeSettings): boolean {
   return settings.enabled && settings.consent !== undefined;
 }
 
+/** `readsOn` from the settings file as it is now: a pass checks it before each call, so a revoke stops the next send. */
+export function readsOnNow(archive: string): boolean {
+  return readsOn(readSettings(archive));
+}
+
 /** How long a preview stays valid for a yes: the yes must follow a preview the person could see. */
 const PREVIEW_VALID_MS = 60 * 60_000;
 

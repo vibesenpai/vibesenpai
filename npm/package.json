@@ -1,6 +1,6 @@
 {
   "name": "vibesenpai",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Discover how your agents failed you. A Claude Code plugin: `npx vibesenpai install` installs it through Claude Code's own installer, after you say yes.",
   "license": "MIT",
   "type": "module",

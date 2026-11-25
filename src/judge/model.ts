@@ -88,9 +88,12 @@ export function callModelAsync(
   });
 }
 
-/** The packet is sent on stdin, never as an argument: Linux caps one argument at 128 KiB, and a full batch nears it. */
+/**
+ * The packet is sent on stdin, never as an argument: Linux caps one argument at 128 KiB, and a full batch nears it.
+ * `--tools ''` removes every built-in tool and `--strict-mcp-config` loads no MCP server. Not `--bare`: it never reads a plan login.
+ */
 function modelArgs(model: string): string[] {
-  return ['-p', '--output-format', 'json', '--allowed-tools', '', '--model', model];
+  return ['-p', '--output-format', 'json', '--tools', '', '--strict-mcp-config', '--model', model];
 }
 
 function modelExecOptions(opts: ModelOptions) {

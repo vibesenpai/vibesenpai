@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-25
+
+### Fixed
+
+- **Turning model reads off now stops a pass that is already running.** A pass checked that reads
+  were on once per round, so a second request from the same batch could still go out after
+  `/vibesenpai:judge off`. It now checks before every call; a call already in flight finishes, and
+  its sessions stay unread. Reported by the maintainer of awesome-claude-code-mods.
+- **The model call has no tools.** It ran with `--allowed-tools ''`, which approves nothing but
+  leaves the built-in tools in place, and it loaded your MCP servers. It now runs with `--tools ''`
+  and `--strict-mcp-config`.
+
 ## [0.1.1] - 2026-11-22
 
 ### Added
@@ -188,7 +200,8 @@ candidates were the agent's own prior edit; `permission_denied`, where only 6
 of 398 denials were ever re-issued; and `file_churn`, which fires on 48% of
 sessions and could never be shown to be waste.
 
-[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/vibesenpai/vibesenpai/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/vibesenpai/vibesenpai/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/vibesenpai/vibesenpai/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.5...v0.1.0
 [0.0.5]: https://github.com/vibesenpai/vibesenpai/compare/v0.0.4...v0.0.5

@@ -9,7 +9,7 @@ import { basename } from 'node:path';
 import { resolveConfig } from '../src/config.ts';
 import { discoverTranscripts } from '../src/read.ts';
 
-import { readJudgeState, readsOn, recordPass } from '../src/judge/state.ts';
+import { readJudgeState, readsOn, readsOnNow, recordPass } from '../src/judge/state.ts';
 import { clean, JUDGE_DEADLINE_MS } from '../src/jobs.ts';
 import { runJob, type Outcome } from '../src/supervise/index.ts';
 import { packBatches, planRound, runBatch, type BatchFailure } from '../src/judge/run.ts';
@@ -76,7 +76,7 @@ async function drain(holds: () => boolean, limits: boolean): Promise<Outcome> {
     const send = withinBudget(batches, (b) => batchCost(estimateTokens(renderExtract(b.sessions))), left);
     if (send.length === 0) return { status: 'ok' };
 
-    const failures = (await Promise.all(send.map((b) => runBatch(config.archive, state, b, holds)))).filter(
+    const failures = (await Promise.all(send.map((b) => runBatch(config.archive, state, b, holds, () => readsOnNow(config.archive))))).filter(
       (f): f is BatchFailure => f !== undefined,
     );
     if (failures.length > 0) {
