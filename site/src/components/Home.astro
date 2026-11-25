@@ -111,6 +111,7 @@ const faq = [
       <div class="actions rise r3">
         <a class="primary" href={`${base}/start/install/`}>Get started</a>
         <a class="quiet" href="#dimensions">What it looks for</a>
+        <a class="star" href="https://github.com/vibesenpai/vibesenpai" data-umami-event="github-star"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>Star on GitHub</a>
       </div>
       <div class="installs rise r4">
         <p class="via">From a terminal</p>
@@ -283,6 +284,11 @@ const faq = [
     padding: 12px 22px; border-radius: 8px; text-decoration: none;
   }
   .quiet { font-weight: 500; }
+  /* No star count: a small number argues against itself. Clicks are counted by Umami. */
+  .star { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: var(--vs-text); text-decoration: none;
+    border: 1px solid var(--vs-line); border-radius: 10px; padding: 9px 14px; }
+  .star svg { color: #e3b341; }
+  .star:hover { border-color: color-mix(in srgb, var(--vs-hat) 55%, var(--vs-line)); }
   .install {
     position: relative; display: inline-block; text-align: left; max-width: 100%;
     background: color-mix(in srgb, var(--vs-hat) 8%, var(--vs-panel));

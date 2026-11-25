@@ -94,6 +94,8 @@ There are no runtime dependencies, on purpose. `npm run verify:corpus` fails if
 any published count changes or anything leaks; it fetches the public corpus it
 needs.
 
+If it found something real in your sessions, a [star](https://github.com/vibesenpai/vibesenpai) helps other people find it.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
